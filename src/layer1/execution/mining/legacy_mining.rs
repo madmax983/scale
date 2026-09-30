@@ -195,13 +195,13 @@ fn handle_mining_visuals(world: &mut World, entity: Entity, pos: GridPosition, i
             spawn_moving_particle(world, pos, '.', Color::DarkGray, 15, dx, dy);
         }
     } else if !is_crit {
-        // Working: Dynamic shake + Dust
-        let intensity = world
-            .get::<crate::layer1::resources::MiningProgress>(entity)
-            .map_or(0.05, |prog| (prog.current / prog.max).mul_add(0.15, 0.05));
-
-        trigger_shake(world, intensity);
-        spawn_particle(world, pos, '.', Color::DarkGray, 3);
+        // Working: occasional dust puff only — no per-tick shake. Screen shake is
+        // event-driven (finish/crit/combat/explosions); triggering it every tick
+        // while work is in progress saturates the shake resource at its cap and
+        // turns the game into a permanent earthquake simulator.
+        if rng.gen_bool(0.3) {
+            spawn_particle(world, pos, '.', Color::DarkGray, 3);
+        }
 
         if rng.gen_bool(0.3) {
             let dx = rng.gen_range(-0.5..0.5);
@@ -270,13 +270,10 @@ fn handle_chopping_visuals(world: &mut World, entity: Entity, pos: GridPosition,
             spawn_moving_particle(world, pos, '\'', Color::Rgb(139, 69, 19), 15, dx, dy);
         }
     } else if !is_crit {
-        // Working
-        let intensity = world
-            .get::<crate::layer1::resources::ForestryProgress>(entity)
-            .map_or(0.02, |prog| (prog.current / prog.max).mul_add(0.1, 0.02));
-
-        trigger_shake(world, intensity);
-        spawn_particle(world, pos, '\'', Color::Rgb(139, 69, 19), 3);
+        // Working: occasional wood chip only — no per-tick shake (see above).
+        if rng.gen_bool(0.3) {
+            spawn_particle(world, pos, '\'', Color::Rgb(139, 69, 19), 3);
+        }
 
         // Ludwig: Occasional flying chip
         if rng.gen_bool(0.3) {
@@ -342,5 +339,28 @@ mod tests {
             .collect();
         assert!(!resources.is_empty());
         assert_eq!(resources[0].resource_type, ResourceType::Stone);
+    }
+
+    #[test]
+    fn test_working_ticks_do_not_shake_screen() {
+        // Regression test for the "earthquake simulator" bug: ordinary mining
+        // and chopping work ticks used to call trigger_shake() every tick.
+        // ScreenShake only decays by 0.9 per update, so continuous work
+        // saturated it at its 5.0 cap and the viewport never stopped shaking.
+        // Working ticks must not touch ScreenShake at all; shake is reserved
+        // for discrete events (completion, crits, combat, explosions).
+        let mut world = World::new();
+        world.insert_resource(ScreenShake::default());
+        let worker = world.spawn_empty().id();
+        let pos = GridPosition { x: 10, y: 10 };
+        for _ in 0..200 {
+            handle_mining_visuals(&mut world, worker, pos, false);
+            handle_chopping_visuals(&mut world, worker, pos, false);
+        }
+        let shake = world.resource::<ScreenShake>();
+        assert_eq!(
+            shake.intensity, 0.0,
+            "ordinary work ticks must not trigger screen shake"
+        );
     }
 }

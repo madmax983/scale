@@ -278,6 +278,11 @@ pub fn decay_needs_system(
 }
 
 /// System to despawn pops that have reached 0.0 hunger.
+///
+/// DEPRECATED (revival fix): This system is NOT scheduled. It instantly despawns
+/// pops at hunger <= 0.0, which wiped the starting colony on tick 2 before they
+/// could eat. Starvation is handled by `starvation_damage_system` (gradual damage).
+/// Kept for tests; do not re-add to the schedule without a grace period.
 pub fn kill_starving_pops_system(
     mut commands: Commands,
     query: Query<

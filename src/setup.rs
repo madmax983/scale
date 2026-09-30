@@ -69,6 +69,10 @@ pub fn setup_world() -> World {
     world.init_resource::<Events<crate::layer1::orphaned_swarm::SwarmArrivalEvent>>();
     world.init_resource::<Events<crate::layer1::orphaned_swarm::SwarmHostileEvent>>();
     world.init_resource::<Events<crate::layer2::events_new::orphaned_swarm::SwarmHostileEvent>>();
+    // The sub-light arrival chronicle bridge system reads this event every
+    // tick; without registration the first tick panics on the missing
+    // Events<SubLightArrivalEvent> resource.
+    world.init_resource::<Events<crate::layer2::sub_light_arrival::SubLightArrivalEvent>>();
     world.insert_resource(crate::layer3::economy::market_shock::MarketShockMarket {
         luxury_price: 10.0,
     });
@@ -128,6 +132,10 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<crate::layer1::orphaned_swarm::SwarmArrivalEvent>>();
     world.init_resource::<Events<crate::layer1::orphaned_swarm::SwarmHostileEvent>>();
     world.init_resource::<Events<crate::layer2::events_new::orphaned_swarm::SwarmHostileEvent>>();
+    // The sub-light arrival chronicle bridge system reads this event every
+    // tick; without registration the first tick panics on the missing
+    // Events<SubLightArrivalEvent> resource.
+    world.init_resource::<Events<crate::layer2::sub_light_arrival::SubLightArrivalEvent>>();
     world.insert_resource(crate::layer3::economy::market_shock::MarketShockMarket {
         luxury_price: 10.0,
     });
@@ -575,7 +583,12 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
         let pop_positions = start_scenario_pop_positions(layout, scenario.id);
         spawn_initial_pops_at_positions(&mut world, &pop_positions);
     } else {
+        // No valid 5x5 site for the starter habitat (pathological map). The
+        // raw scatter spawns pops into hard vacuum, where
+        // pressure_damage_system wipes the colony within seconds, so seed a
+        // breathable patch + LifeSupport unit around every pop.
         spawn_initial_pops(&mut world);
+        seed_emergency_oxygen_for_pops(&mut world);
     }
     apply_start_scenario_state(&mut world, scenario.id, starter_colony.as_ref());
     spawn_initial_anomalies(&mut world, 5);
@@ -722,6 +735,58 @@ fn spawn_initial_pops_at_positions(world: &mut World, positions: &[crate::layer1
     }
 }
 
+/// Emergency oxygen for the no-habitat fallback path.
+///
+/// Gives every pop a breathable 5x5 pressure patch (seeded at 1.0) and drops a
+/// LifeSupport unit on an adjacent free tile so the generator maintains it
+/// against diffusion into the surrounding vacuum. Without this, scattered pops
+/// start in vacuum and `pressure_damage_system` kills the colony within
+/// seconds — the mass-extinction-on-tick-5 bootstrap bug.
+fn seed_emergency_oxygen_for_pops(world: &mut World) {
+    let positions: Vec<crate::layer1::GridPosition> = world
+        .query_filtered::<&crate::layer1::GridPosition, With<crate::layer1::pop::Pop>>()
+        .iter(world)
+        .copied()
+        .collect();
+
+    for p in positions {
+        if let Some(mut pressure) = world.get_resource_mut::<crate::layer1::pressure::PressureGrid>()
+        {
+            for dy in -2..=2 {
+                for dx in -2..=2 {
+                    pressure.set(p.x + dx, p.y + dy, 1.0);
+                }
+            }
+        }
+
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)] {
+            let (cx, cy) = (p.x + dx, p.y + dy);
+            let free = (|| {
+                let ux = usize::try_from(cx).ok()?;
+                let uy = usize::try_from(cy).ok()?;
+                let walkable = world
+                    .resource::<crate::layer1::TerrainGrid>()
+                    .get(ux, uy)?
+                    .is_walkable();
+                let occupied = world.resource::<OccupiedTiles>().0.contains(&(cx, cy));
+                Some(walkable && !occupied)
+            })()
+            .unwrap_or(false);
+            if free {
+                crate::layer1::building::spawn_building(
+                    world,
+                    cx,
+                    cy,
+                    crate::layer1::building::BuildingType::LifeSupport,
+                    crate::layer1::building::MaterialType::default(),
+                );
+                world.resource_mut::<OccupiedTiles>().0.insert((cx, cy));
+                break;
+            }
+        }
+    }
+}
+
 fn apply_start_scenario_state(
     world: &mut World,
     scenario_id: StartScenarioId,
@@ -760,7 +825,10 @@ fn apply_ground_survival_start(world: &mut World, layout: Option<&StarterColonyL
         for tile in &layout.interior_tiles {
             pressure.set(tile.x, tile.y, 0.45);
         }
-        pressure.set(layout.life_support_pos.x, layout.life_support_pos.y, 0.15);
+        // NOTE: the life-support tile is one of the interior tiles above; it
+        // must stay >= 0.45 (the pressure_damage_system suffocation threshold
+        // is 0.2). A previous revision seeded it at 0.15, which suffocated any
+        // pop idling on the generator.
     }
 
     let mut life_support_query = world.query::<(
@@ -1733,5 +1801,106 @@ mod tests {
 
         let planets = world.query::<&Planet>().iter(&world).count();
         assert!(planets >= 3, "Should generate at least 3 planets");
+    }
+
+    #[test]
+    fn test_starting_pops_spawn_in_breathable_air() {
+        // Regression test for the player-reported "mass extinction on tick 5":
+        // starting pops used to begin with NO oxygen and suffocate within
+        // seconds. Every scenario must spawn pops on tiles at or above the
+        // pressure_damage_system suffocation threshold (0.2), with a
+        // LifeSupport unit present to maintain the air.
+        for scenario in [
+            StartScenarioId::Classic,
+            StartScenarioId::GroundSurvival,
+            StartScenarioId::SocialDrama,
+            StartScenarioId::Layer2Ready,
+        ] {
+            let mut world = setup_world_with_config(SetupConfig {
+                headless: true,
+                scenario,
+            });
+            // Collect positions first: the query borrows world mutably, so the
+            // pressure grid borrow has to come after.
+            let positions: Vec<GridPosition> = world
+                .query_filtered::<&GridPosition, With<crate::layer1::pop::Pop>>()
+                .iter(&world)
+                .copied()
+                .collect();
+            assert!(
+                !positions.is_empty(),
+                "scenario {scenario:?} should spawn starting pops"
+            );
+            let grid = world.resource::<crate::layer1::pressure::PressureGrid>();
+            for pos in &positions {
+                let pressure = grid.get(pos.x, pos.y);
+                assert!(
+                    pressure >= 0.2,
+                    "scenario {scenario:?}: pop at ({}, {}) starts at pressure {pressure:.2}, below the 0.2 suffocation threshold",
+                    pos.x,
+                    pos.y,
+                );
+            }
+            let life_support = world
+                .query::<&Building>()
+                .iter(&world)
+                .filter(|b| b.building_type == BuildingType::LifeSupport)
+                .count();
+            assert!(
+                life_support >= 1,
+                "scenario {scenario:?}: colony starts with no LifeSupport unit"
+            );
+        }
+    }
+
+    #[test]
+    fn test_emergency_oxygen_fallback_seeds_pressure_and_life_support() {
+        // The no-habitat fallback (spawn_initial_pops scatter) must not leave
+        // pops in vacuum either.
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            ..Default::default()
+        });
+        // Despawn any existing pops + life support to isolate the fallback.
+        let pops: Vec<bevy_ecs::prelude::Entity> =
+            world.query_filtered::<bevy_ecs::prelude::Entity, With<Pop>>().iter(&world).collect();
+        for entity in pops {
+            world.despawn(entity);
+        }
+        let units: Vec<bevy_ecs::prelude::Entity> = world
+            .query_filtered::<bevy_ecs::prelude::Entity, With<Building>>()
+            .iter(&world)
+            .collect();
+        for entity in units {
+            world.despawn(entity);
+        }
+
+        crate::layer1::entities::pop::spawn_initial_pops(&mut world);
+        seed_emergency_oxygen_for_pops(&mut world);
+
+        let positions: Vec<GridPosition> = world
+            .query_filtered::<&GridPosition, With<crate::layer1::pop::Pop>>()
+            .iter(&world)
+            .copied()
+            .collect();
+        assert!(!positions.is_empty(), "fallback should spawn pops");
+        let grid = world.resource::<crate::layer1::pressure::PressureGrid>();
+        for pos in &positions {
+            assert!(
+                grid.get(pos.x, pos.y) >= 0.2,
+                "fallback pop at ({}, {}) has no oxygen",
+                pos.x,
+                pos.y,
+            );
+        }
+        let life_support = world
+            .query::<&Building>()
+            .iter(&world)
+            .filter(|b| b.building_type == BuildingType::LifeSupport)
+            .count();
+        assert!(
+            life_support >= 1,
+            "fallback should place at least one LifeSupport unit"
+        );
     }
 }

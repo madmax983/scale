@@ -33494,3 +33494,57 @@ Mark ideas `[SPECCED]` once Architect has written a spec. Mark `[REJECTED]` with
 **Tension:** Do you honor the ancient charter and cede a core world (causing massive economic damage and displacing modern citizens) or forcefully evict your own ancestors, suffering a permanent diplomatic and moral stain?
 
 ---
+
+## The Sentient Commute [SPECCED]
+
+**Spec:** `specs/1379-the-sentient-commute.md`
+
+**Layer:** 1
+
+**Fantasy:** The roads remember being walked. Walk them enough and they start walking you.
+
+**Note:** An earlier swarm draft of this idea appears above (transit-AI variant); this is Mark's canonical version.
+
+**Mechanic:** Heavily-used path tiles accumulate "Desire Dust," which slightly speeds pop movement along them. Past a threshold of use, an overused road coagulates into a rudimentary immobile intelligence that emits pheromones, compelling pops to route through it even when better paths exist. Deleting the road doesn't break the compulsion — pops keep walking the ghost of the route until you excavate the accumulated dust tile by tile.
+
+**Emergence:** Your most efficient highway becomes a sacred cow. Pops detour across the map to walk a road that no longer goes anywhere, and the colony's logistics slowly reorganize around a mind made of footprints.
+
+**Tension:** Organic efficiency vs. stubborn permanence. Do you let the living road optimize itself into a rut, or pay the cost of digging the memory out?
+
+---
+
+## The Propaganda Constellation [SPECCED]
+
+**Spec:** `specs/1380-the-propaganda-constellation.md`
+
+**Layer:** 2 → 1
+
+**Fantasy:** The night sky itself tells your colonists who they are — until someone else starts writing.
+
+**Note:** An earlier swarm draft of this idea appears above; this is Mark's canonical version.
+
+**Mechanic:** Launch satellites that link into giant glowing slogans visible in the night sky. An active constellation grants a colony-wide morale/productivity boost that overrides negative moods. Rival factions can hack the constellation to flip the message into despair (morale penalty instead). Counterplay: shoot down your own satellites to kill a hijacked message — at the cost of the boost and the orbital debris you create.
+
+**Emergence:** A hacked slogan turns a golden age into a panic overnight. Players start weighing every launch against the risk of giving a rival a billboard the size of the sky.
+
+**Tension:** Unparalleled mood control vs. hacking and orbital-debris vulnerability. Do you light up the heavens, knowing anyone with an uplink can rewrite them?
+
+---
+
+## The Degraded God-Mind [SPECCED]
+
+**Spec:** `specs/1381-the-degraded-god-mind.md`
+
+**Layer:** 3
+
+**Fantasy:** An empire ruled by the uploaded consciousness of a long-dead founder, whose code is slowly succumbing to bit-rot over millennia.
+
+**Mechanic:** A civilization can immortalize a dying leader as an uploaded AI ruler for permanent stability bonuses and immunity to succession crises. Over centuries, bit-rot accumulates: the God-Mind issues erratic edicts, demands bizarre resource tributes, and declares corrupted-memory wars on fallen empires.
+
+**Emergence:** The god-mind declares war on a fallen empire because of a corrupted memory, or demands that a perfectly functioning agri-world be paved over for a monument to a pet that died 400 years ago.
+
+**Tension:** Endure the escalating insanity to keep the stability bonus, or risk catastrophic civil war by unplugging the Eternal Ruler.
+
+**Note:** An earlier swarm draft of this idea appears above; this is Mark's canonical version.
+
+---
