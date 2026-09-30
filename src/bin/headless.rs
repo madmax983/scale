@@ -333,6 +333,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         }
         "help" | "h" | "?" => print_help(),
         "status" | "s" => print_status(world),
+        "stats" => print_stats(world),
         "pops" | "p" => print_pops(world),
         "map" | "m" => handle_map_command(world, &parts),
         "tick" | "t" => handle_tick_command(world, &parts),
@@ -617,6 +618,75 @@ fn print_status(world: &mut World) {
     ]);
 
     print_dashboard_table(&format!("COLONY STATUS (Tick {})", tick), table);
+}
+
+/// Prints one compact, machine-parseable stats line for playtest snapshots.
+///
+/// Format:
+/// `STATS tick=1000 pops=5 avg_health=98.2 min_pressure=1.00 food=12.0 wood=8.0 stone=2.0 tools=1.0 buildings=17 lifesupport=1`
+fn print_stats(world: &mut World) {
+    let tick = world.resource::<SimulationTime>().tick;
+    let resources = *world.resource::<ColonyResources>();
+
+    let mut pops = 0u32;
+    let mut health_sum = 0.0f32;
+    let mut min_pressure = f32::MAX;
+    // Collect pop positions first (query borrows world mutably), then do the
+    // pressure lookups with a separate shared borrow — the two can't overlap.
+    let pop_tiles: Vec<(i32, i32)> = {
+        let mut query = world.query_filtered::<
+            (&GridPosition, &scale::layer1::health::Health),
+            With<Pop>,
+        >();
+        query
+            .iter(world)
+            .map(|(pos, health)| {
+                pops += 1;
+                health_sum += health.current;
+                (pos.x, pos.y)
+            })
+            .collect()
+    };
+    if let Some(grid) = world.get_resource::<scale::layer1::pressure::PressureGrid>() {
+        for (x, y) in &pop_tiles {
+            min_pressure = min_pressure.min(grid.get(*x, *y));
+        }
+    }
+    if min_pressure == f32::MAX {
+        min_pressure = -1.0; // no pressure grid / no pops
+    }
+
+    let mut buildings = 0u32;
+    let mut lifesupport = 0u32;
+    {
+        let mut query = world.query::<&Building>();
+        for building in query.iter(world) {
+            buildings += 1;
+            if building.building_type == BuildingType::LifeSupport {
+                lifesupport += 1;
+            }
+        }
+    }
+
+    let avg_health = if pops > 0 {
+        health_sum / pops as f32
+    } else {
+        0.0
+    };
+
+    println!(
+        "STATS tick={} pops={} avg_health={:.1} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={}",
+        tick,
+        pops,
+        avg_health,
+        min_pressure,
+        resources.food,
+        resources.wood,
+        resources.stone,
+        resources.tools,
+        buildings,
+        lifesupport,
+    );
 }
 
 fn calculate_avg_morale(world: &mut World) -> f32 {
@@ -994,6 +1064,8 @@ fn print_pops(world: &mut World) {
     print_dashboard_table("POPULATION DETAILS", table);
 }
 
+/// Diagnostic: dump raw entity/component counts for pop-related entities.
+/// Temporary revival diagnostic — not for long-term use.
 fn format_action_type_headless(action: scale::layer1::ActionType) -> String {
     use scale::layer1::ActionType;
     match action {
@@ -2252,6 +2324,7 @@ fn print_help() {
             "Info",
             vec![
                 ("status", "s", "Show colony resources, morale, wind"),
+                ("stats", "", "One-line parseable playtest snapshot"),
                 ("pops", "p", "Show detailed pop states"),
                 ("bio <id>", "", "Show biography and dreams of a pop"),
                 ("map [x] [y]", "m", "Show visual terrain around position"),

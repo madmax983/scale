@@ -140,7 +140,10 @@ pub fn register(schedule: &mut Schedule) {
             pressure_damage_system.after(decay_needs_system),
             consume_artifacts_during_famine_system.after(decay_needs_system),
             crate::layer1::needs::starvation_damage_system.after(decay_needs_system),
-            crate::layer1::needs::kill_starving_pops_system.after(decay_needs_system),
+            // REMOVED (revival fix): kill_starving_pops_system instantly despawned
+            // pops at hunger <= 0.0, which wiped the starting colony on tick 2.
+            // Starvation is now handled gracefully by starvation_damage_system
+            // (0.2 dmg/tick, ~500 ticks to die), giving pops a chance to eat.
             crate::layer1::biology::rust_lung::rust_lung_degradation_system
                 .after(decay_needs_system),
             crate::layer1::atmosphere::apply_smog_damage_system.after(decay_needs_system),
