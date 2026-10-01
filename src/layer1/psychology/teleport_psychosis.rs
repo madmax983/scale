@@ -41,7 +41,11 @@ pub fn process_psychosis_system(
     }
 }
 
-pub fn hunger_decay_system(mut query: Query<(&mut Needs, &Traits), With<Pop>>) {
+/// Teleport dissociation disrupts metabolism: pops suffering from dissociation
+/// (not yet Phantom) burn hunger rapidly. Healthy pops are unaffected.
+pub fn hunger_decay_system(
+    mut query: Query<(&mut Needs, &Traits), (With<Pop>, With<Dissociation>)>,
+) {
     for (mut needs, traits) in query.iter_mut() {
         if !traits.has(Trait::Phantom) {
             needs.hunger -= 1.0;
