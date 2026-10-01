@@ -41,6 +41,7 @@ ratzilla = "0.3.0"
 mockall = "0.13.1"
 assert_approx_eq = "1.1.0"
 criterion = "0.5"
+iai-callgrind = "0.16.1"
 
 [profile.dev]
 opt-level = 0
@@ -50,6 +51,11 @@ debug = true
 opt-level = 3
 lto = true
 strip = true
+
+[profile.bench]
+# Symbols are required by iai-callgrind to locate the benchmark function.
+strip = false
+debug = 1
 
 [features]
 default = ["native"]
@@ -68,3 +74,7 @@ required-features = ["nova"]
 [[example]]
 name = "test_readme_nova"
 # NO required-features, we want it to compile and run with the stub if nova is off
+
+[[bench]]
+name = "tick_iai"
+harness = false
