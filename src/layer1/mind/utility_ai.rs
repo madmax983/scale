@@ -503,8 +503,15 @@ impl<'a> PopDecider<'a> {
             0.0,
         );
 
+        // Homeostatic food urgency: when the colony's food stockpile runs low,
+        // farming outbids competing chores (e.g. Repair at 0.6) so the colony
+        // staffs its farms instead of starving next to them. 1x at food >= 10,
+        // 2x at 0. Kept moderate so farmers can still be pulled away by urgent
+        // needs (hunger/rest) instead of getting stuck via utility staleness.
+        let food_scarcity =
+            1.0 + 1.0 * (1.0 - (self.context.resources.food / 10.0).clamp(0.0, 1.0));
         self.evaluator.evaluate_and_consider(
-            evaluate_simple_action(pop_pos, &weights, &self.buffer.farms, 0.5),
+            evaluate_simple_action(pop_pos, &weights, &self.buffer.farms, 0.5 * food_scarcity),
             ActionType::Farm,
             self.context,
             0.0,

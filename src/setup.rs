@@ -689,6 +689,9 @@ const STARTER_WALL_OFFSETS: &[(i32, i32)] = &[
 const STARTER_AIRLOCK_OFFSET: (i32, i32) = (0, 2);
 const STARTER_LANDER_OFFSET: (i32, i32) = (1, 0);
 const STARTER_LIFE_SUPPORT_OFFSET: (i32, i32) = (-1, 0);
+const STARTER_FARM_OFFSET: (i32, i32) = (1, 1);
+const STARTER_FARM2_OFFSET: (i32, i32) = (-1, -1);
+const STARTER_STOCKPILE_OFFSET: (i32, i32) = (-1, 1);
 const STARTER_POP_OFFSETS: &[(i32, i32)] = &[(0, 0), (-1, -1), (0, -1), (1, -1), (0, 1)];
 const STARTER_HAZARD_BUFFER_RADIUS: i32 = 14;
 
@@ -1106,6 +1109,94 @@ fn spawn_starter_colony(world: &mut World) -> Option<StarterColonyLayout> {
         .0
         .insert((life_support_pos.x, life_support_pos.y));
 
+    // Starter farm: the colony's food supply. Placed on a free interior
+    // tile (1, 1) inside the pressurized hull — never on a wall tile.
+    // Fertility is set explicitly so production never depends on the
+    // underlying terrain, and the crop is Potato for its strong winter
+    // modifier (0.8); Wheat would starve the colony in winter (0.2).
+    let farm_pos = crate::layer1::GridPosition {
+        x: center.x + STARTER_FARM_OFFSET.0,
+        y: center.y + STARTER_FARM_OFFSET.1,
+    };
+    let farm_entity = crate::layer1::building::spawn_building(
+        world,
+        farm_pos.x,
+        farm_pos.y,
+        crate::layer1::building::BuildingType::Farm,
+        crate::layer1::building::MaterialType::default(),
+    );
+    world
+        .resource_mut::<OccupiedTiles>()
+        .0
+        .insert((farm_pos.x, farm_pos.y));
+    if let Some(mut farm) = world.get_mut::<crate::layer1::agriculture::Farm>(farm_entity) {
+        farm.selected_crop = crate::layer1::items::ItemType::Potato;
+    }
+    if let Some(mut fertility) =
+        world.get_resource_mut::<crate::layer1::fertility::FertilityGrid>()
+    {
+        if let (Ok(ux), Ok(uy)) = (
+            usize::try_from(farm_pos.x),
+            usize::try_from(farm_pos.y),
+        ) {
+            fertility.set(ux, uy, 1.0);
+        }
+    }
+
+    // Second starter farm: one farm's worth of workers (~2) only break even
+    // against the colony's burn; two farms give the production headroom to
+    // build a buffer against raids, winter, and sabotage-repair duty cycles.
+    // Same treatment: Potato for winter resilience, explicit fertility.
+    let farm2_pos = crate::layer1::GridPosition {
+        x: center.x + STARTER_FARM2_OFFSET.0,
+        y: center.y + STARTER_FARM2_OFFSET.1,
+    };
+    let farm2_entity = crate::layer1::building::spawn_building(
+        world,
+        farm2_pos.x,
+        farm2_pos.y,
+        crate::layer1::building::BuildingType::Farm,
+        crate::layer1::building::MaterialType::default(),
+    );
+    world
+        .resource_mut::<OccupiedTiles>()
+        .0
+        .insert((farm2_pos.x, farm2_pos.y));
+    if let Some(mut farm) = world.get_mut::<crate::layer1::agriculture::Farm>(farm2_entity) {
+        farm.selected_crop = crate::layer1::items::ItemType::Potato;
+    }
+    if let Some(mut fertility) =
+        world.get_resource_mut::<crate::layer1::fertility::FertilityGrid>()
+    {
+        if let (Ok(ux), Ok(uy)) = (
+            usize::try_from(farm2_pos.x),
+            usize::try_from(farm2_pos.y),
+        ) {
+            fertility.set(ux, uy, 1.0);
+        }
+    }
+
+    // Starter stockpile: a walkable Stockpile building so pops can actually
+    // complete FetchTool/FetchClothing/Haul. The Lander also carries a
+    // Stockpile component, but it is an obstacle tile — arrival requires
+    // standing exactly on the target tile, so the Lander's stockpile is
+    // unreachable and used to wedge every pop on FetchTool forever.
+    let stockpile_pos = crate::layer1::GridPosition {
+        x: center.x + STARTER_STOCKPILE_OFFSET.0,
+        y: center.y + STARTER_STOCKPILE_OFFSET.1,
+    };
+    crate::layer1::building::spawn_building(
+        world,
+        stockpile_pos.x,
+        stockpile_pos.y,
+        crate::layer1::building::BuildingType::Stockpile,
+        crate::layer1::building::MaterialType::default(),
+    );
+    world
+        .resource_mut::<OccupiedTiles>()
+        .0
+        .insert((stockpile_pos.x, stockpile_pos.y));
+
     if let Some(mut pressure) = world.get_resource_mut::<crate::layer1::pressure::PressureGrid>() {
         for tile in &interior_tiles {
             pressure.set(tile.x, tile.y, 1.0);
@@ -1198,6 +1289,9 @@ fn starter_colony_site_is_valid(world: &World, center: crate::layer1::GridPositi
         STARTER_AIRLOCK_OFFSET,
         STARTER_LANDER_OFFSET,
         STARTER_LIFE_SUPPORT_OFFSET,
+        STARTER_FARM_OFFSET,
+        STARTER_FARM2_OFFSET,
+        STARTER_STOCKPILE_OFFSET,
     ] {
         if !crate::layer1::building::can_place_building(world, center.x + dx, center.y + dy) {
             return false;

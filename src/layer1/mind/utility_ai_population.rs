@@ -409,7 +409,25 @@ fn populate_residues(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
 }
 
 fn populate_stockpiles(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
-    populate_simple::<Stockpile>(world, buffer);
+    // Skip stockpiles sitting on obstacle-building tiles. Fetch/haul arrival
+    // requires the pop to stand exactly on the target tile, and obstacle
+    // tiles are unwalkable — offering them traps pops in an unreachable loop
+    // (e.g. the starter Lander carries a Stockpile component but is an
+    // obstacle, which used to wedge every pop on FetchTool forever).
+    let blocked: bevy_utils::HashSet<GridPosition> = world
+        .query::<(&GridPosition, &Building)>()
+        .iter(world)
+        .filter(|(_, b)| b.building_type.is_obstacle())
+        .map(|(pos, _)| *pos)
+        .collect();
+    buffer.clear();
+    buffer.extend(
+        world
+            .query_filtered::<(Entity, &GridPosition), With<Stockpile>>()
+            .iter(world)
+            .filter(|(_, pos)| !blocked.contains(*pos))
+            .map(|(e, pos)| ScorableCandidate::new(e, *pos)),
+    );
 }
 
 fn populate_items(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {

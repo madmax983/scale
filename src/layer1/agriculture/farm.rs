@@ -136,7 +136,6 @@ pub fn produce_food_system(
         if action.current != ActionType::Farm {
             continue;
         }
-
         // Check for strikes
         if let Some(factions) = &factions {
             if let Some(member) = faction_member_opt {
@@ -261,7 +260,6 @@ fn process_single_farmer(
     }
 
     let production = efficiency * base_production * effective_modifier * fertility_modifier;
-
     if production > 0.0 {
         match building_type {
             BuildingType::Plantation => {

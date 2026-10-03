@@ -15,7 +15,7 @@ use crate::layer1::pop::Job;
 use crate::layer1::resources::ColonyResources;
 use crate::layer1::social::{handle_socialize, Tavern};
 use crate::layer1::social_stratification::Prestige;
-use crate::layer1::utility_types::ActionType;
+use crate::layer1::utility_types::{ActionType, PopAction};
 use crate::shared::log::MessageLog;
 use crate::shared::time::SimulationTime;
 
@@ -84,6 +84,22 @@ pub fn arrival_handler_system(
         );
 
         if should_remove {
+            // One-shot errands complete on arrival: release the pop back to the
+            // idle pool so the utility AI picks a fresh task next tick.
+            // Otherwise the pop keeps the errand's snapshot utility forever (it
+            // never decays), and ongoing work like farming can never outbid it
+            // — the colony starves next to a working farm. Ongoing actions
+            // (Farm, Rest, Work, ...) are intentionally left alone.
+            if matches!(
+                mt.for_action,
+                ActionType::SatisfyHunger | ActionType::FetchTool | ActionType::FetchClothing
+            ) {
+                commands.entity(pop_entity).insert(PopAction {
+                    current: ActionType::Idle,
+                    current_utility: 0.0,
+                    ticks_committed: 0,
+                });
+            }
             remove_movement_components(&mut commands, pop_entity);
         }
     }
