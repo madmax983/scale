@@ -53,4 +53,7 @@ pub mod memorial_revolt;
 /// The Fallen Sovereign: exiled-monarch adventurer origin.
 pub mod sovereign;
 pub use sovereign::*;
+/// The Corsair: space-pirate adventurer origin.
+pub mod corsair;
+pub use corsair::*;
 pub use invasive_xeno_aesthetics::*;

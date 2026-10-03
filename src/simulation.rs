@@ -127,6 +127,8 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::culture::sovereign::FarmProductionLedger>();
     world.init_resource::<crate::layer1::culture::sovereign::LaborFervor>();
     world.init_resource::<crate::layer1::culture::sovereign::SporeSuppression>();
+    // The Corsair (adventurer origin)
+    world.init_resource::<crate::layer1::culture::corsair::CorsairState>();
     world.init_resource::<crate::layer2::propaganda_engine::PropagandaEngine>();
     world.init_resource::<crate::layer2::propaganda_engine::DiplomaticWeight>();
     world.init_resource::<crate::layer2::propaganda_engine::InspectorEvent>();
@@ -931,6 +933,15 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         ),
         crate::layer1::culture::sovereign::apply_sovereign_morale
             .before(crate::layer1::social::morale::update_morale_cache_system),
+    ));
+    // The Corsair systems (adventurer origin: the raider skiff).
+    // The tick holds the skiff's pressure envelope, so it must run before
+    // the pressure damage system suffocates the tethered crew.
+    schedule.add_systems((
+        crate::layer1::culture::corsair::spawn_raider_skiff_once,
+        crate::layer1::culture::corsair::corsair_tick.before(
+            crate::layer1::physics::pressure::pressure_damage_system,
+        ),
     ));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,

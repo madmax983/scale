@@ -49,6 +49,10 @@ use scale::layer1::culture::sovereign::{
     abdicate, commission_artwork, crown_within_reach, describe_edicts, issue_decree,
     sovereign_stats, try_crown_pop, DecreeKind, Sovereign,
 };
+use scale::layer1::culture::corsair::{
+    corsair_stats, describe_corsair, divide_plunder, execute_raid, fence_plunder, repair_skiff,
+    skim_credits, skiff_within_reach, try_embark_corsair, unload_hold, CorsairCaptain, RaidTarget,
+};
 use scale::layer1::direct_link::{
     possessed_entity, try_player_step, DirectControlState, Possessed,
 };
@@ -402,6 +406,13 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "commission" => handle_commission_command(world, &parts),
         "edicts" => handle_edicts_command(world),
         "abdicate" => handle_abdicate_command(world),
+        "corsair" => handle_corsair_command(world),
+        "raid" => handle_raid_command(world, &parts),
+        "unload" => handle_unload_command(world),
+        "fence" => handle_fence_command(world),
+        "skim" => handle_skim_command(world, &parts),
+        "divide" => handle_divide_command(world),
+        "repair" => handle_repair_command(world, &parts),
         _ => print_dashboard_panel(
             "ERROR",
             &format!("Unknown command: '{command}'. Type 'help' for commands."),
@@ -749,6 +760,30 @@ fn handle_interact_command(world: &mut World) {
         return;
     }
 
+    // The Corsair: a raider skiff within reach offers the captain's writ.
+    if world.get::<CorsairCaptain>(entity).is_none()
+        && skiff_within_reach(world, entity).is_some()
+    {
+        match try_embark_corsair(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, &format!("{name} takes the captain's writ."));
+                print_dashboard_panel(
+                    "EMBARKED",
+                    &msg,
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+
     // What building (if any) sits on this tile?
     let building_here: Option<BuildingType> = world
         .query::<(&Building, &GridPosition)>()
@@ -833,6 +868,188 @@ fn handle_interact_command(world: &mut World) {
 fn crowned_sovereign_entity(world: &mut World) -> Option<Entity> {
     let entity = possessed_entity(world)?;
     world.get::<Sovereign>(entity).is_some().then_some(entity)
+}
+
+/// The possessed pop, if it holds the captain's writ.
+fn corsair_captain_entity(world: &mut World) -> Option<Entity> {
+    let entity = possessed_entity(world)?;
+    world.get::<CorsairCaptain>(entity).is_some().then_some(entity)
+}
+
+fn require_corsair_captain(world: &mut World) -> Option<Entity> {
+    let entity = corsair_captain_entity(world);
+    if entity.is_none() {
+        print_dashboard_panel(
+            "ERROR",
+            "No corsair captain is possessed. Possess a crew pop, move adjacent to the raider skiff, and `interact` to take the writ.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+    entity
+}
+
+fn handle_corsair_command(world: &mut World) {
+    print_dashboard_panel(
+        "CORSAIR",
+        &describe_corsair(world),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_raid_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = require_corsair_captain(world) else {
+        return;
+    };
+    let target = match parts.get(1).and_then(|s| RaidTarget::parse(s)) {
+        Some(t) => t,
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: raid <colony|trader|rival>",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    let name = world
+        .get::<PopName>(entity)
+        .map_or_else(|| format!("pop #{}", entity.index()), |n| n.0.clone());
+    match execute_raid(world, entity, target) {
+        Ok(msg) => {
+            log_adventurer(world, &format!("{name} leads a raid: {msg}"));
+            print_dashboard_panel(
+                "RAID",
+                &msg,
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_unload_command(world: &mut World) {
+    let Some(entity) = require_corsair_captain(world) else {
+        return;
+    };
+    match unload_hold(world, entity) {
+        Ok(msg) => print_dashboard_panel(
+            "UNLOAD",
+            &msg,
+            Some(comfy_table::Color::Green),
+            None,
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_fence_command(world: &mut World) {
+    let Some(entity) = require_corsair_captain(world) else {
+        return;
+    };
+    match fence_plunder(world, entity) {
+        Ok(msg) => print_dashboard_panel(
+            "FENCE",
+            &msg,
+            Some(comfy_table::Color::Green),
+            None,
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_skim_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = require_corsair_captain(world) else {
+        return;
+    };
+    let amount: f32 = match parts.get(1).and_then(|s| s.parse().ok()) {
+        Some(a) => a,
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: skim <amount>",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    match skim_credits(world, entity, amount) {
+        Ok(msg) => print_dashboard_panel(
+            "SKIM",
+            &msg,
+            Some(comfy_table::Color::Yellow),
+            None,
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_divide_command(world: &mut World) {
+    let Some(entity) = require_corsair_captain(world) else {
+        return;
+    };
+    match divide_plunder(world, entity) {
+        Ok(msg) => {
+            log_adventurer(world, &format!("Prize-law divide: {msg}"));
+            print_dashboard_panel(
+                "DIVIDE",
+                &msg,
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_repair_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = require_corsair_captain(world) else {
+        return;
+    };
+    let amount: Option<f32> = parts.get(1).and_then(|s| s.parse().ok());
+    match repair_skiff(world, entity, amount) {
+        Ok(msg) => print_dashboard_panel(
+            "REPAIR",
+            &msg,
+            Some(comfy_table::Color::Green),
+            None,
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
 }
 
 fn handle_decree_command(world: &mut World, parts: &[&str]) {
@@ -1099,7 +1316,7 @@ fn print_status(world: &mut World) {
 /// Prints one compact, machine-parseable stats line for playtest snapshots.
 ///
 /// Format:
-/// `STATS tick=1000 pops=5 avg_health=98.2 avg_morale=0.85 min_pressure=1.00 food=12.0 wood=8.0 stone=2.0 tools=1.0 buildings=17 lifesupport=1 possessed=none`
+/// `STATS tick=1000 pops=5 avg_health=98.2 avg_morale=0.85 min_pressure=1.00 food=12.0 wood=8.0 stone=2.0 tools=1.0 buildings=17 lifesupport=1 possessed=none sovereign=none legitimacy=0.00 melancholy=0.00 heat=0.0 hull=100 crew=3 loyalty=0.60`
 fn print_stats(world: &mut World) {
     let tick = world.resource::<SimulationTime>().tick;
     let resources = *world.resource::<ColonyResources>();
@@ -1161,8 +1378,10 @@ fn print_stats(world: &mut World) {
         .map(|i| i.to_string())
         .unwrap_or_else(|| "none".to_string());
 
+    let (heat, hull, crew, loyalty) = corsair_stats(world);
+
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2}",
         tick,
         pops,
         avg_health,
@@ -1178,6 +1397,10 @@ fn print_stats(world: &mut World) {
         sovereign,
         legitimacy,
         melancholy,
+        heat,
+        hull,
+        crew,
+        loyalty,
     );
 }
 
@@ -3186,7 +3409,7 @@ fn print_help() {
                 (
                     "interact",
                     "",
-                    "Act at the possessed pop's tile: work farm, eat at stockpile, rest at housing — or take up the dented crown",
+                    "Act at the possessed pop's tile: work farm, eat at stockpile, rest at housing — or take up the dented crown / the captain's writ",
                 ),
                 (
                     "decree <labor|revel|levy>",
@@ -3207,6 +3430,41 @@ fn print_help() {
                     "abdicate",
                     "",
                     "Lay down the crown on the current tile",
+                ),
+                (
+                    "corsair",
+                    "",
+                    "Corsair status: skiff hold/purse/hull, heat, crew loyalty (possess a crew pop, `interact` by the skiff to take the writ)",
+                ),
+                (
+                    "raid <colony|trader|rival>",
+                    "",
+                    "Lead a boarding party: plunder food/credits/artifacts into the skiff hold (+heat)",
+                ),
+                (
+                    "unload",
+                    "",
+                    "Ferry the hold's food into the colony stores",
+                ),
+                (
+                    "fence",
+                    "",
+                    "Sell hold artifacts to a passing trader (needs a merchant present; +heat)",
+                ),
+                (
+                    "skim <amount>",
+                    "",
+                    "Pocket hold credits into the captain's own wallet (the crew may notice at the divide)",
+                ),
+                (
+                    "divide",
+                    "",
+                    "Prize-law split: captain double share, one per crew, one for the ship's purse",
+                ),
+                (
+                    "repair [amount]",
+                    "",
+                    "Spend purse credits to repair the skiff hull (1cr = 1 hull)",
                 ),
                 (
                     "possessed",
