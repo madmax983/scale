@@ -7,6 +7,32 @@ pub struct MindSporeInfection {
     pub active: bool,
 }
 
+/// Marker placed on an airlock whose doors the symbiont faction has forced
+/// open. Counts down each tick; when it expires the crew wrestles the
+/// airlock shut again (see `reseal_sabotaged_airlocks_system`).
+#[derive(Component)]
+pub struct SabotagedAirlock {
+    pub ticks_remaining: u32,
+}
+
+/// How long a sabotaged airlock stays forced open before the crew reseals it.
+pub const SABOTAGED_AIRLOCK_RESEAL_TICKS: u32 = 150;
+
+/// Per-tick chance for an infected pop's immune system to fight off the
+/// mind-spore infection on its own. Keeps the symbiont faction ebbing and
+/// flowing instead of ratcheting to 100% and staying there forever.
+pub const SPORE_CLEARANCE_CHANCE_PER_TICK: f64 = 0.004;
+
+/// Base structure damage dealt to each LifeSupport building by one
+/// air-filtration sabotage event, plus a per-member escalation term.
+///
+/// Tuned so a 5-pop colony can keep up: at full infection (5 members) this
+/// is 27 damage per 10 ticks (2.7/tick), which one pop spending ~a third of
+/// its time on Repair (10 HP/tick) can offset. Teeth, not a death sentence.
+pub const SABOTAGE_BASE_DAMAGE: f32 = 12.0;
+pub const SABOTAGE_DAMAGE_PER_MEMBER: f32 = 3.0;
+pub const SABOTAGE_MAX_DAMAGE: f32 = 30.0;
+
 #[derive(Resource, Default)]
 pub struct SymbiontFaction {
     pub members: usize,
@@ -43,7 +69,10 @@ pub fn transmit_mind_spore_infection_system(
     mut commands: Commands,
     uninfected_query: Query<
         (Entity, &crate::layer1::entities::pop::Pop),
-        Without<MindSporeInfection>,
+        (
+            Without<MindSporeInfection>,
+            With<crate::layer1::health::Health>,
+        ),
     >,
     mut faction: ResMut<SymbiontFaction>,
 ) {
@@ -100,6 +129,72 @@ pub fn trigger_symbiont_sabotage_system(
         events.send(SabotageEvent {
             target: SabotageTarget::AirFiltration,
         });
+    }
+}
+
+/// Immune response: infected pops have a small per-tick chance to fight off
+/// the mind-spore infection on their own, shrinking the symbiont faction.
+/// Transmission still outpaces clearance in a crowded colony, so the crisis
+/// keeps its teeth — but the faction can now ebb as well as flow.
+pub fn fight_off_spore_infection_system(
+    mut commands: Commands,
+    mut faction: ResMut<SymbiontFaction>,
+    mut query: Query<(
+        Entity,
+        &MindSporeInfection,
+        &mut Traits,
+        Option<&crate::layer1::pop::PopName>,
+    ), (
+        With<crate::layer1::entities::pop::Pop>,
+        With<crate::layer1::health::Health>,
+        Without<crate::layer1::biology::health::Dead>,
+    )>,
+    mut chronicle: EventWriter<crate::layer1::core::chronicle::AddChronicleEvent>,
+) {
+    use crate::layer1::core::chronicle::EventImportance;
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    for (entity, infection, mut traits, name) in query.iter_mut() {
+        if !infection.active {
+            continue;
+        }
+        if rng.gen_bool(SPORE_CLEARANCE_CHANCE_PER_TICK) {
+            commands.entity(entity).remove::<MindSporeInfection>();
+            traits.remove(Trait::MindSporeInfected);
+            faction.members = faction.members.saturating_sub(1);
+            let who = name
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| "A colonist".to_string());
+            chronicle.send(crate::layer1::core::chronicle::AddChronicleEvent {
+                text: format!(
+                    "{} shakes off the spore-dream; the symbiont's hold weakens.",
+                    who
+                ),
+                importance: EventImportance::Minor,
+            });
+        }
+    }
+}
+
+/// When an infected pop dies, release its hold on the symbiont faction
+/// count. Without this, dead pops inflate `members` forever (and, before
+/// the `Without<Dead>` filter above, corpses kept "fighting off" the
+/// infection, pinning the faction near zero).
+pub fn release_dead_spore_hosts_system(
+    mut commands: Commands,
+    mut faction: ResMut<SymbiontFaction>,
+    query: Query<
+        Entity,
+        (
+            With<MindSporeInfection>,
+            Added<crate::layer1::biology::health::Dead>,
+        ),
+    >,
+) {
+    for entity in query.iter() {
+        commands.entity(entity).remove::<MindSporeInfection>();
+        faction.members = faction.members.saturating_sub(1);
     }
 }
 
@@ -184,6 +279,7 @@ mod tests {
 
     #[test]
     fn test_transmit_mind_spore_infection_system() {
+        use crate::layer1::health::Health;
         let mut app = App::new();
         app.insert_resource(InfectionConfig {
             base_transmission_rate: 1.0, // 100% transmission for test
@@ -195,7 +291,7 @@ mod tests {
         });
         app.add_systems(Update, transmit_mind_spore_infection_system);
 
-        let pop = app.world_mut().spawn(Pop).id();
+        let pop = app.world_mut().spawn((Pop, Health::default())).id();
 
         app.update();
 
@@ -211,8 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trigger_symbiont_sabotage_system_below_critical() {
-        let mut app = App::new();
+    fn test_trigger_symbiont_sabotage_system_below_critical() {        let mut app = App::new();
         app.add_event::<SabotageEvent>();
         app.add_systems(Update, trigger_symbiont_sabotage_system);
 
@@ -239,6 +334,53 @@ mod tests {
         assert!(
             target_is_air_filtration,
             "Sabotage target should be AirFiltration"
+        );
+    }
+
+    #[test]
+    fn test_fight_off_spore_infection_clears_eventually() {
+        use crate::layer1::core::chronicle::AddChronicleEvent;
+        use crate::layer1::health::Health;
+        let mut app = App::new();
+        app.add_event::<AddChronicleEvent>();
+        app.insert_resource(SymbiontFaction {
+            members: 1,
+            critical_mass: 40,
+        });
+        app.add_systems(Update, fight_off_spore_infection_system);
+
+        let pop = app
+            .world_mut()
+            .spawn((
+                Pop,
+                Health::default(),
+                Needs {
+                    hunger: 1.0,
+                    rest: 1.0,
+                    leisure: 1.0,
+                    hygiene: 1.0,
+                },
+                Traits::default(),
+                MindSporeInfection { active: true },
+            ))
+            .id();
+
+        // Run enough ticks that clearance (p=0.004/tick) is near-certain.
+        for _ in 0..5000 {
+            app.update();
+            if app.world().get::<MindSporeInfection>(pop).is_none() {
+                break;
+            }
+        }
+
+        assert!(
+            app.world().get::<MindSporeInfection>(pop).is_none(),
+            "Infection should clear within 5000 ticks at p=0.004"
+        );
+        assert_eq!(
+            app.world().resource::<SymbiontFaction>().members,
+            0,
+            "Faction members should decrement on clearance"
         );
     }
 }

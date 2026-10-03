@@ -215,10 +215,13 @@ pub fn update_temperature_system(
     }
 
     // 2. Solar Heat (Spec 198)
+    // Tuned 2026-10-03 (crisis-balance): Day 0.5 -> 0.15. The old value drove
+    // open-air tiles ~11C above ambient at equilibrium, so every summer
+    // cooked the colony (heatstroke at 35C) with no counterplay available.
     let solar_heat = if let Some(cycle) = cycle {
         match cycle.time_of_day {
-            TimeOfDay::Day => 0.5,
-            TimeOfDay::Dawn | TimeOfDay::Dusk => 0.1,
+            TimeOfDay::Day => 0.15,
+            TimeOfDay::Dawn | TimeOfDay::Dusk => 0.05,
             TimeOfDay::Night => 0.0,
         }
     } else {
@@ -255,8 +258,26 @@ pub fn update_temperature_system(
                 if power.is_some_and(|p| !p.active) {
                     0.0
                 } else {
-                    5.0
+                    // Thermostat: heaters sleep once their tile is warm, so
+                    // they save the colony in winter without turning housing
+                    // into an oven in summer.
+                    let tile_temp = grid.get_safe(pos.x, pos.y);
+                    if tile_temp < 18.0 {
+                        5.0
+                    } else {
+                        0.0
+                    }
                 }
+            }
+            BuildingType::LifeSupport => {
+                // Life support includes thermal regulation for the habitat:
+                // it gently holds nearby tiles toward a survivable 20C. This
+                // is the colony's winter lifeline — and one more reason
+                // sabotage targeting life support is scary.
+                //
+                // NOTE: arm returns 0.0; the actual multi-tile heating is
+                // applied just below (it needs the grid, not just `heat`).
+                0.0
             }
             BuildingType::Smelter => {
                 if power.is_some_and(|p| !p.active) {
@@ -277,6 +298,26 @@ pub fn update_temperature_system(
 
         if heat > 0.0 {
             grid.add(pos.x, pos.y, heat);
+        }
+
+        // Life-support habitat thermoregulation (see match arm above):
+        // warm every tile within radius 3 of a LifeSupport building toward
+        // 20C. The habitat stays livable through winter as long as life
+        // support stands.
+        if b.building_type == BuildingType::LifeSupport {
+            for dy in -4i32..=4 {
+                for dx in -4i32..=4 {
+                    if dx.abs() + dy.abs() > 4 {
+                        continue;
+                    }
+                    let tx = pos.x + dx;
+                    let ty = pos.y + dy;
+                    let tile_temp = grid.get_safe(tx, ty);
+                    if tile_temp < 20.0 {
+                        grid.add(tx, ty, (20.0 - tile_temp).min(6.0));
+                    }
+                }
+            }
         }
     }
 

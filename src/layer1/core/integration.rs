@@ -2945,25 +2945,43 @@ pub fn void_stare_chronicle_bridge(
 
 /// INT-555: Bridges `SabotageEvent` from Symbiotic Insurgency to `Building` access control and structure damage.
 pub fn symbiont_sabotage_bridge_system(
+    mut commands: Commands,
+    faction: Res<crate::layer1::biology::symbiotic_insurgency::SymbiontFaction>,
     mut events: EventReader<crate::layer1::biology::symbiotic_insurgency::SabotageEvent>,
     mut buildings: Query<(
+        Entity,
         &crate::layer1::architecture::Building,
         Option<&mut crate::layer1::access_control::AccessControl>,
         Option<&mut crate::layer1::architecture::Structure>,
+        Option<&mut crate::layer1::control::DoorControl>,
     )>,
     mut chronicle: EventWriter<AddChronicleEvent>,
 ) {
     use crate::layer1::access_control::AccessMode;
     use crate::layer1::architecture::BuildingType;
-    use crate::layer1::biology::symbiotic_insurgency::SabotageTarget;
+    use crate::layer1::biology::symbiotic_insurgency::{
+        SabotageTarget, SABOTAGED_AIRLOCK_RESEAL_TICKS, SABOTAGE_BASE_DAMAGE,
+        SABOTAGE_DAMAGE_PER_MEMBER, SABOTAGE_MAX_DAMAGE,
+    };
+    use crate::layer1::control::DoorState;
 
     for event in events.read() {
         match event.target {
             SabotageTarget::Airlocks => {
-                for (building, access, _) in buildings.iter_mut() {
+                for (entity, building, access, _, door) in buildings.iter_mut() {
                     if building.building_type == BuildingType::Airlock {
                         if let Some(mut access) = access {
                             access.mode = AccessMode::Public;
+                        }
+                        // Physically force the airlock open: it vents until
+                        // the crew wrestles it shut (reseal system below).
+                        if let Some(mut door) = door {
+                            door.state = DoorState::Open;
+                            commands.entity(entity).insert(
+                                crate::layer1::biology::symbiotic_insurgency::SabotagedAirlock {
+                                    ticks_remaining: SABOTAGED_AIRLOCK_RESEAL_TICKS,
+                                },
+                            );
                         }
                     }
                 }
@@ -2973,10 +2991,16 @@ pub fn symbiont_sabotage_bridge_system(
                 });
             }
             SabotageTarget::AirFiltration => {
-                for (building, _, structure) in buildings.iter_mut() {
+                // Sabotage escalates with the faction: a lone carrier is a
+                // nuisance, a entrenched faction guts life support faster
+                // than a single repair crew can keep up with.
+                let damage = (SABOTAGE_BASE_DAMAGE
+                    + SABOTAGE_DAMAGE_PER_MEMBER * faction.members as f32)
+                    .min(SABOTAGE_MAX_DAMAGE);
+                for (_, building, _, structure, _) in buildings.iter_mut() {
                     if building.building_type == BuildingType::LifeSupport {
                         if let Some(mut structure) = structure {
-                            structure.current_hp -= 50.0;
+                            structure.current_hp -= damage;
                             if structure.current_hp < 0.0 {
                                 structure.current_hp = 0.0;
                             }
@@ -2984,10 +3008,44 @@ pub fn symbiont_sabotage_bridge_system(
                     }
                 }
                 chronicle.send(AddChronicleEvent {
-                    text: "Air filtration systems sabotaged by Symbiont faction.".to_string(),
+                    text: format!(
+                        "Air filtration systems sabotaged by Symbiont faction ({:.0} damage to life support).",
+                        damage
+                    ),
                     importance: EventImportance::Minor,
                 });
             }
+        }
+    }
+}
+
+/// Counts down sabotaged airlocks; when the timer expires the crew forces
+/// the doors shut again. This is the colony's counterplay against the
+/// critical airlock-venting sabotage: the leak is real, but it ends.
+pub fn reseal_sabotaged_airlocks_system(
+    mut commands: Commands,
+    mut query: Query<(
+        Entity,
+        &mut crate::layer1::biology::symbiotic_insurgency::SabotagedAirlock,
+        &mut crate::layer1::control::DoorControl,
+    )>,
+    mut chronicle: EventWriter<AddChronicleEvent>,
+) {
+    use crate::layer1::control::DoorState;
+    for (entity, mut sabotaged, mut door) in query.iter_mut() {
+        if sabotaged.ticks_remaining > 0 {
+            sabotaged.ticks_remaining -= 1;
+        }
+        if sabotaged.ticks_remaining == 0 {
+            door.state = DoorState::Auto;
+            commands
+                .entity(entity)
+                .remove::<crate::layer1::biology::symbiotic_insurgency::SabotagedAirlock>();
+            chronicle.send(AddChronicleEvent {
+                text: "The crew wrestles a sabotaged airlock shut; the hissing stops."
+                    .to_string(),
+                importance: EventImportance::Standard,
+            });
         }
     }
 }

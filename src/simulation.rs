@@ -74,7 +74,10 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems((
         crate::layer1::biology::symbiotic_insurgency::transmit_mind_spore_infection_system,
         crate::layer1::biology::symbiotic_insurgency::process_mind_spore_infection_system,
+        crate::layer1::biology::symbiotic_insurgency::fight_off_spore_infection_system,
+        crate::layer1::biology::symbiotic_insurgency::release_dead_spore_hosts_system,
         crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
+        crate::layer1::core::integration::reseal_sabotaged_airlocks_system,
     ));
     schedule.add_systems((
         crate::layer1::architecture::hostage_protocol::hostage_protocol_suppression_system,
@@ -166,7 +169,13 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::AcceptSponsorshipEvent>>();
     world.init_resource::<Events<crate::layer1::crafting::CraftEvent>>();
     world.init_resource::<Events<crate::layer1::biology::symbiotic_insurgency::SabotageEvent>>();
-    world.init_resource::<crate::layer1::biology::symbiotic_insurgency::SymbiontFaction>();
+    world.insert_resource(crate::layer1::biology::symbiotic_insurgency::SymbiontFaction {
+        members: 0,
+        // INT-555: the trigger system escalates to critical (airlock) sabotage
+        // at this size; the unit tests assume 40. A default of 0 made EVERY
+        // sabotage event take the critical path.
+        critical_mass: 40,
+    });
     world.init_resource::<crate::layer1::biology::symbiotic_insurgency::InfectionConfig>();
     world
         .init_resource::<Events<crate::layer3::events::generational_debt::RepoFleetArrivalEvent>>();
@@ -1350,7 +1359,13 @@ mod tests {
         world.init_resource::<Events<crate::layer1::crafting::CraftEvent>>();
         world
             .init_resource::<Events<crate::layer1::biology::symbiotic_insurgency::SabotageEvent>>();
-        world.init_resource::<crate::layer1::biology::symbiotic_insurgency::SymbiontFaction>();
+        world.insert_resource(crate::layer1::biology::symbiotic_insurgency::SymbiontFaction {
+        members: 0,
+        // INT-555: the trigger system escalates to critical (airlock) sabotage
+        // at this size; the unit tests assume 40. A default of 0 made EVERY
+        // sabotage event take the critical path.
+        critical_mass: 40,
+    });
         world.init_resource::<crate::layer1::biology::symbiotic_insurgency::InfectionConfig>();
         world.init_resource::<Events<crate::layer1::psychology::memory_blackout::MemoryBlackoutEvent>>();
         world.init_resource::<Events<crate::layer1::RepairBuildingEvent>>();
@@ -1452,7 +1467,13 @@ mod tests {
         world.init_resource::<Events<crate::layer1::crafting::CraftEvent>>();
         world
             .init_resource::<Events<crate::layer1::biology::symbiotic_insurgency::SabotageEvent>>();
-        world.init_resource::<crate::layer1::biology::symbiotic_insurgency::SymbiontFaction>();
+        world.insert_resource(crate::layer1::biology::symbiotic_insurgency::SymbiontFaction {
+        members: 0,
+        // INT-555: the trigger system escalates to critical (airlock) sabotage
+        // at this size; the unit tests assume 40. A default of 0 made EVERY
+        // sabotage event take the critical path.
+        critical_mass: 40,
+    });
         world.init_resource::<crate::layer1::biology::symbiotic_insurgency::InfectionConfig>();
         world.init_resource::<Events<crate::layer1::psychology::memory_blackout::MemoryBlackoutEvent>>();
         world.init_resource::<Events<crate::layer1::RepairBuildingEvent>>();
