@@ -27,6 +27,7 @@ use crate::layer1::traits::Trait;
 use crate::layer1::utility_ai::{ActionType, PopAction};
 use crate::layer1::GridPosition;
 use bevy_ecs::prelude::*;
+use crate::layer1::culture::sovereign::FarmProductionLedger;
 use rand::seq::SliceRandom;
 
 /// Water cost per tick per worker for Hydroponics.
@@ -107,6 +108,8 @@ pub fn produce_food_system(
     fertility_grid: Option<Res<FertilityGrid>>,
     eureka_config: Option<Res<EurekaConfig>>,
     mut eureka_events: EventWriter<crate::layer1::eureka::EurekaEvent>,
+    // Fallen Sovereign: cumulative farm-production ledger for the labor decree.
+    mut ledger: Option<ResMut<FarmProductionLedger>>,
 ) {
     let modifier = season_state
         .as_ref()
@@ -167,6 +170,7 @@ pub fn produce_food_system(
                 &mut eureka_events,
                 modifier,
                 current_season,
+                ledger.as_deref_mut(),
             );
         }
     }
@@ -189,6 +193,8 @@ fn process_single_farmer(
     eureka_events: &mut EventWriter<crate::layer1::eureka::EurekaEvent>,
     modifier: f32,
     current_season: Season,
+    // Fallen Sovereign: cumulative farm-production ledger (None = don't track).
+    ledger: Option<&mut FarmProductionLedger>,
 ) {
     // Tech Corruption Check
     if let Some(tech) = building_type.required_tech() {
@@ -267,6 +273,9 @@ fn process_single_farmer(
             }
             _ => {
                 resources.add_food(production);
+                if let Some(ledger) = ledger {
+                    ledger.cumulative += production;
+                }
             }
         }
 

@@ -1,3 +1,4 @@
+use crate::layer1::culture::sovereign::SporeSuppression;
 use crate::layer1::psychology::needs::Needs;
 use crate::layer1::psychology::traits::{Trait, Traits};
 use bevy_ecs::prelude::*;
@@ -114,12 +115,27 @@ pub fn trigger_symbiont_sabotage_system(
     faction: Res<SymbiontFaction>,
     mut events: EventWriter<SabotageEvent>,
     mut timer: Local<u32>,
+    mut cycle: Local<u64>,
+    // Fallen Sovereign: Crown's Silence — grief confuses the spore.
+    suppression: Option<ResMut<SporeSuppression>>,
 ) {
     *timer += 1;
     if *timer < 10 {
         return;
     }
     *timer = 0;
+
+    // While the Silence holds, every other sabotage window passes quietly:
+    // the effective sabotage rate is halved.
+    if let Some(mut sup) = suppression {
+        if sup.remaining > 0 {
+            *cycle += 1;
+            if *cycle % 2 == 1 {
+                sup.suppressed_events += 1;
+                return;
+            }
+        }
+    }
 
     if faction.members >= faction.critical_mass {
         events.send(SabotageEvent {

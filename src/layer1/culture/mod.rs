@@ -49,4 +49,8 @@ pub mod cultural_influence;
 pub use cultural_influence::*;
 pub mod invasive_xeno_aesthetics;
 pub mod memorial_revolt;
+
+/// The Fallen Sovereign: exiled-monarch adventurer origin.
+pub mod sovereign;
+pub use sovereign::*;
 pub use invasive_xeno_aesthetics::*;

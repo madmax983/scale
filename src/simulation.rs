@@ -122,6 +122,11 @@ fn init_simulation_resources(world: &mut World) {
         .init_resource::<bevy_ecs::event::Events<crate::layer2::orbit::tether::AsteroidCrashEvent>>(
         );
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::spatial_compression::PocketCollapseEvent>>();
+    // Fallen Sovereign (adventurer origin)
+    world.init_resource::<crate::layer1::culture::sovereign::SovereignState>();
+    world.init_resource::<crate::layer1::culture::sovereign::FarmProductionLedger>();
+    world.init_resource::<crate::layer1::culture::sovereign::LaborFervor>();
+    world.init_resource::<crate::layer1::culture::sovereign::SporeSuppression>();
     world.init_resource::<crate::layer2::propaganda_engine::PropagandaEngine>();
     world.init_resource::<crate::layer2::propaganda_engine::DiplomaticWeight>();
     world.init_resource::<crate::layer2::propaganda_engine::InspectorEvent>();
@@ -914,6 +919,18 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
             .before(crate::layer1::social::morale::update_morale_cache_system),
         crate::layer2::propaganda::constellation_hack_system
             .after(crate::layer2::propaganda::update_constellation),
+    ));
+    // Fallen Sovereign systems (adventurer origin: the dented crown).
+    // Registered in their own block: the tuple above is at the
+    // IntoSystemConfigs arity limit.
+    schedule.add_systems((
+        crate::layer1::culture::sovereign::spawn_dented_crown_once,
+        crate::layer1::culture::sovereign::sovereign_tick,
+        crate::layer1::culture::sovereign::sabotage_melancholy_bridge.after(
+            crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
+        ),
+        crate::layer1::culture::sovereign::apply_sovereign_morale
+            .before(crate::layer1::social::morale::update_morale_cache_system),
     ));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,

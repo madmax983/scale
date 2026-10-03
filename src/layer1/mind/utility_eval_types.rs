@@ -282,6 +282,9 @@ pub struct WorldContext<'a> {
     pub zone_grid: &'a crate::layer1::zone::ZoneGrid,
     /// Reference to temperature grid (for clothing checks).
     pub temperature_grid: Option<&'a crate::layer1::temperature::TemperatureGrid>,
+    /// Work-utility bonus broadcast by a Fallen Sovereign's labor decree
+    /// (0.0 normally). Added to productive action utilities.
+    pub work_fervor: f32,
 }
 
 // --- UNIFIED PROXY ---
@@ -632,6 +635,7 @@ mod tests {
             factions: None,
             zone_grid,
             temperature_grid: None,
+            work_fervor: 0.0,
         };
 
         evaluator.evaluate_and_consider(None, ActionType::Work, &context, 0.0);
@@ -663,6 +667,7 @@ mod tests {
             factions: None,
             zone_grid,
             temperature_grid: None,
+            work_fervor: 0.0,
         };
 
         let entity = Entity::from_raw(42);

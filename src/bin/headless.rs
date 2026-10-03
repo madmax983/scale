@@ -45,6 +45,10 @@ use scale::layer1::construction::{ConstructionProgress, GreatWork, OperationalGr
 use scale::layer1::dreams::Dream;
 #[cfg(feature = "nova")]
 use scale::layer1::oral_tradition::{OralTradition, StoryGenre};
+use scale::layer1::culture::sovereign::{
+    abdicate, commission_artwork, crown_within_reach, describe_edicts, issue_decree,
+    sovereign_stats, try_crown_pop, DecreeKind, Sovereign,
+};
 use scale::layer1::direct_link::{
     possessed_entity, try_player_step, DirectControlState, Possessed,
 };
@@ -394,6 +398,10 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "possessed" => handle_possessed_command(world),
         "move" => handle_move_command(world, &parts),
         "interact" => handle_interact_command(world),
+        "decree" => handle_decree_command(world, &parts),
+        "commission" => handle_commission_command(world, &parts),
+        "edicts" => handle_edicts_command(world),
+        "abdicate" => handle_abdicate_command(world),
         _ => print_dashboard_panel(
             "ERROR",
             &format!("Unknown command: '{command}'. Type 'help' for commands."),
@@ -719,6 +727,28 @@ fn handle_interact_command(world: &mut World) {
         y: 0,
     });
 
+    // The Fallen Sovereign: a dented crown within reach is taken up first.
+    if world.get::<Sovereign>(entity).is_none() && crown_within_reach(world, entity).is_some() {
+        match try_crown_pop(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, &format!("{name} takes up the dented crown."));
+                print_dashboard_panel(
+                    "CROWNED",
+                    &msg,
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+
     // What building (if any) sits on this tile?
     let building_here: Option<BuildingType> = world
         .query::<(&Building, &GridPosition)>()
@@ -796,6 +826,114 @@ fn handle_interact_command(world: &mut World) {
                 None,
             );
         }
+    }
+}
+
+/// The possessed pop must also wear the crown for sovereign commands.
+fn crowned_sovereign_entity(world: &mut World) -> Option<Entity> {
+    let entity = possessed_entity(world)?;
+    world.get::<Sovereign>(entity).is_some().then_some(entity)
+}
+
+fn handle_decree_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = crowned_sovereign_entity(world) else {
+        print_dashboard_panel(
+            "ERROR",
+            "No crowned sovereign is possessed. Possess the crown-bearer first.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let kind = match parts.get(1).map(|s| s.to_lowercase()).as_deref() {
+        Some("labor") => DecreeKind::Labor,
+        Some("revel") => DecreeKind::Revel,
+        Some("levy") => DecreeKind::Levy,
+        _ => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: decree <labor|revel|levy>",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    match issue_decree(world, entity, kind) {
+        Ok(msg) => print_dashboard_panel(
+            "DECREE",
+            &msg,
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_commission_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = crowned_sovereign_entity(world) else {
+        print_dashboard_panel(
+            "ERROR",
+            "No crowned sovereign is possessed. Possess the crown-bearer first.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let name = parts[1..].join(" ");
+    match commission_artwork(world, entity, &name) {
+        Ok(msg) => print_dashboard_panel(
+            "COMMISSION",
+            &msg,
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_edicts_command(world: &mut World) {
+    print_dashboard_panel(
+        "EDICTS",
+        &describe_edicts(world),
+        Some(comfy_table::Color::Yellow),
+        None,
+    );
+}
+
+fn handle_abdicate_command(world: &mut World) {
+    let Some(entity) = crowned_sovereign_entity(world) else {
+        print_dashboard_panel(
+            "ERROR",
+            "No crowned sovereign is possessed. Possess the crown-bearer first.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    match abdicate(world, entity) {
+        Ok(msg) => print_dashboard_panel(
+            "ABDICATE",
+            &msg,
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
     }
 }
 
@@ -1018,8 +1156,13 @@ fn print_stats(world: &mut World) {
 
     let avg_morale = calculate_avg_morale(world);
 
+    let (sov_id, legitimacy, melancholy) = sovereign_stats(world);
+    let sovereign = sov_id
+        .map(|i| i.to_string())
+        .unwrap_or_else(|| "none".to_string());
+
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2}",
         tick,
         pops,
         avg_health,
@@ -1032,6 +1175,9 @@ fn print_stats(world: &mut World) {
         buildings,
         lifesupport,
         possessed,
+        sovereign,
+        legitimacy,
+        melancholy,
     );
 }
 
@@ -3040,7 +3186,27 @@ fn print_help() {
                 (
                     "interact",
                     "",
-                    "Act at the possessed pop's tile: work farm, eat at stockpile, rest at housing",
+                    "Act at the possessed pop's tile: work farm, eat at stockpile, rest at housing — or take up the dented crown",
+                ),
+                (
+                    "decree <labor|revel|levy>",
+                    "",
+                    "Sovereign decree (50-tick cooldown; labor/revel judged, levy costs legitimacy)",
+                ),
+                (
+                    "commission <name>",
+                    "",
+                    "Patron-of-the-arts: spend food+metal to unveil an artwork (+morale, +legitimacy)",
+                ),
+                (
+                    "edicts",
+                    "",
+                    "List the melancholy-engine edicts and their thresholds",
+                ),
+                (
+                    "abdicate",
+                    "",
+                    "Lay down the crown on the current tile",
                 ),
                 (
                     "possessed",
