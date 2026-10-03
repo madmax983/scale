@@ -16,6 +16,11 @@
 //!   `chop <x> <y>`   - Designate tree for chopping
 //!   `designations`   - List all active designations
 //!   `find <terrain> [count]` - Find terrain coordinates
+//!   `possess <pop_id>` - Take direct control of a pop (adventurer mode)
+//!   `move <north|south|east|west>` - Step the possessed pop one tile
+//!   `interact`       - Act at the possessed pop's tile
+//!   `release`        - Return the possessed pop to AI control
+//!   `possessed`      - Show who is currently possessed
 //!   `help`           - Show this help
 //!   `quit`           - Exit
 
@@ -33,6 +38,9 @@ use scale::layer1::construction::{ConstructionProgress, GreatWork, OperationalGr
 use scale::layer1::dreams::Dream;
 #[cfg(feature = "nova")]
 use scale::layer1::oral_tradition::{OralTradition, StoryGenre};
+use scale::layer1::direct_link::{
+    possessed_entity, try_player_step, DirectControlState, Possessed,
+};
 use scale::layer1::pop::PopName;
 use scale::layer1::stress::StressTracker;
 use scale::layer1::tech::{unlock_tech, Tech, TechState, TechStatus};
@@ -363,6 +371,11 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "log" | "l" => print_log(world),
         "tech" | "research_status" => print_tech(world),
         "research" | "r" => handle_research_command(world, &parts),
+        "possess" => handle_possess_command(world, &parts),
+        "release" => handle_release_command(world),
+        "possessed" => handle_possessed_command(world),
+        "move" => handle_move_command(world, &parts),
+        "interact" => handle_interact_command(world),
         _ => print_dashboard_panel(
             "ERROR",
             &format!("Unknown command: '{command}'. Type 'help' for commands."),
@@ -458,6 +471,313 @@ fn handle_bio_command(world: &mut World, parts: &[&str]) {
             Some(comfy_table::Color::Red),
             Some(comfy_table::Attribute::Bold),
         ),
+    }
+}
+
+/// Find a living pop by its entity index (the ID column of the `pops` table).
+fn find_pop_by_id(world: &mut World, id: u32) -> Option<(Entity, String)> {
+    world
+        .query::<(Entity, &Pop, &PopName)>()
+        .iter(world)
+        .find(|(entity, _, _)| entity.index() == id)
+        .map(|(entity, _, name)| (entity, name.0.clone()))
+}
+
+/// Strip possession components from every possessed entity, returning the
+/// (entity, name) pairs that were released.
+fn clear_possession(world: &mut World) -> Vec<(Entity, String)> {
+    let possessed: Vec<Entity> = world
+        .query_filtered::<Entity, With<Possessed>>()
+        .iter(world)
+        .collect();
+    let mut released = Vec::new();
+    for entity in possessed {
+        let name = world
+            .get::<PopName>(entity)
+            .map_or_else(|| format!("pop #{}", entity.index()), |n| n.0.clone());
+        {
+            let mut em = world.entity_mut(entity);
+            em.remove::<Possessed>();
+            em.remove::<DirectControlState>();
+        }
+        released.push((entity, name));
+    }
+    released
+}
+
+/// Log an adventurer event to the colony message log (visible via `log`).
+fn log_adventurer(world: &mut World, text: &str) {
+    world
+        .resource_mut::<MessageLog>()
+        .add(format!("[adventurer] {text}"));
+}
+
+fn handle_possess_command(world: &mut World, parts: &[&str]) {
+    let Some(id_str) = parts.get(1) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: possess <pop_id>  (list ids with `pops`)",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let Ok(id) = id_str.parse::<u32>() else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("Invalid pop id: '{id_str}'"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let Some((entity, name)) = find_pop_by_id(world, id) else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("No pop with id {id}. List candidates with `pops`."),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+
+    // Only one pop at a time; release anyone currently possessed.
+    let _ = clear_possession(world);
+    {
+        let mut em = world.entity_mut(entity);
+        em.insert((Possessed, DirectControlState::default()));
+        // Mirror handle_possession: clear AI state so the player's input wins.
+        em.remove::<MovementTarget>();
+        em.remove::<scale::layer1::AtTarget>();
+        em.remove::<scale::layer1::mind::utility_types::StartPlan>();
+        em.remove::<scale::layer1::AssignedTo>();
+    }
+    let pos = world
+        .get::<GridPosition>(entity)
+        .map_or_else(|| "?".to_string(), |p| format!("{},{}", p.x, p.y));
+    log_adventurer(world, &format!("{name} is now under your direct control."));
+    print_dashboard_panel(
+        "POSSESSED",
+        &format!("You are now {name} (id {id}) at ({pos}). The utility AI will not reassign them while possessed. `move` to walk, `interact` to act, `release` to let go."),
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_release_command(world: &mut World) {
+    let released = clear_possession(world);
+    match released.as_slice() {
+        [] => print_dashboard_panel(
+            "INFO",
+            "Nobody is possessed right now.",
+            Some(comfy_table::Color::DarkGrey),
+            None,
+        ),
+        [(entity, name)] => {
+            log_adventurer(world, &format!("{name} returns to the colony's care."));
+            print_dashboard_panel(
+                "RELEASED",
+                &format!("{name} (id {}) is back under AI control.", entity.index()),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        _ => print_dashboard_panel(
+            "RELEASED",
+            "Possession cleared (multiple entities were marked; this should not happen).",
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_possessed_command(world: &mut World) {
+    match possessed_entity(world) {
+        Some(entity) => {
+            let name = world
+                .get::<PopName>(entity)
+                .map_or_else(|| format!("pop #{}", entity.index()), |n| n.0.clone());
+            let pos = world
+                .get::<GridPosition>(entity)
+                .map_or_else(|| "?".to_string(), |p| format!("{},{}", p.x, p.y));
+            let needs = world.get::<Needs>(entity);
+            let vitals = needs.map_or_else(
+                || String::new(),
+                |n| {
+                    format!(
+                        " hunger={:.0}% rest={:.0}%",
+                        n.hunger * 100.0,
+                        n.rest * 100.0
+                    )
+                },
+            );
+            print_dashboard_panel(
+                "POSSESSED",
+                &format!(
+                    "{name} (id {}) at ({pos}){vitals}",
+                    entity.index()
+                ),
+                Some(comfy_table::Color::Magenta),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        None => print_dashboard_panel(
+            "INFO",
+            "No pop is currently possessed. Use `possess <pop_id>`.",
+            Some(comfy_table::Color::DarkGrey),
+            None,
+        ),
+    }
+}
+
+fn handle_move_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = possessed_entity(world) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Nobody is possessed. Use `possess <pop_id>` first.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+
+    let step: Option<(i32, i32)> = match parts.get(1).map(|s| s.to_lowercase()) {
+        Some(dir) if dir == "north" || dir == "n" => Some((0, -1)),
+        Some(dir) if dir == "south" || dir == "s" => Some((0, 1)),
+        Some(dir) if dir == "west" || dir == "w" => Some((-1, 0)),
+        Some(dir) if dir == "east" || dir == "e" => Some((1, 0)),
+        Some(_) if parts.len() >= 3 => {
+            let dx: Option<i32> = parts[1].parse().ok();
+            let dy: Option<i32> = parts[2].parse().ok();
+            dx.zip(dy)
+        }
+        _ => None,
+    };
+    let Some((dx, dy)) = step else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: move <north|south|east|west>  or  move <dx> <dy>",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+
+    match try_player_step(world, entity, dx, dy) {
+        Ok((nx, ny)) => {
+            print_dashboard_panel(
+                "MOVED",
+                &format!("Stepped to ({nx}, {ny})."),
+                Some(comfy_table::Color::Green),
+                None,
+            );
+        }
+        Err(reason) => {
+            print_dashboard_panel(
+                "BLOCKED",
+                &reason,
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+fn handle_interact_command(world: &mut World) {
+    let Some(entity) = possessed_entity(world) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Nobody is possessed. Use `possess <pop_id>` first.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let name = world
+        .get::<PopName>(entity)
+        .map_or_else(|| format!("pop #{}", entity.index()), |n| n.0.clone());
+    let pos = world.get::<GridPosition>(entity).copied().unwrap_or(GridPosition {
+        x: 0,
+        y: 0,
+    });
+
+    // What building (if any) sits on this tile?
+    let building_here: Option<BuildingType> = world
+        .query::<(&Building, &GridPosition)>()
+        .iter(world)
+        .find(|(_, bpos)| bpos.x == pos.x && bpos.y == pos.y)
+        .map(|(b, _)| b.building_type);
+
+    match building_here {
+        Some(BuildingType::Farm) => {
+            // Work the farm: a single shift's yield straight into colony stores.
+            world.resource_mut::<ColonyResources>().food += 0.5;
+            log_adventurer(world, &format!("{name} works the fields (+0.5 food)."));
+            print_dashboard_panel(
+                "INTERACT",
+                &format!("{name} works the farm: +0.5 food to colony stores."),
+                Some(comfy_table::Color::Green),
+                None,
+            );
+        }
+        Some(BuildingType::Stockpile) => {
+            let ate = {
+                let mut resources = world.resource_mut::<ColonyResources>();
+                if resources.food >= 1.0 {
+                    resources.food -= 1.0;
+                    true
+                } else {
+                    false
+                }
+            };
+            if ate {
+                if let Some(mut needs) = world.get_mut::<Needs>(entity) {
+                    needs.hunger = (needs.hunger + 0.3).min(1.0);
+                }
+                log_adventurer(world, &format!("{name} eats from the stockpile."));
+                print_dashboard_panel(
+                    "INTERACT",
+                    &format!("{name} eats from the stockpile (-1.0 food, hunger restored)."),
+                    Some(comfy_table::Color::Green),
+                    None,
+                );
+            } else {
+                print_dashboard_panel(
+                    "INTERACT",
+                    "The stockpile is empty — nothing to eat.",
+                    Some(comfy_table::Color::Yellow),
+                    None,
+                );
+            }
+        }
+        Some(BuildingType::Housing) => {
+            if let Some(mut needs) = world.get_mut::<Needs>(entity) {
+                needs.rest = (needs.rest + 0.3).min(1.0);
+            }
+            log_adventurer(world, &format!("{name} catches some rest."));
+            print_dashboard_panel(
+                "INTERACT",
+                &format!("{name} rests a while (rest restored)."),
+                Some(comfy_table::Color::Green),
+                None,
+            );
+        }
+        Some(other) => {
+            print_dashboard_panel(
+                "INTERACT",
+                &format!("The {other:?} hums along — nothing for you to do here."),
+                Some(comfy_table::Color::DarkGrey),
+                None,
+            );
+        }
+        None => {
+            print_dashboard_panel(
+                "INTERACT",
+                "Nothing to interact with on this tile.",
+                Some(comfy_table::Color::DarkGrey),
+                None,
+            );
+        }
     }
 }
 
@@ -623,7 +943,7 @@ fn print_status(world: &mut World) {
 /// Prints one compact, machine-parseable stats line for playtest snapshots.
 ///
 /// Format:
-/// `STATS tick=1000 pops=5 avg_health=98.2 min_pressure=1.00 food=12.0 wood=8.0 stone=2.0 tools=1.0 buildings=17 lifesupport=1`
+/// `STATS tick=1000 pops=5 avg_health=98.2 min_pressure=1.00 food=12.0 wood=8.0 stone=2.0 tools=1.0 buildings=17 lifesupport=1 possessed=none`
 fn print_stats(world: &mut World) {
     let tick = world.resource::<SimulationTime>().tick;
     let resources = *world.resource::<ColonyResources>();
@@ -674,8 +994,12 @@ fn print_stats(world: &mut World) {
         0.0
     };
 
+    let possessed = possessed_entity(world)
+        .map(|e| e.index().to_string())
+        .unwrap_or_else(|| "none".to_string());
+
     println!(
-        "STATS tick={} pops={} avg_health={:.1} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={}",
+        "STATS tick={} pops={} avg_health={:.1} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={}",
         tick,
         pops,
         avg_health,
@@ -686,6 +1010,7 @@ fn print_stats(world: &mut World) {
         resources.tools,
         buildings,
         lifesupport,
+        possessed,
     );
 }
 
@@ -965,8 +1290,11 @@ fn print_pops(world: &mut World) {
         let traits = world.get::<Traits>(entity);
         let mt = world.get::<MovementTarget>(entity);
         let at_target = world.get::<scale::layer1::AtTarget>(entity).is_some();
+        let is_possessed = world.get::<Possessed>(entity).is_some();
 
-        let status = if at_target {
+        let status = if is_possessed {
+            "POSSESSED (you)".to_string()
+        } else if at_target {
             "At target".to_string()
         } else if let Some(mt) = mt {
             format!(
@@ -2370,6 +2698,36 @@ fn print_help() {
                     "research <name>",
                     "r",
                     "Research a technology (e.g. Masonry)",
+                ),
+            ],
+        ),
+        (
+            "Adventurer",
+            vec![
+                (
+                    "possess <pop_id>",
+                    "",
+                    "Take direct control of a pop (ids from `pops`); AI skips them while possessed",
+                ),
+                (
+                    "move <north|south|east|west>",
+                    "",
+                    "Step the possessed pop one tile (or `move <dx> <dy>`)",
+                ),
+                (
+                    "interact",
+                    "",
+                    "Act at the possessed pop's tile: work farm, eat at stockpile, rest at housing",
+                ),
+                (
+                    "possessed",
+                    "",
+                    "Show who is currently possessed",
+                ),
+                (
+                    "release",
+                    "",
+                    "Return the possessed pop to AI control",
                 ),
             ],
         ),

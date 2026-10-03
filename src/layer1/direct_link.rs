@@ -3,7 +3,9 @@ use crate::layer1::actions::AssignedTo;
 use crate::layer1::building::{Building, OccupiedTiles};
 use crate::layer1::defense::Gate;
 use crate::layer1::execution::components::{AtTarget, MovementTarget};
-use crate::layer1::execution::movement::is_tile_walkable;
+use crate::layer1::execution::movement::{
+    is_tile_walkable, is_tile_walkable_data, BuildingCollisionInfo,
+};
 use crate::layer1::map::{GridPosition, ScreenShake};
 use crate::layer1::particles::Particle;
 use crate::layer1::pop::{Role, Speed};
@@ -300,6 +302,91 @@ pub fn handle_direct_input_system(
     if input.just_pressed(KeyCode::Esc) {
         unpossess_events.send(UnpossessEvent);
     }
+}
+
+/// The currently possessed pop entity, if any.
+///
+/// Only one pop can be possessed at a time; possession is cleared on
+/// [`UnpossessEvent`] (see [`handle_possession`]).
+pub fn possessed_entity(world: &mut World) -> Option<Entity> {
+    world
+        .query_filtered::<Entity, With<Possessed>>()
+        .iter(world)
+        .next()
+}
+
+/// Attempt one player-directed step for a possessed pop, applying the same
+/// collision rules as keyboard-driven direct movement.
+///
+/// This is the non-interactive entry point for direct control: the headless
+/// console `move` command (and any future UI driver) routes through here
+/// instead of [`handle_direct_movement`], which reads live keyboard `Input`.
+///
+/// On success the pop's [`GridPosition`] is updated and a dust particle is
+/// spawned (mirroring the interactive path). On failure a human-readable
+/// reason is returned and nothing changes.
+pub fn try_player_step(
+    world: &mut World,
+    entity: Entity,
+    dx: i32,
+    dy: i32,
+) -> Result<(i32, i32), String> {
+    if !world.entity(entity).contains::<Possessed>() {
+        return Err("no pop is currently possessed".to_string());
+    }
+
+    // Gather walkability data with shared borrows only, so the same rules as
+    // the interactive path apply (see is_tile_walkable_data).
+    let buildings: Vec<BuildingCollisionInfo> = {
+        let mut query = world.query::<(
+            &GridPosition,
+            &Building,
+            Option<&Gate>,
+            Option<&AccessControl>,
+        )>();
+        query
+            .iter(world)
+            .map(|(pos, building, _gate, access)| {
+                BuildingCollisionInfo::from_query_item(pos, building, access)
+            })
+            .collect()
+    };
+    let walkable = {
+        let terrain = world.resource::<TerrainGrid>();
+        let occupied = world.get_resource::<OccupiedTiles>();
+        let role = world.get::<Role>(entity).copied();
+        let Some(pos) = world.get::<GridPosition>(entity) else {
+            return Err("possessed pop has no position".to_string());
+        };
+        let nx = pos.x + dx.clamp(-1, 1);
+        let ny = pos.y + dy.clamp(-1, 1);
+        (
+            is_tile_walkable_data(terrain, occupied, &buildings, nx, ny, entity, role),
+            nx,
+            ny,
+        )
+    };
+    let (ok, nx, ny) = walkable;
+    if !ok {
+        return Err(format!("blocked: cannot step to ({nx}, {ny})"));
+    }
+
+    // Apply the step and kick up dust at the old tile (mirrors handle_direct_movement).
+    let mut pos = world
+        .get_mut::<GridPosition>(entity)
+        .ok_or_else(|| "possessed pop has no position".to_string())?;
+    let old = *pos;
+    pos.x = nx;
+    pos.y = ny;
+    world.spawn((
+        Particle {
+            char: '.',
+            color: Color::DarkGray,
+            lifetime: 5,
+        },
+        old,
+    ));
+    Ok((nx, ny))
 }
 
 #[cfg(test)]

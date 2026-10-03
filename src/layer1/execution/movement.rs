@@ -1,7 +1,7 @@
 use crate::layer1::access_control::{AccessControl, AccessMode};
 use crate::layer1::actions::{AssignedTo, AssignmentType};
 use crate::layer1::admin::{AdminProvider, Office};
-use crate::layer1::building::{Building, OccupiedTiles};
+use crate::layer1::building::{Building, BuildingType, OccupiedTiles};
 use crate::layer1::defense::Gate;
 use crate::layer1::erosion::{ErosionGrid, MOVEMENT_EROSION_AMOUNT};
 use crate::layer1::execution::components::{AtTarget, MovementTarget};
@@ -371,15 +371,38 @@ pub(crate) fn try_get_walkable_pos(
     }
 }
 
-pub(crate) fn is_tile_walkable(
+/// Collision-relevant data for one building tile, pre-extracted so callers
+/// without a Bevy system `Query` (e.g. the headless console) can reuse the
+/// exact same walkability rules as [`is_tile_walkable`].
+#[derive(Clone)]
+pub(crate) struct BuildingCollisionInfo {
+    pub pos: GridPosition,
+    pub building_type: BuildingType,
+    pub access: Option<AccessControl>,
+}
+
+impl BuildingCollisionInfo {
+    pub fn from_query_item(
+        pos: &GridPosition,
+        building: &Building,
+        access: Option<&AccessControl>,
+    ) -> Self {
+        Self {
+            pos: *pos,
+            building_type: building.building_type,
+            access: access.cloned(),
+        }
+    }
+}
+
+/// Data-driven core of the walkability check.
+///
+/// Same rules as [`is_tile_walkable`], but takes pre-extracted building
+/// data instead of a system `Query`.
+pub(crate) fn is_tile_walkable_data(
     terrain: &TerrainGrid,
     occupied: Option<&OccupiedTiles>,
-    buildings: &Query<(
-        &GridPosition,
-        &Building,
-        Option<&Gate>,
-        Option<&AccessControl>,
-    )>,
+    buildings: &[BuildingCollisionInfo],
     x: i32,
     y: i32,
     pop_entity: Entity,
@@ -408,10 +431,10 @@ pub(crate) fn is_tile_walkable(
         return true;
     }
 
-    for (pos, building, _gate, access_opt) in buildings.iter() {
-        if pos.x == x && pos.y == y {
+    for info in buildings {
+        if info.pos.x == x && info.pos.y == y {
             // Priority: AccessControl
-            if let Some(access) = access_opt {
+            if let Some(access) = &info.access {
                 return match access.mode {
                     AccessMode::Public => true,
                     AccessMode::Lockdown => false,
@@ -428,13 +451,36 @@ pub(crate) fn is_tile_walkable(
             // Since we are adding AccessControl to Gates, we should rely on AccessControl.
             // If AccessControl is missing, we check building.is_obstacle().
             // Gate is an obstacle.
-            if building.building_type.is_obstacle() {
+            if info.building_type.is_obstacle() {
                 return false;
             }
             return true;
         }
     }
     true
+}
+
+pub(crate) fn is_tile_walkable(
+    terrain: &TerrainGrid,
+    occupied: Option<&OccupiedTiles>,
+    buildings: &Query<(
+        &GridPosition,
+        &Building,
+        Option<&Gate>,
+        Option<&AccessControl>,
+    )>,
+    x: i32,
+    y: i32,
+    pop_entity: Entity,
+    pop_role: Option<Role>,
+) -> bool {
+    let info: Vec<BuildingCollisionInfo> = buildings
+        .iter()
+        .map(|(pos, building, _gate, access_opt)| {
+            BuildingCollisionInfo::from_query_item(pos, building, access_opt)
+        })
+        .collect();
+    is_tile_walkable_data(terrain, occupied, &info, x, y, pop_entity, pop_role)
 }
 
 #[allow(clippy::missing_const_for_fn, clippy::unnecessary_wraps)]
