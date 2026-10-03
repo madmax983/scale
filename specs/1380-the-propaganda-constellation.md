@@ -161,3 +161,5 @@ mod tests {
 ## 8. Questions
 
 *Builder: add questions here if spec is unclear.*
+
+**Builder note (2026-10-03, implemented):** RED test 2 (`test_active_constellation_boosts_colony_morale`) sets a Hope message on a `Constellation::default()` with *zero* satellites and expects the morale modifier — while §6 requires "dropping below N ends the boost." Reconciliation: added `SloganMessage::Dark`. `update_constellation` darkens the sky whenever the link drops below `CONSTELLATION_MIN_SATELLITES` (killing hope *or* hacked despair), and `apply_constellation_morale` broadcasts only while a message is lit. Observable game behavior is exactly "while active"; all four RED tests pass unmodified (test 2 passes because it sets a lit Hope message directly). Two extra tests cover refresh-not-stack and below-threshold deactivation.

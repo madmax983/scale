@@ -16,6 +16,8 @@ use bevy_ecs::prelude::*;
 
 /// Component tracking the amount of debris in orbit around a body.
 /// The density of debris, where 0.0 is clear and `1.0` is extremely hazardous. Can exceed `1.0`.
+/// Also usable as a resource: the simplified colony-level orbital-debris
+/// ledger (fed by e.g. satellite shoot-downs in spec 1380).
 ///
 /// # Examples
 ///
@@ -28,7 +30,7 @@ use bevy_ecs::prelude::*;
 /// sky.0 += 0.5; // A major space battle occurs!
 /// assert!(sky.0 > 0.0);
 /// ```
-#[derive(Component, Default, Debug)]
+#[derive(Component, Resource, Default, Debug)]
 pub struct OrbitalDebris(pub f32);
 
 /// System that increases orbital debris based on events.

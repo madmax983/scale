@@ -11666,3 +11666,27 @@ overused road. Used by the procedural text generator for chronicle flavor.
 - your destination can wait; the way is the point
 - ten thousand soles pressed this dirt into dreaming
 - the shortest path is the one that wants you back
+
+## Propaganda Constellation Slogans (Spec 1380)
+
+Slogans for the sky-message spelled by linked slogan satellites — "the
+Broadcast" as the pops call it. Hope slogans lift the colony; despair
+slogans are what rival hacks overwrite them with. All original.
+
+## Fragment Type: [slogan-hope]
+- WE ENDURE
+- THE HARVEST IS OURS
+- TOMORROW BELONGS TO US
+- HOLD THE LINE
+- THE COLONY PROVIDES
+- EVERY HAND BUILDS DAWN
+- THE NIGHT IS OURS TOO
+
+## Fragment Type: [slogan-despair]
+- OBEY THE STATIC
+- THE VOID IS HUNGRY
+- NO DAWN COMES
+- YOU ARE ALONE
+- THE SIGNAL EATS
+- SLEEP IS SURRENDER
+- THE DARK KEEPS RECEIPTS

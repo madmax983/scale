@@ -895,6 +895,13 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         crate::layer2::debris::debris_attrition_system
             .after(crate::layer2::debris::debris_accumulation_system),
         crate::layer2::debris::debris_decay_system,
+        // Propaganda Constellation Systems (spec 1380)
+        crate::layer2::propaganda::update_constellation,
+        crate::layer2::propaganda::apply_constellation_morale
+            .after(crate::layer2::propaganda::update_constellation)
+            .before(crate::layer1::social::morale::update_morale_cache_system),
+        crate::layer2::propaganda::constellation_hack_system
+            .after(crate::layer2::propaganda::update_constellation),
     ));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,

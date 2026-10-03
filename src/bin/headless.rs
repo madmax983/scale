@@ -16,6 +16,11 @@
 //!   `chop <x> <y>`   - Designate tree for chopping
 //!   `excavate <x> <y>` - Excavate Desire Dust from a tile (Spec 1379)
 //!   `dust`            - Show Desire Dust / RoadMind status
+//!   `launch_sat`      - Launch a slogan satellite (Spec 1380)
+//!   `constellation`   - Show Propaganda Constellation status
+//!   `hack_sat <msg>`  - Rival hack: flip the sky-message to despair
+//!   `shootdown <id>`  - Shoot down your own satellite (feeds debris)
+//!   `give <res> <n>`   - Debug: grant resources
 //!   `designations`   - List all active designations
 //!   `find <terrain> [count]` - Find terrain coordinates
 //!   `possess <pop_id>` - Take direct control of a pop (adventurer mode)
@@ -355,6 +360,11 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "chop" => handle_designate_command(world, &parts, DesignationType::Chop),
         "excavate" => handle_designate_command(world, &parts, DesignationType::ExcavateDust),
         "dust" => print_dust_report(world),
+        "launch_sat" => handle_launch_sat_command(world),
+        "constellation" => print_constellation_report(world),
+        "hack_sat" => handle_hack_sat_command(world, &parts),
+        "shootdown" => handle_shootdown_command(world, &parts),
+        "give" => handle_give_command(world, &parts),
         "designations" | "d" => print_designations(world),
         "find" => handle_find_command(world, &parts),
         "scan" => handle_scan_command(world, &parts),
@@ -949,7 +959,7 @@ fn print_status(world: &mut World) {
 /// Prints one compact, machine-parseable stats line for playtest snapshots.
 ///
 /// Format:
-/// `STATS tick=1000 pops=5 avg_health=98.2 min_pressure=1.00 food=12.0 wood=8.0 stone=2.0 tools=1.0 buildings=17 lifesupport=1 possessed=none`
+/// `STATS tick=1000 pops=5 avg_health=98.2 avg_morale=0.85 min_pressure=1.00 food=12.0 wood=8.0 stone=2.0 tools=1.0 buildings=17 lifesupport=1 possessed=none`
 fn print_stats(world: &mut World) {
     let tick = world.resource::<SimulationTime>().tick;
     let resources = *world.resource::<ColonyResources>();
@@ -1004,11 +1014,14 @@ fn print_stats(world: &mut World) {
         .map(|e| e.index().to_string())
         .unwrap_or_else(|| "none".to_string());
 
+    let avg_morale = calculate_avg_morale(world);
+
     println!(
-        "STATS tick={} pops={} avg_health={:.1} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={}",
         tick,
         pops,
         avg_health,
+        avg_morale,
         min_pressure,
         resources.food,
         resources.wood,
@@ -1791,6 +1804,240 @@ fn print_dust_report(world: &mut World) {
         "DESIRE DUST",
         &lines.join("\n"),
         Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Find the colony's planet (spawning a bare one if the schedule hasn't).
+fn colony_planet_entity(world: &mut World) -> bevy_ecs::prelude::Entity {
+    use bevy_ecs::prelude::With;
+    if let Some(planet) = world
+        .query_filtered::<bevy_ecs::prelude::Entity, With<scale::layer2::generation::Planet>>()
+        .iter(world)
+        .next()
+    {
+        return planet;
+    }
+    world
+        .spawn((
+            scale::layer2::generation::Planet,
+            scale::layer2::debris::OrbitalDebris(0.0),
+        ))
+        .id()
+}
+
+fn handle_launch_sat_command(world: &mut World) {
+    use scale::layer2::propaganda::{
+        launch_slogan_satellite, update_constellation, SATELLITE_METAL_COST, SATELLITE_TOOL_COST,
+    };
+    let planet = colony_planet_entity(world);
+    match launch_slogan_satellite(world, planet) {
+        Some(sat) => {
+            update_constellation(world);
+            let word = world
+                .get::<scale::layer2::propaganda::SloganSatellite>(sat)
+                .map(|s| s.word.clone())
+                .unwrap_or_default();
+            print_dashboard_panel(
+                "SLOGAN SATELLITE LAUNCHED",
+                &format!(
+                    "Satellite #{} in orbit (carries \"{word}\").\nCost: {SATELLITE_METAL_COST} metal, {SATELLITE_TOOL_COST} tools. LaunchEvent emitted.",
+                    sat.index()
+                ),
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        None => {
+            print_dashboard_panel(
+                "LAUNCH FAILED",
+                &format!(
+                    "Not enough resources: need {SATELLITE_METAL_COST} metal and {SATELLITE_TOOL_COST} tools."
+                ),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+fn print_constellation_report(world: &mut World) {
+    use scale::layer2::propaganda::{Constellation, SloganMessage, SloganSatellite, PROPAGANDA_MODIFIER_LABEL};
+    let (active, message_text, kind, sat_count, broadcast_value) = match world.get_resource::<Constellation>() {
+        Some(c) => (
+            c.active(),
+            c.message.text().to_string(),
+            match &c.message {
+                SloganMessage::Hope(_) => "HOPE",
+                SloganMessage::Despair(_) => "DESPAIR (hacked)",
+                SloganMessage::Dark => "DARK",
+            }
+            .to_string(),
+            c.satellites.len(),
+            c.morale_value(),
+        ),
+        None => (false, String::new(), "DARK".to_string(), 0, 0.0),
+    };
+    let sat_ids: Vec<String> = world
+        .query::<(bevy_ecs::prelude::Entity, &SloganSatellite)>()
+        .iter(world)
+        .map(|(e, s)| format!("#{} \"{}\"", e.index(), s.word))
+        .collect();
+    let mut boosted = 0u32;
+    let mut pops = 0u32;
+    for morale in world.query::<&Morale>().iter(world) {
+        pops += 1;
+        if morale
+            .modifiers
+            .iter()
+            .any(|m| m.label == PROPAGANDA_MODIFIER_LABEL)
+        {
+            boosted += 1;
+        }
+    }
+    let debris_ledger = world
+        .get_resource::<scale::layer2::debris::OrbitalDebris>()
+        .map(|d| d.0)
+        .unwrap_or(0.0);
+    let night = world
+        .get_resource::<scale::layer1::day_night::DayNightCycle>()
+        .map(|c| format!("{:?}", c.time_of_day))
+        .unwrap_or_else(|| "unknown".to_string());
+    let lines = [
+        format!("Active: {active} ({kind})"),
+        format!("Message: \"{message_text}\""),
+        format!("Broadcast value: {broadcast_value:+.2} morale/pop"),
+        format!("Linked satellites: {sat_count}"),
+        format!("Satellites: {}", sat_ids.join(" ")),
+        format!("Pops with Broadcast modifier: {boosted}/{pops}"),
+        format!("Orbital debris (ledger): {debris_ledger:.2}"),
+        format!("Sky: {night}"),
+    ];
+    print_dashboard_panel(
+        "PROPAGANDA CONSTELLATION",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_hack_sat_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::propaganda::{
+        apply_constellation_morale, hack_constellation, update_constellation, Constellation,
+    };
+    let active = world
+        .get_resource::<Constellation>()
+        .is_some_and(|c| c.active());
+    if !active {
+        print_dashboard_panel(
+            "HACK FAILED",
+            "No active constellation to hack — the sky is dark.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let message = if parts.len() > 1 {
+        parts[1..].join(" ")
+    } else {
+        "OBEY THE STATIC".to_string()
+    };
+    hack_constellation(world, message.clone());
+    update_constellation(world);
+    apply_constellation_morale(world);
+    print_dashboard_panel(
+        "CONSTELLATION HACKED",
+        &format!("Rival broadcast overwrote the sky: \"{message}\". Despair rains down."),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_shootdown_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::propaganda::{shoot_down_satellite, SloganSatellite};
+    let sats: Vec<bevy_ecs::prelude::Entity> = world
+        .query::<(bevy_ecs::prelude::Entity, &SloganSatellite)>()
+        .iter(world)
+        .map(|(e, _)| e)
+        .collect();
+    // No id given: shoot down the first linked satellite (scripted playthroughs).
+    let target: Option<u32> = parts
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .or_else(|| sats.first().map(|e| e.index()));
+    let Some(target) = target else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: shootdown [satellite_id] (ids from `constellation`)",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let sat = sats.into_iter().find(|e| e.index() == target);
+    match sat {
+        Some(sat) => {
+            use scale::layer2::propaganda::{
+                apply_constellation_morale, update_constellation,
+            };
+            shoot_down_satellite(world, sat);
+            update_constellation(world);
+            apply_constellation_morale(world);
+            print_dashboard_panel(
+                "SATELLITE DOWN",
+                &format!(
+                    "Shot down our own satellite #{target}. The message dies; the wreckage feeds orbital debris."
+                ),
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                &format!("No slogan satellite with id #{target}."),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// Debug command: grant colony resources (playtesting aid).
+fn handle_give_command(world: &mut World, parts: &[&str]) {
+    let (resource, amount) = match (parts.get(1), parts.get(2)) {
+        (Some(name), Some(n)) => (name.to_lowercase(), n.parse::<f32>().unwrap_or(0.0)),
+        _ => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: give <food|wood|stone|metal|tools> <amount>",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    let mut resources = world.resource_mut::<ColonyResources>();
+    match resource.as_str() {
+        "food" => resources.food += amount,
+        "wood" => resources.wood += amount,
+        "stone" => resources.stone += amount,
+        "metal" => resources.metal += amount,
+        "tools" => resources.tools += amount,
+        _ => {
+            print_dashboard_panel(
+                "ERROR",
+                &format!("Unknown resource: '{resource}'."),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    }
+    print_dashboard_panel(
+        "RESOURCES GRANTED",
+        &format!("+{amount} {resource} (debug)."),
+        Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
     );
 }
@@ -2760,6 +3007,11 @@ fn print_help() {
                 ("destroy <x> <y>", "", "Designate building for destruction"),
                 ("excavate <x> <y>", "", "Excavate Desire Dust from a tile"),
                 ("dust", "", "Show Desire Dust and RoadMind status"),
+                ("launch_sat", "", "Launch a slogan satellite (Propaganda Constellation)"),
+                ("constellation", "", "Show Propaganda Constellation status"),
+                ("hack_sat <msg>", "", "Rival hack: flip the sky-message to despair"),
+                ("shootdown <id>", "", "Shoot down your own satellite (feeds orbital debris)"),
+                ("give <res> <n>", "", "Debug: grant resources (food|wood|stone|metal|tools)"),
                 ("find <type> [N]", "", "Find N terrain coords (default 10)"),
                 (
                     "research <name>",
