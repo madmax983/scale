@@ -87,6 +87,7 @@ pub struct WarningDiplomaticMessageEvent {
 }
 pub mod flesh_tax;
 pub mod galactic_games;
+pub mod god_mind;
 pub mod red_tape_defense;
 pub mod retro_contracts;
 pub mod system_sovereignty;

@@ -84,6 +84,25 @@ pub fn dynastic_crisis_chronicle_bridge(
     }
 }
 
+use crate::layer3::diplomacy::god_mind::GodMindWarDeclared;
+
+/// Bridges `GodMindWarDeclared` to `AddChronicleEvent`: the Eternal Ruler's
+/// corrupted-memory war becomes history.
+pub fn god_mind_war_chronicle_bridge(
+    mut war_events: EventReader<GodMindWarDeclared>,
+    mut chronicle_events: EventWriter<AddChronicleEvent>,
+) {
+    for event in war_events.read() {
+        chronicle_events.send(AddChronicleEvent {
+            importance: EventImportance::Major,
+            text: format!(
+                "The Eternal Ruler of {} declares a corrupted-memory war on {} — an enemy that no longer exists.",
+                event.faction_name, event.target_name
+            ),
+        });
+    }
+}
+
 use crate::layer2::navigation::stellar_weather::FleetDamagedEvent;
 use crate::layer3::stellar_cartography::JumpRisk;
 

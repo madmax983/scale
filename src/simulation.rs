@@ -261,6 +261,9 @@ fn init_simulation_resources(world: &mut World) {
     world
         .init_resource::<Events<crate::layer3::diplomacy::xenolinguistics::MessageResponseEvent>>();
     world.init_resource::<Events<crate::layer3::diplomacy::succession::SuccessionCrisisEvent>>();
+    world.init_resource::<Events<crate::layer3::diplomacy::god_mind::GodMindEdict>>();
+    world.init_resource::<Events<crate::layer3::diplomacy::god_mind::GodMindSchism>>();
+    world.init_resource::<Events<crate::layer3::diplomacy::god_mind::GodMindWarDeclared>>();
     world.init_resource::<Events<crate::layer3::diplomacy::diplomatic_fashion::DiplomaticMeetingEvent>>();
     world.init_resource::<crate::layer1::mind::fugue::FugueEventTracker>();
     world.init_resource::<Events<crate::layer1::pop_memories::FamineEvent>>();
@@ -1054,6 +1057,17 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         )
             .chain(),
     );
+
+    // The Degraded God-Mind (spec 1381): bit-rot, monument upkeep, schism
+    // crises, and the corrupted-memory war chronicle bridge.
+    schedule.add_systems((
+        crate::layer3::diplomacy::god_mind::god_mind_rot_system,
+        crate::layer3::diplomacy::god_mind::god_mind_monument_upkeep_system,
+        crate::layer3::diplomacy::god_mind::god_mind_schism_crisis_system,
+        crate::layer3::integration::god_mind_war_chronicle_bridge,
+    ));
+    // Exclusive system: rolls edicts from &mut World each tick.
+    schedule.add_systems(crate::layer3::diplomacy::god_mind::god_mind_edict_tick_system);
 
     schedule.add_systems((
         crate::layer3::map::stellar_drift_system,

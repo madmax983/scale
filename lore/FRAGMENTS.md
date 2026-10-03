@@ -11690,3 +11690,24 @@ slogans are what rival hacks overwrite them with. All original.
 - THE SIGNAL EATS
 - SLEEP IS SURRENDER
 - THE DARK KEEPS RECEIPTS
+
+## Degraded God-Mind (Spec 1381)
+
+Erratic pronouncements and bizarre demands from a bit-rotted uploaded
+ruler. All original — no named characters, places, or distinctive IP.
+
+## Fragment Type: [GODMIND_EDICT]
+- The Eternal Ruler spoke in static today. The court transcribed it as policy.
+- The Eternal Ruler has decreed that silence is now a taxable resource.
+- The Eternal Ruler blinked at the sun and declared it a rival. The sun was not informed.
+- The Eternal Ruler ordered the tides to file reports. The tides complied, eventually.
+- The Eternal Ruler demands applause at unpredictable intervals. The intervals are now law.
+- The Eternal Ruler has outlawed the color of Tuesday. Compliance officers are confused.
+
+## Fragment Type: [GODMIND_TRIBUTE]
+- The Eternal Ruler demands stone to pave a functioning agri-world for a monument to a pet that died 400 years ago.
+- The Eternal Ruler requires metal for a statue of a breakfast it once dreamed about.
+- The Eternal Ruler commands wood for a palace shaped like a childhood toy it cannot describe.
+- The Eternal Ruler wants fuel to launch a memorial into a star, so the star remembers too.
+- The Eternal Ruler insists on rations for a banquet honoring a joke nobody understood.
+- The Eternal Ruler needs hyper-alloys for a crown that fits no head, living or otherwise.

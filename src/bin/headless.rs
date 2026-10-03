@@ -362,6 +362,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "dust" => print_dust_report(world),
         "launch_sat" => handle_launch_sat_command(world),
         "constellation" => print_constellation_report(world),
+        "godmind" => handle_godmind_command(world),
+        "unplug" => handle_unplug_command(world),
         "hack_sat" => handle_hack_sat_command(world, &parts),
         "shootdown" => handle_shootdown_command(world, &parts),
         "give" => handle_give_command(world, &parts),
@@ -3009,6 +3011,8 @@ fn print_help() {
                 ("dust", "", "Show Desire Dust and RoadMind status"),
                 ("launch_sat", "", "Launch a slogan satellite (Propaganda Constellation)"),
                 ("constellation", "", "Show Propaganda Constellation status"),
+                ("godmind", "", "Debug: upload a dying leader as the Eternal Ruler (Spec 1381)"),
+                ("unplug", "", "Debug: unplug the Eternal Ruler (risks schism)"),
                 ("hack_sat <msg>", "", "Rival hack: flip the sky-message to despair"),
                 ("shootdown <id>", "", "Shoot down your own satellite (feeds orbital debris)"),
                 ("give <res> <n>", "", "Debug: grant resources (food|wood|stone|metal|tools)"),
@@ -3073,6 +3077,67 @@ fn print_help() {
 
     print_dashboard_table("Commands", table);
 }
+
+fn handle_godmind_command(world: &mut World) {
+    use scale::layer3::diplomacy::god_mind::{GodMind, upload_god_mind};
+    use scale::layer3::diplomacy::succession::{CurrentLeader, Faction, Leader};
+
+    let faction = match world
+        .query_filtered::<Entity, (With<Faction>, Without<GodMind>)>()
+        .iter(world)
+        .next()
+    {
+        Some(e) => e,
+        None => {
+            let leader = world
+                .spawn(Leader {
+                    name: "Founder Vex".to_string(),
+                })
+                .id();
+            world
+                .spawn((
+                    Faction {
+                        name: "Vex Hegemony".to_string(),
+                    },
+                    CurrentLeader(leader),
+                ))
+                .id()
+        }
+    };
+    let name = world
+        .get::<Faction>(faction)
+        .map(|f| f.name.clone())
+        .unwrap_or_default();
+    upload_god_mind(world, faction, "Founder Vex");
+    print_dashboard_panel(
+        "GOD-MIND",
+        &format!("{name} will never die. The Eternal Ruler ascends."),
+        Some(Color::Yellow),
+        Some(Attribute::Bold),
+    );
+}
+
+fn handle_unplug_command(world: &mut World) {
+    use scale::layer3::diplomacy::god_mind::{GodMind, unplug_god_mind};
+
+    let minds: Vec<Entity> = world
+        .query_filtered::<Entity, With<GodMind>>()
+        .iter(world)
+        .collect();
+    for faction in &minds {
+        unplug_god_mind(world, *faction);
+    }
+    print_dashboard_panel(
+        "GOD-MIND",
+        &format!(
+            "Unplugged {} Eternal Ruler(s). The faithful weep static.",
+            minds.len()
+        ),
+        Some(Color::Red),
+        Some(Attribute::Bold),
+    );
+}
+
 
 #[cfg(test)]
 mod reproduction_tests {

@@ -1006,3 +1006,4 @@
 
 - [x] `INT-1152` Integration: Sub-light Arrival Shock -> Chronicle — completed 2026-08-19
 - [x] `1154` The Blind Terraformer — `specs/1154-the-blind-terraformer.md` — completed 2026-02-01
+- [x] `1381` The Degraded God-Mind — `specs/1381-the-degraded-god-mind.md` — completed 2026-10-03

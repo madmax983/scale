@@ -641,4 +641,4 @@ See `design/IDEAS.md` for unspecced concepts.
 - [ ] `1378` The Martyr's Wake — `specs/1378-the-martyrs-wake.md`
 - [ ] `1379` The Sentient Commute — `specs/1379-the-sentient-commute.md`
 - [ ] `1380` The Propaganda Constellation — `specs/1380-the-propaganda-constellation.md`
-- [ ] `1381` The Degraded God-Mind — `specs/1381-the-degraded-god-mind.md`
+- [x] `1381` The Degraded God-Mind — `specs/1381-the-degraded-god-mind.md`

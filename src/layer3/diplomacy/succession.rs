@@ -4,6 +4,8 @@
 //! or triggering a succession crisis if no heir is present.
 use bevy::prelude::*;
 
+use super::god_mind::GodMind;
+
 #[derive(Component)]
 pub struct Faction {
     pub name: String,
@@ -60,15 +62,21 @@ pub fn process_succession_system(
         Option<&HeirApparent>,
         Option<&SuccessionCrisis>,
         &Faction,
+        Option<&GodMind>,
     )>,
     heir_query: Query<&Heir>,
     mut succession_events: EventWriter<SuccessionEvent>,
     mut crisis_events: EventWriter<SuccessionCrisisEvent>,
 ) {
     // Reverse the iteration order to avoid nesting: Iterate over Factions first
-    for (faction_entity, mut current_leader, heir_apparent, crisis, faction) in
+    for (faction_entity, mut current_leader, heir_apparent, crisis, faction, god_mind) in
         faction_query.iter_mut()
     {
+        // The Eternal Ruler never dies and never triggers succession crises.
+        if god_mind.is_some() {
+            continue;
+        }
+
         // If they already have a crisis, we don't process them again
         if crisis.is_some() {
             continue;
