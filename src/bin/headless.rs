@@ -14,6 +14,8 @@
 //!   `build <type> <x> <y>` - Build: farm, housing, stockpile
 //!   `mine <x> <y>`   - Designate rock for mining
 //!   `chop <x> <y>`   - Designate tree for chopping
+//!   `excavate <x> <y>` - Excavate Desire Dust from a tile (Spec 1379)
+//!   `dust`            - Show Desire Dust / RoadMind status
 //!   `designations`   - List all active designations
 //!   `find <terrain> [count]` - Find terrain coordinates
 //!   `possess <pop_id>` - Take direct control of a pop (adventurer mode)
@@ -47,8 +49,9 @@ use scale::layer1::tech::{unlock_tech, Tech, TechState, TechStatus};
 use scale::layer1::traits::Traits;
 use scale::layer1::{
     try_designate, try_place_building, Building, BuildingType, Chronicle, ColonyResources,
-    Designation, DesignationType, EventImportance, Farm, GlobalWind, GridPosition, Housing, Morale,
-    MovementTarget, Needs, OccupiedTiles, Pop, PopAction, Stockpile, TerrainGrid, TerrainType,
+    Designation, DesignationType, DesireDust, EventImportance, Farm, GlobalWind, GridPosition,
+    Housing, Morale, MovementTarget, Needs, OccupiedTiles, Pop, PopAction, RoadMind, Stockpile,
+    TerrainGrid, TerrainType,
 };
 use scale::setup::{setup_world_with_config, SetupConfig};
 use scale::shared::log::MessageLog;
@@ -220,6 +223,7 @@ fn handle_designate_command(world: &mut World, parts: &[&str], designation_type:
             DesignationType::Destroy => "destroy",
             DesignationType::Mine => "mine",
             DesignationType::Chop => "chop",
+            DesignationType::ExcavateDust => "excavate",
             _ => "designate", // Fallback, though we only call this for destroy, mine, chop
         };
         let msg = format!("Usage: {name} <x> <y>");
@@ -349,6 +353,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "destroy" => handle_designate_command(world, &parts, DesignationType::Destroy),
         "mine" => handle_designate_command(world, &parts, DesignationType::Mine),
         "chop" => handle_designate_command(world, &parts, DesignationType::Chop),
+        "excavate" => handle_designate_command(world, &parts, DesignationType::ExcavateDust),
+        "dust" => print_dust_report(world),
         "designations" | "d" => print_designations(world),
         "find" => handle_find_command(world, &parts),
         "scan" => handle_scan_command(world, &parts),
@@ -1581,6 +1587,7 @@ fn print_map(world: &mut World, center_x: i32, center_y: i32) {
                     DesignationType::Destroy => 'D',
                     DesignationType::CollectSample => 'S',
                     DesignationType::Consume => 'E',
+                    DesignationType::ExcavateDust => 'U',
                 };
                 map_content.push_str(&format!("{c}").magenta().to_string());
                 continue;
@@ -1722,12 +1729,68 @@ fn designate_at(world: &mut World, designation_type: DesignationType, x: i32, y:
         DesignationType::Cannibalize => format!("Failed: no Lander at ({x}, {y})"),
         DesignationType::CollectSample => format!("Failed: no Flora or Fauna at ({x}, {y})"),
         DesignationType::Consume => return, // Do nothing for consume
+        DesignationType::ExcavateDust => {
+            format!("Failed: no Desire Dust at ({x}, {y})")
+        }
     };
 
     print_dashboard_panel(
         "ERROR",
         &err_msg,
         Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn print_dust_report(world: &mut World) {
+    let minds: Vec<Vec<(i32, i32)>> = world
+        .query::<&RoadMind>()
+        .iter(world)
+        .map(|mind| mind.tiles.clone())
+        .collect();
+    // Measurable speed effect: pops standing on dust right now (before the dust borrow).
+    let pop_speeds: Vec<(i32, i32, f32, f32)> = world
+        .query::<(&Pop, &GridPosition, &scale::layer1::pop::Speed)>()
+        .iter(world)
+        .map(|(_, pos, speed)| (pos.x, pos.y, speed.current, speed.base))
+        .collect();
+    let dust = world.resource::<DesireDust>();
+    let mut lines = vec![
+        format!("Dusty tiles: {}", dust.dusty_tile_count()),
+        format!("Total dust: {:.2}", dust.total()),
+        format!("RoadMinds: {}", minds.len()),
+    ];
+    let mut on_dust = 0;
+    let mut bonus_sum = 0.0f32;
+    for (x, y, current, base) in pop_speeds {
+        if dust.amount_at(x, y) > 0.0 {
+            on_dust += 1;
+            bonus_sum += current / base - 1.0;
+        }
+    }
+    if on_dust > 0 {
+        lines.push(format!(
+            "Pops on dust: {on_dust} (avg speed bonus +{:.0}%)",
+            bonus_sum / on_dust as f32 * 100.0
+        ));
+    }
+    for (i, tiles) in minds.iter().enumerate() {
+        let coords: Vec<String> = tiles.iter().map(|(x, y)| format!("({x},{y})")).collect();
+        lines.push(format!("  Mind {i}: {} tiles {}", tiles.len(), coords.join(" ")));
+    }
+    let mut top: Vec<((i32, i32), f32)> = dust
+        .iter()
+        .map(|(tile, amount)| (*tile, *amount))
+        .collect();
+    top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    lines.push("Dustiest tiles:".to_string());
+    for ((x, y), amount) in top.iter().take(8) {
+        lines.push(format!("  ({x},{y}): {amount:.2}"));
+    }
+    print_dashboard_panel(
+        "DESIRE DUST",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
 }
@@ -1759,6 +1822,7 @@ fn print_designations(world: &mut World) {
             DesignationType::Destroy => Cell::new(type_str).fg(Color::Red),
             DesignationType::CollectSample => Cell::new(type_str).fg(Color::Cyan),
             DesignationType::Consume => Cell::new(type_str).fg(Color::Red),
+            DesignationType::ExcavateDust => Cell::new(type_str).fg(Color::Yellow),
         };
 
         table.add_row(vec![type_cell, Cell::new(format!("{},{}", pos.x, pos.y))]);
@@ -1938,6 +2002,7 @@ fn scan_terrain(world: &mut World, center_x: i32, center_y: i32, radius: ScanRad
             let dt = match d.designation_type {
                 DesignationType::Mine => "mine",
                 DesignationType::Chop => "chop",
+                DesignationType::ExcavateDust => "excavate_dust",
                 DesignationType::Demolish => "demolish",
                 DesignationType::Repair => "repair",
                 DesignationType::SetZone(_) => "zone",
@@ -2693,6 +2758,8 @@ fn print_help() {
                 ("mine <x> <y>", "", "Designate rock for mining"),
                 ("chop <x> <y>", "", "Designate tree for chopping"),
                 ("destroy <x> <y>", "", "Designate building for destruction"),
+                ("excavate <x> <y>", "", "Excavate Desire Dust from a tile"),
+                ("dust", "", "Show Desire Dust and RoadMind status"),
                 ("find <type> [N]", "", "Find N terrain coords (default 10)"),
                 (
                     "research <name>",

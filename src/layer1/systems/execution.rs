@@ -427,6 +427,21 @@ pub fn register(schedule: &mut Schedule) {
 
     schedule.add_systems(
         (
+            // Spec 1379: Desire Dust roads. Exclusive (World) systems.
+            crate::layer1::desire_dust::accumulate_desire_dust,
+            crate::layer1::desire_dust::decay_desire_dust,
+            crate::layer1::desire_dust::check_road_sentience,
+            crate::layer1::desire_dust::apply_desire_dust_speed
+                .after(crate::layer1::pop::reset_speed_system)
+                .before(movement_system),
+            crate::layer1::desire_dust::road_mind_pheromone_system
+                .before(crate::layer1::execution::phantom_commutes::apply_phantom_commute_system),
+        )
+            .in_set(Layer1SystemSet::Execution),
+    );
+
+    schedule.add_systems(
+        (
             crate::layer1::tech::temporal_smuggling::open_rift_system,
             crate::layer1::tech::temporal_smuggling::pay_temporal_debt_system,
             crate::layer1::tech::temporal_smuggling::check_temporal_debts_system,

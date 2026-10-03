@@ -46,6 +46,8 @@ pub enum DesignationType {
     Consume,
     /// Collect genetic sample from flora or fauna.
     CollectSample,
+    /// Excavate accumulated Desire Dust from a tile (Spec 1379 counterplay).
+    ExcavateDust,
 }
 
 impl DesignationType {
@@ -73,6 +75,7 @@ impl DesignationType {
             Self::Destroy => 'D',
             Self::Consume => 'E',
             Self::CollectSample => 'S',
+            Self::ExcavateDust => 'U',
         }
     }
 
@@ -100,6 +103,7 @@ impl DesignationType {
             Self::Destroy => "D",
             Self::Consume => "E",
             Self::CollectSample => "S",
+            Self::ExcavateDust => "U",
         }
     }
 
@@ -127,6 +131,7 @@ impl DesignationType {
             Self::Destroy => "Destroy",
             Self::Consume => "Consume",
             Self::CollectSample => "Collect Sample",
+            Self::ExcavateDust => "Excavate Dust",
         }
     }
 }
@@ -296,6 +301,9 @@ pub fn can_designate(world: &World, x: i32, y: i32, designation_type: Designatio
             has_component_at::<crate::layer1::flora::Flora>(world, x, y)
                 || has_component_at::<crate::layer1::fauna::Fauna>(world, x, y)
         }
+        DesignationType::ExcavateDust => world
+            .get_resource::<crate::layer1::desire_dust::DesireDust>()
+            .is_some_and(|dust| dust.amount_at(x, y) > 0.0),
     }
 }
 
@@ -533,6 +541,8 @@ pub fn try_designate_area(
                     DesignationType::Destroy => {
                         occupied_tiles.is_some_and(|o| o.0.contains(&(x, y)))
                     }
+                    // Single-tile tool: area designation does not apply.
+                    DesignationType::ExcavateDust => false,
                 };
 
                 if is_valid {

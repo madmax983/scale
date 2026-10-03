@@ -67,6 +67,7 @@ pub fn produce_manual_system(
                 | DesignationType::JuryRig
                 | DesignationType::Destroy
                 | DesignationType::SetZone(_) => Some(SkillType::Construction),
+                DesignationType::ExcavateDust => Some(SkillType::Mining),
                 DesignationType::Tame => Some(SkillType::Husbandry),
                 DesignationType::Cannibalize | DesignationType::Consume => None,
             });
@@ -160,6 +161,7 @@ pub fn manual_aura_system(
                     | DesignationType::JuryRig
                     | DesignationType::Destroy
                     | DesignationType::SetZone(_) => Some(SkillType::Construction),
+                    DesignationType::ExcavateDust => Some(SkillType::Mining),
                     DesignationType::Tame => Some(SkillType::Husbandry),
                     DesignationType::Cannibalize | DesignationType::Consume => None,
                 };

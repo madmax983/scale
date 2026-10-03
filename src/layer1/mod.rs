@@ -229,6 +229,10 @@ pub use eureka::*;
 pub mod pheromone;
 pub use pheromone::*;
 
+/// Desire Dust roads / The Sentient Commute (Spec 1379).
+pub mod desire_dust;
+pub use desire_dust::*;
+
 /// Heirloom tech system (Spec 070).
 pub mod heirloom;
 pub mod heirloom_tool;

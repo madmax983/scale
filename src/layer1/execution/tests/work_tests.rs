@@ -637,3 +637,47 @@ fn test_calculate_work_amount_cap() {
         work_amount
     );
 }
+
+#[test]
+fn test_work_execution_excavates_desire_dust() {
+    use crate::layer1::desire_dust::{DesireDust, RoadMind, SENTIENCE_THRESHOLD};
+
+    let mut world = setup_world();
+
+    // Dusty tile claimed by a single-tile RoadMind.
+    let mut dust = DesireDust::default();
+    dust.deposit(5, 5, SENTIENCE_THRESHOLD);
+    world.insert_resource(dust);
+    let mind = world.spawn(RoadMind { tiles: vec![(5, 5)] }).id();
+
+    let designation = world
+        .spawn((
+            Designation {
+                designation_type: DesignationType::ExcavateDust,
+            },
+            GridPosition { x: 5, y: 5 },
+        ))
+        .id();
+
+    let pop = world
+        .spawn((
+            Pop,
+            GridPosition { x: 5, y: 5 },
+            MovementTarget {
+                target_entity: designation,
+                target_position: GridPosition { x: 5, y: 5 },
+                for_action: ActionType::Work,
+            },
+            AtTarget,
+            Needs::default(),
+        ))
+        .id();
+
+    work_execution_system(&mut world);
+
+    // Dust cleared, designation consumed, and the starved RoadMind dissolved.
+    assert_eq!(world.resource::<DesireDust>().amount_at(5, 5), 0.0);
+    assert!(world.get_entity(designation).is_err());
+    assert!(world.get_entity(mind).is_err());
+    assert!(world.get_entity(pop).is_ok());
+}

@@ -45,6 +45,7 @@ pub fn check_mentorship_system(
                 | DesignationType::JuryRig
                 | DesignationType::Cannibalize
                 | DesignationType::Destroy => Some(SkillType::Construction),
+                DesignationType::ExcavateDust => Some(SkillType::Mining),
                 DesignationType::ClearFlora | DesignationType::CollectSample => {
                     Some(SkillType::Farming)
                 }

@@ -376,6 +376,7 @@ pub(crate) const fn get_skill_for_designation(
         | DesignationType::Cannibalize
         | DesignationType::Destroy => Some(SkillType::Construction),
         DesignationType::ClearFlora | DesignationType::CollectSample => Some(SkillType::Farming),
+        DesignationType::ExcavateDust => Some(SkillType::Mining),
         DesignationType::SetZone(_) | DesignationType::Tame | DesignationType::Consume => None,
     }
 }
@@ -531,8 +532,28 @@ fn execute_work_on_designation(
                 false
             }
         }
+        DesignationType::ExcavateDust => handle_dust_excavation(world, designation_entity, pos),
         DesignationType::SetZone(_) | DesignationType::Tame => false,
     }
+}
+
+/// Excavate Desire Dust from a designation tile (Spec 1379 counterplay).
+///
+/// Clears the dust, shrinks or dissolves any RoadMind on the tile, and
+/// despawns the completed designation.
+fn handle_dust_excavation(
+    world: &mut World,
+    designation_entity: Entity,
+    pos: Option<GridPosition>,
+) -> bool {
+    if let Some(p) = pos {
+        crate::layer1::desire_dust::excavate_dust_tile(world, p.x, p.y);
+        if let Some(mut log) = world.get_resource_mut::<crate::shared::log::MessageLog>() {
+            log.add(format!("Excavated desire dust at ({}, {})", p.x, p.y));
+        }
+    }
+    world.despawn(designation_entity);
+    true
 }
 
 fn handle_post_work_effects(

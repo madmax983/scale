@@ -11653,3 +11653,16 @@ How the damage from the pulsar beam is described.
 - insufficient worker dedication
 - sub-optimal resource utilization
 - unexpected market friction
+
+## Desire Dust Fragments (Spec 1379)
+
+## Fragment Type: [DESIRE_DUST]
+Whispers attributed to a road-mind — the sentience that coagulates from an
+overused road. Used by the procedural text generator for chronicle flavor.
+- walk where the feet have worn the world smooth
+- the dust remembers every step you ever took
+- why carve a new path when the old one loves you
+- the road is awake and it is thirsty for footsteps
+- your destination can wait; the way is the point
+- ten thousand soles pressed this dirt into dreaming
+- the shortest path is the one that wants you back
