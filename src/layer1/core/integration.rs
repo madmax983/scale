@@ -1562,10 +1562,24 @@ pub fn beacon_migrant_arrival_bridge(
     mut commands: Commands,
     mut events: EventReader<crate::layer1::economy::remittances::MigrantArrivalEvent>,
     mut chronicle_events: EventWriter<crate::layer1::core::chronicle::AddChronicleEvent>,
+    sim_time: Option<Res<SimulationTime>>,
+    pop_positions: Query<
+        &crate::layer1::core::map::GridPosition,
+        With<crate::layer1::pop::Pop>,
+    >,
 ) {
+    use rand::seq::SliceRandom;
+    use rand::Rng;
+
+    let tick = sim_time.map_or(0, |t| t.tick);
+    // Migrants arrive at the colony proper, not at the map origin: pick a
+    // random living pop's tile so they land inside the pressurized habitat
+    // instead of (0, 0), which may be vacuum.
+    let colony_tiles: Vec<crate::layer1::core::map::GridPosition> =
+        pop_positions.iter().copied().collect();
+
     for event in events.read() {
         let mut rng = rand::thread_rng();
-        use rand::Rng;
 
         for _ in 0..event.count {
             let is_criminal = rng.gen::<f32>() < event.criminal_chance;
@@ -1579,12 +1593,22 @@ pub fn beacon_migrant_arrival_bridge(
                 traits.add(crate::layer1::psychology::traits::Trait::Lazy);
             }
 
-            commands.spawn((
-                crate::layer1::pop::Pop,
-                traits,
-                crate::layer1::core::map::GridPosition { x: 0, y: 0 },
-                crate::layer1::needs::Needs::default(),
-            ));
+            let spawn_pos = colony_tiles
+                .choose(&mut rng)
+                .copied()
+                .unwrap_or(crate::layer1::core::map::GridPosition { x: 0, y: 0 });
+
+            // WINTER-ECONOMY PASS (2026-10-03): migrants used to spawn as bare
+            // Pop+Traits+Needs ghosts — no Health, no PopName, no Wallet — so
+            // they were invisible to STATS, immune to damage and infection,
+            // and ate from the stockpile for free. Spawn a full PopBundle like
+            // starter pops instead, keeping the beacon-selected traits and a
+            // real arrival tick.
+            let mut bundle =
+                crate::layer1::PopBundle::random(spawn_pos.x, spawn_pos.y, &mut rng);
+            bundle.traits = traits;
+            bundle.arrival = crate::layer1::social::old_guard::Arrival { tick };
+            commands.spawn(bundle);
         }
 
         chronicle_events.send(crate::layer1::core::chronicle::AddChronicleEvent {
@@ -1626,7 +1650,12 @@ pub fn beacon_pirate_raid_bridge(
 ) {
     for _ in events.read() {
         // Pirates steal resources
-        resources.food = (resources.food - 50.0).max(0.0);
+        // WINTER-ECONOMY PASS (2026-10-03): the flat 50-food theft erased a
+        // small colony's entire stockpile in one raid (starter food is 10),
+        // which is what starved colonies into winter. Steal a quarter of the
+        // stockpile capped at 10: it stings without deleting the buffer.
+        let stolen_food = (resources.food * 0.25).min(10.0);
+        resources.food = (resources.food - stolen_food).max(0.0);
         resources.metal = (resources.metal - 20.0).max(0.0);
 
         // Morale drops

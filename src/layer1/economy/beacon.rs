@@ -46,7 +46,13 @@ pub struct ColonyBeacon {
 /// ```
 pub fn toggle_beacon_system(mut beacon: ResMut<ColonyBeacon>, sim_time: Res<SimulationTime>) {
     let cooldown_ticks = 100; // Hardcoded cooldown for refactor phase
-    if sim_time.tick >= beacon.last_toggled_tick + cooldown_ticks || beacon.last_toggled_tick == 0 {
+    // WINTER-ECONOMY PASS (2026-10-03): the old `|| last_toggled_tick == 0`
+    // clause re-fired on tick 1 (last_toggled_tick had just been set to 0),
+    // so the beacon flickered ON for exactly one tick at game start. Only
+    // allow the cooldown bypass on the very first tick.
+    if sim_time.tick >= beacon.last_toggled_tick + cooldown_ticks
+        || (beacon.last_toggled_tick == 0 && sim_time.tick == 0)
+    {
         beacon.is_active = !beacon.is_active;
         beacon.last_toggled_tick = sim_time.tick;
     }
@@ -86,17 +92,24 @@ pub fn process_colony_beacon_system(
         });
     }
 
-    if rng.gen::<f32>() < 0.05 {
+    // WINTER-ECONOMY PASS (2026-10-03): the old 5%-per-tick shower of
+    // 5-15 migrants flooded a 5-pop starter colony (~250 arrivals/year).
+    // A trickle of 1-3 keeps the beacon's "all its scum" flavor without
+    // overwhelming food, housing, and jobs.
+    if rng.gen::<f32>() < 0.01 {
         migrant_writer.send(MigrantArrivalEvent {
             home_faction: Entity::PLACEHOLDER, // Unspecified source
-            count: rng.gen_range(5..15),
+            count: rng.gen_range(1..4),
             criminal_chance: 0.3,  // High chance of criminals
             low_skill_chance: 0.5, // High chance of grifters
         });
     }
 
     // Risk of pirate raids
-    if rng.gen::<f32>() < 0.02 {
+    // WINTER-ECONOMY PASS (2026-10-03): 2% -> 1%. Raids still happen, but
+    // no longer machine-gun the food stockpile (see also the proportional
+    // theft in beacon_pirate_raid_bridge).
+    if rng.gen::<f32>() < 0.01 {
         // PirateRaidEvent is an empty struct
         pirate_writer.send(PirateRaidEvent);
     }
