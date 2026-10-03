@@ -258,6 +258,10 @@ pub fn register(schedule: &mut Schedule) {
     schedule.add_systems(
         (
             update_pressure_system,
+            crate::layer1::physics::pressure::lifesupport_damage_warning_system
+                .after(update_pressure_system),
+            crate::layer1::physics::pressure::lifesupport_self_repair_system
+                .after(update_pressure_system),
             update_noise_system.after(update_pressure_system),
             apply_noise_effects_system.after(update_noise_system),
             crate::layer1::temperature::update_temperature_system.after(update_pressure_system),

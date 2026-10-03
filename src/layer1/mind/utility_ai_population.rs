@@ -487,16 +487,42 @@ fn populate_graves(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
     );
 }
 
+/// Repair urgency bonus for LifeSupport units, scaled by damage fraction.
+///
+/// LifeSupport is existential infrastructure: a sabotage-battered unit must
+/// outbid routine chores (which sit at ~0.6 utility) or the colony loses its
+/// air before anyone bothers to fix it. At full damage this raises repair
+/// utility from 0.6 to 1.8 (before distance falloff).
+pub const LIFESUPPORT_REPAIR_URGENCY: f32 = 1.2;
+
 fn populate_repair_structures(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
     buffer.clear();
     buffer.extend(
         world
-            .query::<(Entity, &GridPosition, &Structure, Option<&DeferMaintenance>)>()
+            .query::<(
+                Entity,
+                &GridPosition,
+                &Structure,
+                Option<&Building>,
+                Option<&DeferMaintenance>,
+            )>()
             .iter(world)
-            .filter(|(_, _, structure, defer)| {
+            .filter(|(_, _, structure, _, defer)| {
                 defer.is_none() && (structure.current_hp - structure.max_hp).abs() >= f32::EPSILON
             })
-            .map(|(entity, pos, _, _)| ScorableCandidate::new(entity, *pos)),
+            .map(|(entity, pos, structure, building, _)| {
+                let mut candidate = ScorableCandidate::new(entity, *pos);
+                // LifeSupport repair urgency scales with damage: the closer to
+                // failure, the harder it outbids competing work.
+                if building.is_some_and(|b| b.building_type == BuildingType::LifeSupport)
+                    && structure.max_hp > 0.0
+                {
+                    let damage_fraction =
+                        1.0 - (structure.current_hp / structure.max_hp).clamp(0.0, 1.0);
+                    candidate.score_bonus = damage_fraction * LIFESUPPORT_REPAIR_URGENCY;
+                }
+                candidate
+            }),
     );
 }
 
@@ -956,5 +982,87 @@ mod tests {
         world.spawn((housing_empty, GridPosition { x: 1, y: 0 }));
         populate_housing(&mut world, &mut buffer);
         assert_eq!(buffer.len(), 1, "Should include available housing");
+    }
+
+    #[test]
+    fn test_lifesupport_repair_urgency_bonus() {
+        let mut world = World::new();
+
+        // Damaged LifeSupport at 50% (25/50 HP)
+        let ls = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::LifeSupport,
+                },
+                Structure {
+                    current_hp: 25.0,
+                    max_hp: 50.0,
+                },
+                GridPosition { x: 5, y: 5 },
+            ))
+            .id();
+
+        // Damaged non-critical building (Housing at 50%)
+        let housing = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::Housing,
+                },
+                Structure {
+                    current_hp: 50.0,
+                    max_hp: 100.0,
+                },
+                GridPosition { x: 6, y: 6 },
+            ))
+            .id();
+
+        let mut buffer = Vec::with_capacity(2);
+        populate_repair_structures(&mut world, &mut buffer);
+
+        assert_eq!(buffer.len(), 2, "Both damaged structures are candidates");
+
+        let ls_cand = buffer.iter().find(|c| c.entity == ls).unwrap();
+        let housing_cand = buffer.iter().find(|c| c.entity == housing).unwrap();
+
+        // 50% damage -> bonus = 0.5 * 1.2 = 0.6
+        assert!(
+            (ls_cand.score_bonus - 0.6).abs() < 0.001,
+            "LifeSupport should get urgency bonus, got {}",
+            ls_cand.score_bonus
+        );
+        assert_eq!(
+            housing_cand.score_bonus, 0.0,
+            "Non-critical building should get no bonus"
+        );
+    }
+
+    #[test]
+    fn test_lifesupport_repair_urgency_scales_with_damage() {
+        let mut world = World::new();
+
+        // Critically damaged LifeSupport (10% HP remaining)
+        let ls = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::LifeSupport,
+                },
+                Structure {
+                    current_hp: 5.0,
+                    max_hp: 50.0,
+                },
+                GridPosition { x: 5, y: 5 },
+            ))
+            .id();
+
+        let mut buffer = Vec::with_capacity(1);
+        populate_repair_structures(&mut world, &mut buffer);
+
+        let ls_cand = buffer.iter().find(|c| c.entity == ls).unwrap();
+        // 90% damage -> bonus = 0.9 * 1.2 = 1.08
+        assert!(
+            (ls_cand.score_bonus - 1.08).abs() < 0.001,
+            "Critical LifeSupport should get max urgency, got {}",
+            ls_cand.score_bonus
+        );
     }
 }

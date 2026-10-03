@@ -275,6 +275,115 @@ pub fn update_pressure_system(
     grid.diffuse(&blockers);
 }
 
+/// HP per tick that a damaged LifeSupport unit restores on its own.
+///
+/// LifeSupport units carry self-diagnostic maintenance systems that slowly
+/// knit sabotage damage closed. This is the colony's *reliable* counterplay
+/// layer: unlike crew repair (which depends on the utility AI noticing),
+/// self-repair always runs. At 0.25 HP/tick it loses to active sabotage
+/// (1.5–3.0 HP/tick average), so sabotage still hurts — but the window for
+/// the crew to respond stretches, and lone saboteurs can't kill a unit
+/// faster than it heals between strikes.
+pub const LIFESUPPORT_SELF_REPAIR_PER_TICK: f32 = 0.25;
+
+/// Self-repair system: damaged LifeSupport units slowly restore integrity.
+///
+/// Runs every tick. Only repairs upward toward max HP; never resurrects a
+/// destroyed (0 HP) unit — once it's gone, it's gone.
+pub fn lifesupport_self_repair_system(
+    mut query: Query<(
+        &crate::layer1::building::Building,
+        &mut crate::layer1::structure::Structure,
+    )>,
+) {
+    use crate::layer1::building::BuildingType;
+
+    for (building, mut structure) in query.iter_mut() {
+        if building.building_type != BuildingType::LifeSupport {
+            continue;
+        }
+        if structure.current_hp > 0.0 && structure.current_hp < structure.max_hp {
+            structure.current_hp =
+                (structure.current_hp + LIFESUPPORT_SELF_REPAIR_PER_TICK).min(structure.max_hp);
+        }
+    }
+}
+
+/// Per-entity alert state for LifeSupport damage warnings.
+///
+/// Hysteresis bands keep the chronicle from spamming while a unit sits below
+/// a threshold: each band warns once, and both reset only after repairs bring
+/// integrity back above [`LIFESUPPORT_WARNING_RESET`].
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct LifeSupportAlertState {
+    warned_half: bool,
+    warned_quarter: bool,
+}
+
+/// Integrity fraction that triggers the "LifeSupport at 50%" warning.
+pub const LIFESUPPORT_WARNING_HALF: f32 = 0.5;
+/// Integrity fraction that triggers the "LifeSupport failing" warning.
+pub const LIFESUPPORT_WARNING_QUARTER: f32 = 0.25;
+/// Integrity fraction that resets the warning bands after repair.
+pub const LIFESUPPORT_WARNING_RESET: f32 = 0.65;
+
+/// Early-warning system: chronicles LifeSupport damage before it becomes
+/// unrecoverable.
+///
+/// Mind-spore sabotage chews through LifeSupport HP in silence; once a unit
+/// hits 0 HP, malfunction fires finish it and the colony depressurizes. This
+/// gives the repair counterplay a visible trigger: at 50% integrity the crew
+/// is alerted, at 25% it's an emergency.
+pub fn lifesupport_damage_warning_system(    mut commands: Commands,
+    query: Query<(
+        Entity,
+        &crate::layer1::building::Building,
+        &crate::layer1::structure::Structure,
+        Option<&LifeSupportAlertState>,
+    )>,
+    mut chronicle: EventWriter<crate::layer1::chronicle::AddChronicleEvent>,
+) {
+    use crate::layer1::building::BuildingType;
+    use crate::layer1::chronicle::EventImportance;
+
+    for (entity, building, structure, alert) in query.iter() {
+        if building.building_type != BuildingType::LifeSupport || structure.max_hp <= 0.0 {
+            continue;
+        }
+        let fraction = (structure.current_hp / structure.max_hp).clamp(0.0, 1.0);
+        let mut state = alert.copied().unwrap_or_default();
+        let mut changed = false;
+
+        if fraction >= LIFESUPPORT_WARNING_RESET {
+            // Repaired past the reset band: re-arm warnings.
+            if state.warned_half || state.warned_quarter {
+                state = LifeSupportAlertState::default();
+                changed = true;
+            }
+        } else if fraction < LIFESUPPORT_WARNING_QUARTER && !state.warned_quarter {
+            chronicle.send(crate::layer1::chronicle::AddChronicleEvent {
+                text: "EMERGENCY: Life support failing! Repair crews must respond or the air goes with it.".to_string(),
+                importance: EventImportance::Major,
+            });
+            state.warned_quarter = true;
+            state.warned_half = true;
+            changed = true;
+        } else if fraction < LIFESUPPORT_WARNING_HALF && !state.warned_half {
+            chronicle.send(crate::layer1::chronicle::AddChronicleEvent {
+                text: "Life support integrity at 50% — sabotage damage needs repair soon."
+                    .to_string(),
+                importance: EventImportance::Standard,
+            });
+            state.warned_half = true;
+            changed = true;
+        }
+
+        if changed {
+            commands.entity(entity).insert(state);
+        }
+    }
+}
+
 /// System to apply suffocation damage.
 pub fn pressure_damage_system(
     mut commands: Commands,
@@ -755,5 +864,184 @@ mod tests {
         // Just outside bounds
         grid.set(10, 10, 0.5);
         assert_eq!(grid.get(10, 10), 0.0);
+    }
+
+    #[test]
+    fn test_lifesupport_self_repair_restores_hp() {
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+
+        let ls = app
+            .world_mut()
+            .spawn((
+                Building {
+                    building_type: BuildingType::LifeSupport,
+                },
+                GridPosition { x: 5, y: 5 },
+                Structure {
+                    current_hp: 20.0,
+                    max_hp: 50.0,
+                },
+            ))
+            .id();
+
+        app.add_systems(bevy::prelude::Update, lifesupport_self_repair_system);
+        app.update();
+
+        let structure = app.world().get::<Structure>(ls).unwrap();
+        assert!(
+            (structure.current_hp - (20.0 + LIFESUPPORT_SELF_REPAIR_PER_TICK)).abs() < 0.001,
+            "LifeSupport should self-repair, got {}",
+            structure.current_hp
+        );
+    }
+
+    #[test]
+    fn test_lifesupport_self_repair_caps_at_max() {
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+
+        let ls = app
+            .world_mut()
+            .spawn((
+                Building {
+                    building_type: BuildingType::LifeSupport,
+                },
+                GridPosition { x: 5, y: 5 },
+                Structure {
+                    current_hp: 49.9,
+                    max_hp: 50.0,
+                },
+            ))
+            .id();
+
+        app.add_systems(bevy::prelude::Update, lifesupport_self_repair_system);
+        app.update();
+
+        let structure = app.world().get::<Structure>(ls).unwrap();
+        assert_eq!(
+            structure.current_hp, 50.0,
+            "Self-repair should cap at max HP"
+        );
+    }
+
+    #[test]
+    fn test_lifesupport_self_repair_ignores_destroyed() {
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+
+        let ls = app
+            .world_mut()
+            .spawn((
+                Building {
+                    building_type: BuildingType::LifeSupport,
+                },
+                GridPosition { x: 5, y: 5 },
+                Structure {
+                    current_hp: 0.0,
+                    max_hp: 50.0,
+                },
+            ))
+            .id();
+
+        app.add_systems(bevy::prelude::Update, lifesupport_self_repair_system);
+        app.update();
+
+        let structure = app.world().get::<Structure>(ls).unwrap();
+        assert_eq!(
+            structure.current_hp, 0.0,
+            "Destroyed LifeSupport should not resurrect"
+        );
+    }
+
+    #[test]
+    fn test_lifesupport_self_repair_ignores_other_buildings() {
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+
+        let housing = app
+            .world_mut()
+            .spawn((
+                Building {
+                    building_type: BuildingType::Housing,
+                },
+                GridPosition { x: 5, y: 5 },
+                Structure {
+                    current_hp: 20.0,
+                    max_hp: 50.0,
+                },
+            ))
+            .id();
+
+        app.add_systems(bevy::prelude::Update, lifesupport_self_repair_system);
+        app.update();
+
+        let structure = app.world().get::<Structure>(housing).unwrap();
+        assert_eq!(
+            structure.current_hp, 20.0,
+            "Non-LifeSupport buildings should not self-repair"
+        );
+    }
+
+    #[test]
+    fn test_lifesupport_damage_warning_fires_at_half() {
+        use crate::layer1::chronicle::AddChronicleEvent;
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+        app.add_event::<AddChronicleEvent>();
+
+        app.world_mut().spawn((
+            Building {
+                building_type: BuildingType::LifeSupport,
+            },
+            GridPosition { x: 5, y: 5 },
+            Structure {
+                current_hp: 20.0, // 40% < 50% threshold
+                max_hp: 50.0,
+            },
+        ));
+
+        app.add_systems(bevy::prelude::Update, lifesupport_damage_warning_system);
+        app.update();
+
+        let events = app.world().resource::<bevy::prelude::Events<AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        let texts: Vec<_> = reader.read(events).map(|e| e.text.clone()).collect();
+        assert!(
+            texts.iter().any(|t| t.contains("50%")),
+            "Should warn at 50% integrity, got {:?}",
+            texts
+        );
+    }
+
+    #[test]
+    fn test_lifesupport_damage_warning_no_spam() {
+        use crate::layer1::chronicle::AddChronicleEvent;
+
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+        app.add_event::<AddChronicleEvent>();
+
+        app.world_mut().spawn((
+            Building {
+                building_type: BuildingType::LifeSupport,
+            },
+            GridPosition { x: 5, y: 5 },
+            Structure {
+                current_hp: 20.0,
+                max_hp: 50.0,
+            },
+        ));
+
+        app.add_systems(bevy::prelude::Update, lifesupport_damage_warning_system);
+        // Run twice: second run should NOT re-warn (hysteresis).
+        app.update();
+        app.update();
+
+        let events = app.world().resource::<bevy::prelude::Events<AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        let count = reader.read(events).count();
+        assert_eq!(count, 1, "Warning should fire once, not every tick");
     }
 }
