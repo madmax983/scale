@@ -831,6 +831,7 @@ mod tests {
             zone_grid: &zone_grid,
             temperature_grid: None,
             work_fervor: 0.0,
+            quota_fervor: 0.0,
         };
 
         world.spawn((
@@ -859,6 +860,7 @@ mod tests {
             zone_grid: &zone_grid,
             temperature_grid: None,
             work_fervor: 0.0,
+            quota_fervor: 0.0,
         };
         populate_refining(&mut world, &mut buffer, &context_valid);
         assert_eq!(buffer.len(), 1, "Should include affordable recipe");
@@ -894,6 +896,7 @@ mod tests {
             zone_grid: &zone_grid,
             temperature_grid: None,
             work_fervor: 0.0,
+            quota_fervor: 0.0,
         };
 
         world.spawn((
@@ -942,6 +945,7 @@ mod tests {
             zone_grid: &zone_grid,
             temperature_grid: None,
             work_fervor: 0.0,
+            quota_fervor: 0.0,
         };
 
         world.spawn((

@@ -285,6 +285,9 @@ pub struct WorldContext<'a> {
     /// Work-utility bonus broadcast by a Fallen Sovereign's labor decree
     /// (0.0 normally). Added to productive action utilities.
     pub work_fervor: f32,
+    /// Work-utility bonus broadcast by a Planetary Governor's quota directive
+    /// (0.0 normally). Added to productive action utilities.
+    pub quota_fervor: f32,
 }
 
 // --- UNIFIED PROXY ---
@@ -636,6 +639,7 @@ mod tests {
             zone_grid,
             temperature_grid: None,
             work_fervor: 0.0,
+            quota_fervor: 0.0,
         };
 
         evaluator.evaluate_and_consider(None, ActionType::Work, &context, 0.0);
@@ -668,6 +672,7 @@ mod tests {
             zone_grid,
             temperature_grid: None,
             work_fervor: 0.0,
+            quota_fervor: 0.0,
         };
 
         let entity = Entity::from_raw(42);

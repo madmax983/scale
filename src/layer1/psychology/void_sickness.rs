@@ -198,6 +198,7 @@ mod tests {
             zone_grid: app.world().resource::<crate::layer1::zone::ZoneGrid>(),
             temperature_grid: None,
             work_fervor: 0.0,
+            quota_fervor: 0.0,
         };
 
         let (action, utility, _) = evaluate_single_pop(&buffer, &data, &world_ctx);

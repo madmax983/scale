@@ -56,4 +56,7 @@ pub use sovereign::*;
 /// The Corsair: space-pirate adventurer origin.
 pub mod corsair;
 pub use corsair::*;
+/// The Planetary Governor: bureaucratic adventurer origin.
+pub mod governor;
+pub use governor::*;
 pub use invasive_xeno_aesthetics::*;

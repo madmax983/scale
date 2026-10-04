@@ -53,6 +53,11 @@ use scale::layer1::culture::corsair::{
     corsair_stats, describe_corsair, divide_plunder, execute_raid, fence_plunder, repair_skiff,
     skim_credits, skiff_within_reach, try_embark_corsair, unload_hold, CorsairCaptain, RaidTarget,
 };
+use scale::layer1::culture::governor::{
+    audit_treasury, collect_tithe, debate_rival, describe_political_field, describe_treasury,
+    file_paperwork, governor_stats, hold_hearing, issue_directive, purge_rival, resign,
+    seal_within_reach, try_sign_seal, DirectiveKind, Governor,
+};
 use scale::layer1::direct_link::{
     possessed_entity, try_player_step, DirectControlState, Possessed,
 };
@@ -413,6 +418,16 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "skim" => handle_skim_command(world, &parts),
         "divide" => handle_divide_command(world),
         "repair" => handle_repair_command(world, &parts),
+        "directive" => handle_directive_command(world, &parts),
+        "tithe" => handle_tithe_command(world),
+        "hearing" => handle_hearing_command(world),
+        "file" => handle_file_command(world),
+        "audit" => handle_audit_command(world),
+        "governors" => handle_governors_command(world),
+        "debate" => handle_debate_command(world, &parts),
+        "purge" => handle_purge_command(world, &parts),
+        "resign" => handle_resign_command(world),
+        "treasury" => handle_treasury_command(world),
         _ => print_dashboard_panel(
             "ERROR",
             &format!("Unknown command: '{command}'. Type 'help' for commands."),
@@ -784,6 +799,28 @@ fn handle_interact_command(world: &mut World) {
         return;
     }
 
+    // The Planetary Governor: a sealed appointment within reach is signed first.
+    if world.get::<Governor>(entity).is_none() && seal_within_reach(world, entity).is_some() {
+        match try_sign_seal(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, &format!("{name} signs the appointment in triplicate."));
+                print_dashboard_panel(
+                    "APPOINTED",
+                    &msg,
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+
     // What building (if any) sits on this tile?
     let building_here: Option<BuildingType> = world
         .query::<(&Building, &GridPosition)>()
@@ -1050,6 +1087,248 @@ fn handle_repair_command(world: &mut World, parts: &[&str]) {
             Some(comfy_table::Attribute::Bold),
         ),
     }
+}
+
+/// The possessed pop, if it holds the appointment seal.
+fn appointed_governor_entity(world: &mut World) -> Option<Entity> {
+    let entity = possessed_entity(world)?;
+    world.get::<Governor>(entity).is_some().then_some(entity)
+}
+
+fn require_governor(world: &mut World) -> Option<Entity> {
+    let entity = appointed_governor_entity(world);
+    if entity.is_none() {
+        print_dashboard_panel(
+            "ERROR",
+            "No appointed governor is possessed. Possess an appointee, move adjacent to the \
+             appointment seal, and `interact` to sign in triplicate.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+    entity
+}
+
+fn handle_directive_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = require_governor(world) else {
+        return;
+    };
+    let kind = match parts.get(1).map(|s| s.to_lowercase()).as_deref() {
+        Some("quota") => DirectiveKind::Quota,
+        Some("ration") => DirectiveKind::Ration,
+        Some("requisition") => DirectiveKind::Requisition,
+        Some("works") => DirectiveKind::Works,
+        _ => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: directive <quota|ration|requisition|works>",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    match issue_directive(world, entity, kind) {
+        Ok(msg) => {
+            let name = world
+                .get::<PopName>(entity)
+                .map_or_else(|| format!("pop #{}", entity.index()), |n| n.0.clone());
+            log_adventurer(world, &format!("{name} issues a directive: {msg}"));
+            print_dashboard_panel(
+                "DIRECTIVE",
+                &msg,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_tithe_command(world: &mut World) {
+    let Some(entity) = require_governor(world) else {
+        return;
+    };
+    match collect_tithe(world, entity) {
+        Ok(msg) => print_dashboard_panel(
+            "TITHE",
+            &msg,
+            Some(comfy_table::Color::Green),
+            None,
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_hearing_command(world: &mut World) {
+    let Some(entity) = require_governor(world) else {
+        return;
+    };
+    match hold_hearing(world, entity) {
+        Ok(msg) => print_dashboard_panel(
+            "HEARING",
+            &msg,
+            Some(comfy_table::Color::Green),
+            None,
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_file_command(world: &mut World) {
+    let Some(entity) = require_governor(world) else {
+        return;
+    };
+    match file_paperwork(world, entity) {
+        Ok(msg) => print_dashboard_panel(
+            "FILED",
+            &msg,
+            Some(comfy_table::Color::Green),
+            None,
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_audit_command(world: &mut World) {
+    let Some(entity) = require_governor(world) else {
+        return;
+    };
+    match audit_treasury(world, entity) {
+        Ok(msg) => print_dashboard_panel(
+            "AUDIT",
+            &msg,
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_governors_command(world: &mut World) {
+    print_dashboard_panel(
+        "GOVERNORS",
+        &describe_political_field(world),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_debate_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = require_governor(world) else {
+        return;
+    };
+    let rival_id: Option<u32> = parts.get(1).and_then(|s| s.parse().ok());
+    let Some(rival_id) = rival_id else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: debate <rival_id>  (list ids with `governors`)",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    match debate_rival(world, entity, rival_id) {
+        Ok(msg) => print_dashboard_panel(
+            "DEBATE",
+            &msg,
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_purge_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = require_governor(world) else {
+        return;
+    };
+    let rival_id: Option<u32> = parts.get(1).and_then(|s| s.parse().ok());
+    let Some(rival_id) = rival_id else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: purge <rival_id>  (list ids with `governors`)",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    match purge_rival(world, entity, rival_id) {
+        Ok(msg) => print_dashboard_panel(
+            "PURGE",
+            &msg,
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_resign_command(world: &mut World) {
+    let Some(entity) = require_governor(world) else {
+        return;
+    };
+    match resign(world, entity) {
+        Ok(msg) => {
+            log_adventurer(world, "The governor resigns. The seal awaits.");
+            print_dashboard_panel(
+                "RESIGN",
+                &msg,
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_treasury_command(world: &mut World) {
+    print_dashboard_panel(
+        "TREASURY",
+        &describe_treasury(world),
+        Some(comfy_table::Color::Yellow),
+        None,
+    );
 }
 
 fn handle_decree_command(world: &mut World, parts: &[&str]) {
@@ -1380,8 +1659,13 @@ fn print_stats(world: &mut World) {
 
     let (heat, hull, crew, loyalty) = corsair_stats(world);
 
+    let (gov_id, gov_legitimacy, treasury, rivals) = governor_stats(world);
+    let governor = gov_id
+        .map(|i| i.to_string())
+        .unwrap_or_else(|| "none".to_string());
+
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={}",
         tick,
         pops,
         avg_health,
@@ -1401,6 +1685,10 @@ fn print_stats(world: &mut World) {
         hull,
         crew,
         loyalty,
+        governor,
+        gov_legitimacy,
+        treasury,
+        rivals,
     );
 }
 
@@ -3409,7 +3697,7 @@ fn print_help() {
                 (
                     "interact",
                     "",
-                    "Act at the possessed pop's tile: work farm, eat at stockpile, rest at housing — or take up the dented crown / the captain's writ",
+                    "Act at the possessed pop's tile: work farm, eat at stockpile, rest at housing — or take up the dented crown / the captain's writ / the appointment seal",
                 ),
                 (
                     "decree <labor|revel|levy>",
@@ -3465,6 +3753,56 @@ fn print_help() {
                     "repair [amount]",
                     "",
                     "Spend purse credits to repair the skiff hull (1cr = 1 hull)",
+                ),
+                (
+                    "directive <quota|ration|requisition|works>",
+                    "",
+                    "Governor directive (60-tick cooldown; quotas judged, requisition costs legitimacy, works costs treasury)",
+                ),
+                (
+                    "tithe",
+                    "",
+                    "Revenue service: collect 5% of every pop's wallet into the treasury",
+                ),
+                (
+                    "hearing",
+                    "",
+                    "Convene a hearing of the Subcommittee on Matters (+legitimacy, costs 10cr)",
+                ),
+                (
+                    "file",
+                    "",
+                    "File Form 77-B: Request to File Forms (+legitimacy)",
+                ),
+                (
+                    "audit",
+                    "",
+                    "Audit the treasury: expose embezzlers or confirm the books balance",
+                ),
+                (
+                    "governors",
+                    "",
+                    "Inspect the political field: you, plus every rival claimant",
+                ),
+                (
+                    "debate <rival_id>",
+                    "",
+                    "Public debate with a rival claimant (legitimacy-weighted)",
+                ),
+                (
+                    "purge <rival_id>",
+                    "",
+                    "Remove a rival by administrative fiat (-legitimacy)",
+                ),
+                (
+                    "resign",
+                    "",
+                    "Lay down the appointment seal on the current tile",
+                ),
+                (
+                    "treasury",
+                    "",
+                    "Show the treasury balance and recent flows",
                 ),
                 (
                     "possessed",

@@ -319,6 +319,8 @@ pub fn consume_food_system(
     farm_query: Query<&Farm>, // Query Farm instead of Crop
     animal_query: Query<&Fauna, With<Tame>>,
     prices: Option<Res<ColonyPrices>>,
+    // Planetary Governor: active rationing schedules shrink meals (None = no rationing).
+    ration: Option<Res<crate::layer1::culture::governor::RationOrder>>,
 ) {
     // Use total_food() logic for check
     let total_food = resources.total_food();
@@ -367,9 +369,17 @@ pub fn consume_food_system(
         let mut eaten_item = ItemType::None;
         let mut ate = false;
 
+        // Planetary Governor: an active rationing schedule shrinks every meal
+        // (smaller portions, same official satisfaction).
+        let meal_cost = if ration.as_ref().is_some_and(|r| r.remaining > 0) {
+            FOOD_PER_MEAL * crate::layer1::culture::governor::RATION_MEAL_FRACTION
+        } else {
+            FOOD_PER_MEAL
+        };
+
         // Simplify consumption: Just check food pool
-        if resources.food >= FOOD_PER_MEAL {
-            resources.food -= FOOD_PER_MEAL;
+        if resources.food >= meal_cost {
+            resources.food -= meal_cost;
             ate = true;
 
             // Determine flavor for Palette Fatigue
@@ -383,12 +393,12 @@ pub fn consume_food_system(
                 // If no farms active, default to Potato (The Universal Tuber)
                 eaten_item = ItemType::Potato;
             }
-        } else if resources.rations >= FOOD_PER_MEAL {
-            resources.rations -= FOOD_PER_MEAL;
+        } else if resources.rations >= meal_cost {
+            resources.rations -= meal_cost;
             eaten_item = ItemType::Rations;
             ate = true;
-        } else if resources.nutrient_paste >= FOOD_PER_MEAL {
-            resources.nutrient_paste -= FOOD_PER_MEAL;
+        } else if resources.nutrient_paste >= meal_cost {
+            resources.nutrient_paste -= meal_cost;
             eaten_item = ItemType::NutrientPaste;
             ate = true;
         }

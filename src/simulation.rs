@@ -129,6 +129,12 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::culture::sovereign::SporeSuppression>();
     // The Corsair (adventurer origin)
     world.init_resource::<crate::layer1::culture::corsair::CorsairState>();
+    // The Planetary Governor (adventurer origin)
+    world.init_resource::<crate::layer1::culture::governor::GovernorState>();
+    world.init_resource::<crate::layer1::culture::governor::Treasury>();
+    world.init_resource::<crate::layer1::culture::governor::QuotaOrder>();
+    world.init_resource::<crate::layer1::culture::governor::RationOrder>();
+    world.init_resource::<crate::layer1::culture::governor::WorksProgram>();
     world.init_resource::<crate::layer2::propaganda_engine::PropagandaEngine>();
     world.init_resource::<crate::layer2::propaganda_engine::DiplomaticWeight>();
     world.init_resource::<crate::layer2::propaganda_engine::InspectorEvent>();
@@ -942,6 +948,14 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         crate::layer1::culture::corsair::corsair_tick.before(
             crate::layer1::physics::pressure::pressure_damage_system,
         ),
+    ));
+    // The Planetary Governor systems (adventurer origin: the appointment seal).
+    // Own block: the tuple above sits near the IntoSystemConfigs arity limit.
+    schedule.add_systems((
+        crate::layer1::culture::governor::spawn_appointment_seal_once,
+        crate::layer1::culture::governor::governor_tick,
+        crate::layer1::culture::governor::apply_governor_morale
+            .before(crate::layer1::social::morale::update_morale_cache_system),
     ));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,

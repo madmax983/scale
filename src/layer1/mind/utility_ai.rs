@@ -98,6 +98,8 @@ struct ScopedEvaluationContext {
 
     /// Work-utility bonus from a Fallen Sovereign's labor decree (0.0 normally).
     work_fervor: f32,
+    /// Work-utility bonus from a Planetary Governor's quota directive (0.0 normally).
+    quota_fervor: f32,
 }
 
 impl ScopedEvaluationContext {
@@ -122,6 +124,10 @@ impl ScopedEvaluationContext {
         let work_fervor = world
             .get_resource::<crate::layer1::culture::sovereign::LaborFervor>()
             .map_or(0.0, |l| l.bonus);
+        // Planetary Governor: quota-directive work fervor (0.0 when no quota).
+        let quota_fervor = world
+            .get_resource::<crate::layer1::culture::governor::QuotaOrder>()
+            .map_or(0.0, |q| q.bonus);
         let cycle = *world.resource::<crate::layer1::day_night::DayNightCycle>();
         // ⚡ Bolt Optimization:
         // We remove `TabooState` rather than cloning it to avoid a clone of a `HashMap`
@@ -138,6 +144,7 @@ impl ScopedEvaluationContext {
             taboo,
             config,
             work_fervor,
+            quota_fervor,
         }
     }
 
@@ -168,6 +175,7 @@ impl ScopedEvaluationContext {
         fallback_zone: &'a ZoneGrid,
         fallback_taboo: &'a crate::layer1::taboo::TabooState,
         work_fervor: f32,
+        quota_fervor: f32,
     ) -> WorldContext<'a> {
         WorldContext {
             resources,
@@ -177,6 +185,7 @@ impl ScopedEvaluationContext {
             zone_grid: zone_grid.unwrap_or(fallback_zone),
             temperature_grid,
             work_fervor,
+            quota_fervor,
         }
     }
 
@@ -193,6 +202,7 @@ impl ScopedEvaluationContext {
             &zone_grid_fallback,
             &default_taboo,
             self.work_fervor,
+            self.quota_fervor,
         );
 
         populate_ai_buffer(world, &mut self.buffer, &context);
@@ -211,6 +221,7 @@ impl ScopedEvaluationContext {
             &zone_grid_fallback,
             &default_taboo,
             self.work_fervor,
+            self.quota_fervor,
         );
 
         let mut results = std::mem::take(&mut self.buffer.results);
@@ -483,7 +494,7 @@ impl<'a> PopDecider<'a> {
             work_utility,
             ActionType::Work,
             self.context,
-            work_bonus + self.context.work_fervor,
+            work_bonus + self.context.work_fervor + self.context.quota_fervor,
         );
 
         self.evaluator.evaluate_and_consider(
@@ -512,7 +523,7 @@ impl<'a> PopDecider<'a> {
             refining_utility,
             ActionType::Refine,
             self.context,
-            self.context.work_fervor,
+            self.context.work_fervor + self.context.quota_fervor,
         );
 
         // Homeostatic food urgency: when the colony's food stockpile runs low,
@@ -526,14 +537,14 @@ impl<'a> PopDecider<'a> {
             evaluate_simple_action(pop_pos, &weights, &self.buffer.farms, 0.5 * food_scarcity),
             ActionType::Farm,
             self.context,
-            self.context.work_fervor,
+            self.context.work_fervor + self.context.quota_fervor,
         );
 
         self.evaluator.evaluate_and_consider(
             evaluate_simple_action(pop_pos, &weights, &self.buffer.offices, 0.5),
             ActionType::Admin,
             self.context,
-            self.context.work_fervor,
+            self.context.work_fervor + self.context.quota_fervor,
         );
 
         if !is_feral {
@@ -1208,6 +1219,7 @@ mod synth_tests {
             zone_grid: world.resource::<crate::layer1::zone::ZoneGrid>(),
             temperature_grid: None,
             work_fervor: 0.0,
+            quota_fervor: 0.0,
         };
 
         // Try to consider ExtinguishFire with high utility (0.9)
