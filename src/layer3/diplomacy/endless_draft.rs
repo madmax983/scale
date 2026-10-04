@@ -3,9 +3,7 @@
 //! Represents the grim reality of eternal conscription during protracted proxy wars.
 //! Colonies are forced into continuous military tithes, devastating local labor pools.
 
-use crate::layer1::pop::Pop;
 use crate::layer1::psychology::traits::{Trait, Traits};
-use crate::layer1::skills::Skills;
 use crate::layer3::diplomacy::proxy_wars::Credits;
 use bevy::prelude::*;
 
@@ -106,17 +104,20 @@ pub fn spawn_veteran_system(mut commands: Commands, mut events: EventReader<Vete
         let mut traits = Traits::default();
         traits.add(Trait::Veteran); // Mocking Veteran trait
 
-        commands.spawn((
-            Pop,
-            traits,
-            Skills::default(), // Would have elite combat skills
-        ));
+        // GHOST-POP FIX (2026-10-04): returning veterans used to spawn as
+        // bare Pop+Traits+Skills — no Health, no PopName, no Wallet. Spawn
+        // a full PopBundle instead, keeping the Veteran trait.
+        let mut rng = rand::thread_rng();
+        let mut bundle = crate::layer1::PopBundle::random(0, 0, &mut rng);
+        bundle.traits = traits;
+        commands.spawn(bundle);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layer1::pop::Pop;
 
     #[test]
     fn test_draft_order_generation() {
@@ -215,10 +216,17 @@ mod tests {
         // Act: Spawn veteran Pop
         app.update();
 
-        // Assert: Pop has elite combat skills and PTSD trait/stress modifier
-        let mut q = app.world_mut().query::<(&Pop, &Traits)>();
+        // Assert: Pop has Veteran trait and is a complete colonist
+        // (GHOST-POP FIX 2026-10-04): Health, PopName, Wallet present.
+        let mut q = app.world_mut().query::<(
+            &Pop,
+            &Traits,
+            &crate::layer1::pop::PopName,
+            &crate::layer1::health::Health,
+            &crate::layer1::economy::Wallet,
+        )>();
         let mut found = false;
-        for (_, traits) in q.iter(app.world()) {
+        for (_, traits, _name, _health, _wallet) in q.iter(app.world()) {
             if traits.has(Trait::Veteran) {
                 found = true;
             }

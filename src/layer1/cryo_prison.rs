@@ -1,4 +1,4 @@
-use crate::layer1::entities::pop::Pop;
+use crate::layer1::map::GridPosition;
 use crate::layer1::skills::{SkillType, Skills};
 use crate::layer1::social::unrest::Unrest;
 use bevy::time::Time;
@@ -30,10 +30,10 @@ pub fn thaw_cryo_pod_system(
     mut commands: Commands,
     mut unrest: ResMut<Unrest>,
     time: Option<Res<Time>>,
-    mut query: Query<(Entity, &mut CryoPod)>,
+    mut query: Query<(Entity, &mut CryoPod, Option<&GridPosition>)>,
 ) {
     let delta = time.map(|t| t.delta_secs()).unwrap_or(1.0); // Default 1.0 for tests without time
-    for (entity, mut pod) in query.iter_mut() {
+    for (entity, mut pod, pos) in query.iter_mut() {
         pod.thaw_progress += delta * 0.1; // Thaws in 10 seconds
 
         if pod.thaw_progress >= 1.0 {
@@ -52,7 +52,17 @@ pub fn thaw_cryo_pod_system(
                     } // Thug might use mining or construction
                 }
 
-                commands.spawn((Pop, CriminalRecord, skills));
+                // GHOST-POP FIX (2026-10-04): thawed criminals used to
+                // spawn as bare Pop+CriminalRecord+Skills — no Health, no
+                // PopName, no Wallet — invisible to STATS and immune to
+                // damage/infection queries. Spawn a full PopBundle at the
+                // pod's tile instead, keeping the criminal record and the
+                // specialty skills.
+                let mut rng = rand::thread_rng();
+                let (x, y) = pos.map(|p| (p.x, p.y)).unwrap_or((0, 0));
+                let mut bundle = crate::layer1::PopBundle::random(x, y, &mut rng);
+                bundle.skills = skills;
+                commands.spawn((bundle, CriminalRecord));
                 unrest.level = (unrest.level + 0.9).min(1.0);
             }
         }
@@ -103,10 +113,18 @@ mod tests {
         );
 
         let mut found = false;
-        let mut query = app
-            .world_mut()
-            .query::<(Entity, &Skills, &CriminalRecord)>();
-        for (_entity, skills, _criminal) in query.iter(app.world()) {
+        let mut query = app.world_mut().query::<(
+            Entity,
+            &Skills,
+            &CriminalRecord,
+            &crate::layer1::pop::PopName,
+            &crate::layer1::health::Health,
+            &crate::layer1::economy::Wallet,
+            &crate::layer1::map::GridPosition,
+        )>();
+        for (_entity, skills, _criminal, _name, _health, _wallet, _pos) in
+            query.iter(app.world())
+        {
             assert!(
                 skills.xp.values().any(|&v| v > 80.0),
                 "Criminal should have high skills"

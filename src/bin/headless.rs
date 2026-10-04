@@ -365,6 +365,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "status" | "s" => print_status(world),
         "stats" => print_stats(world),
         "pops" | "p" => print_pops(world),
+        "ghosts" => print_ghost_audit(world),
         "map" | "m" => handle_map_command(world, &parts),
         "tick" | "t" => handle_tick_command(world, &parts),
         "build" | "b" => handle_build_command(world, &parts),
@@ -2070,6 +2071,74 @@ fn print_pops(world: &mut World) {
     print_dashboard_table("POPULATION DETAILS", table);
 }
 
+/// Ghost-pop audit (GHOST-POP FIX 2026-10-04): every live pop must be a
+/// complete PopBundle. A "ghost" is an entity with `Pop` missing any of
+/// PopName / Health / Wallet / GridPosition / Needs — invisible to STATS,
+/// immune to damage/infection queries, eating without wallet checks.
+fn print_ghost_audit(world: &mut World) {
+    let mut total = 0u32;
+    let mut missing_name = 0u32;
+    let mut missing_health = 0u32;
+    let mut missing_wallet = 0u32;
+    let mut missing_pos = 0u32;
+    let mut missing_needs = 0u32;
+    let mut query = world.query::<(Entity, &Pop)>();
+    for (entity, _) in query.iter(world) {
+        total += 1;
+        if world.get::<PopName>(entity).is_none() {
+            missing_name += 1;
+        }
+        if world
+            .get::<scale::layer1::health::Health>(entity)
+            .is_none()
+        {
+            missing_health += 1;
+        }
+        if world
+            .get::<scale::layer1::economy::Wallet>(entity)
+            .is_none()
+        {
+            missing_wallet += 1;
+        }
+        if world.get::<GridPosition>(entity).is_none() {
+            missing_pos += 1;
+        }
+        if world.get::<Needs>(entity).is_none() {
+            missing_needs += 1;
+        }
+    }
+    let ghosts = missing_name
+        .max(missing_health)
+        .max(missing_wallet)
+        .max(missing_pos)
+        .max(missing_needs);
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .apply_modifier(comfy_table::modifiers::UTF8_ROUND_CORNERS)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("Metric").add_attribute(Attribute::Bold),
+            Cell::new("Count").add_attribute(Attribute::Bold),
+        ]);
+    table.add_row(vec![Cell::new("Pop entities"), Cell::new(total)]);
+    table.add_row(vec![Cell::new("Missing PopName"), Cell::new(missing_name)]);
+    table.add_row(vec![Cell::new("Missing Health"), Cell::new(missing_health)]);
+    table.add_row(vec![Cell::new("Missing Wallet"), Cell::new(missing_wallet)]);
+    table.add_row(vec![Cell::new("Missing GridPosition"), Cell::new(missing_pos)]);
+    table.add_row(vec![Cell::new("Missing Needs"), Cell::new(missing_needs)]);
+    let verdict = if ghosts == 0 {
+        "ZERO GHOSTS — every pop is a complete colonist"
+    } else {
+        "GHOSTS DETECTED — bare Pop entities exist"
+    };
+    table.add_row(vec![
+        Cell::new("Verdict").add_attribute(Attribute::Bold),
+        Cell::new(verdict),
+    ]);
+    print_dashboard_table("GHOST-POP AUDIT", table);
+}
+
 /// Diagnostic: dump raw entity/component counts for pop-related entities.
 /// Temporary revival diagnostic — not for long-term use.
 fn format_action_type_headless(action: scale::layer1::ActionType) -> String {
@@ -3625,6 +3694,7 @@ fn print_help() {
                 ("status", "s", "Show colony resources, morale, wind"),
                 ("stats", "", "One-line parseable playtest snapshot"),
                 ("pops", "p", "Show detailed pop states"),
+                ("ghosts", "", "Ghost-pop audit: Pop entities missing bundle components"),
                 ("bio <id>", "", "Show biography and dreams of a pop"),
                 ("map [x] [y]", "m", "Show visual terrain around position"),
                 ("scan [x] [y] [r]", "", "Semantic terrain scan (parseable)"),

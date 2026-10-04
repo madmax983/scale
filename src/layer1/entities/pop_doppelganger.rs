@@ -10,7 +10,7 @@
 use crate::layer1::execution::MovementTarget;
 use crate::layer1::health::Health;
 use crate::layer1::map::GridPosition;
-use crate::layer1::pop::{Pop, PopName};
+use crate::layer1::pop::PopName;
 use crate::layer1::resources::MiningProgress;
 use bevy_ecs::prelude::*;
 
@@ -83,22 +83,25 @@ pub fn replace_pop_with_mimic(world: &mut World, target: Entity) -> Entity {
 
     world.despawn(target);
 
-    let mut spawn = world.spawn(Pop);
-
-    if let Some(n) = &name {
-        spawn.insert(n.clone());
-    }
-    if let Some(p) = pos {
-        spawn.insert(p);
+    // GHOST-POP FIX (2026-10-04): the mimic used to spawn as a bare Pop
+    // with only name/pos/health copied over — no Needs, no Wallet, no
+    // Morale — invisible to parts of the sim. Build a full PopBundle so
+    // the mimic is a believable colonist, then restore the victim's identity.
+    let mut rng = rand::thread_rng();
+    let (x, y) = pos.map(|p| (p.x, p.y)).unwrap_or((0, 0));
+    let mut bundle = crate::layer1::PopBundle::random(x, y, &mut rng);
+    if let Some(n) = name.clone() {
+        bundle.name = n;
     }
     if let Some(h) = health {
-        spawn.insert(h);
+        bundle.health = h;
     }
 
     let orig_name = name
         .map(|n| n.0.clone())
         .unwrap_or_else(|| "Unknown".to_string());
 
+    let mut spawn = world.spawn(bundle);
     spawn.insert(Mimic {
         state: MimicState::Hidden,
         original_identity: orig_name,
@@ -174,6 +177,7 @@ pub fn reveal_mimic(world: &mut World, target: Entity) -> bool {
 mod tests {
     use super::*;
     use crate::layer1::execution::AtTarget;
+    use crate::layer1::pop::Pop;
     use crate::layer1::utility_types::ActionType;
 
     #[test]
@@ -200,6 +204,22 @@ mod tests {
         assert_eq!(mimic_name.0, "Miner Bob");
 
         assert!(world.get::<Mimic>(mimic_entity).is_some());
+
+        // GHOST-POP FIX (2026-10-04): the replacement must be a complete
+        // colonist — Health, Wallet, Needs, Morale — not a bare Pop.
+        assert!(world.get::<Health>(mimic_entity).is_some());
+        assert!(world
+            .get::<crate::layer1::economy::Wallet>(mimic_entity)
+            .is_some());
+        assert!(world
+            .get::<crate::layer1::needs::Needs>(mimic_entity)
+            .is_some());
+        assert!(world
+            .get::<crate::layer1::morale::Morale>(mimic_entity)
+            .is_some());
+        // Victim's tile is preserved.
+        let pos = world.get::<GridPosition>(mimic_entity).unwrap();
+        assert_eq!((pos.x, pos.y), (10, 10));
     }
 
     #[test]

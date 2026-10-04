@@ -6,7 +6,6 @@
 //! accepting desperate, traumatized pops (burdening local resources) or rejecting them
 //! (suffering severe diplomatic penalties with the origin faction).
 use crate::layer1::health::Health;
-use crate::layer1::pop::Pop;
 use crate::layer1::psychology::needs::Needs;
 use crate::layer1::psychology::traits::Traits;
 use crate::layer3::diplomacy_reflection::DiplomaticRelations;
@@ -48,25 +47,31 @@ pub fn process_refugee_decision(
         match event.decision {
             Decision::Accept => {
                 // Spawn massive influx of low-health, desperate pops
+                // GHOST-POP FIX (2026-10-04): these used to spawn as bare
+                // Pop+Health+Needs+Traits — no PopName, no Wallet, no
+                // GridPosition — invisible to STATS. Full PopBundle instead,
+                // keeping the refugee/traumatized traits, the health
+                // penalty, and the desperate hunger.
+                let mut rng = rand::thread_rng();
                 for _ in 0..event.population_count {
                     let mut traits = Traits::default();
                     traits.add(crate::layer1::psychology::traits::Trait::Refugee);
                     traits.add(crate::layer1::psychology::traits::Trait::Traumatized);
 
-                    commands.spawn((
-                        Pop,
-                        Health {
-                            current: 100.0 - event.health_penalty,
-                            max: 100.0,
-                            has_rust_lung: false,
-                        },
-                        Needs {
-                            hunger: 10.0,
-                            rest: 10.0,
-                            ..default()
-                        },
-                        traits,
-                    ));
+                    let mut bundle =
+                        crate::layer1::PopBundle::random(0, 0, &mut rng);
+                    bundle.traits = traits;
+                    bundle.health = Health {
+                        current: 100.0 - event.health_penalty,
+                        max: 100.0,
+                        has_rust_lung: false,
+                    };
+                    bundle.needs = Needs {
+                        hunger: 10.0,
+                        rest: 10.0,
+                        ..default()
+                    };
+                    commands.spawn(bundle);
                 }
             }
             Decision::Reject => {
@@ -115,6 +120,15 @@ mod tests {
         assert_eq!(new_pops.len(), 50);
         // Assuming max health is 100
         assert!(new_pops[0].1.current <= 50.0);
+
+        // GHOST-POP FIX (2026-10-04): refugees must be complete colonists —
+        // named, with Wallets, on the grid — not bare Pop+Health+Needs ghosts.
+        let mut name_query = app.world_mut().query::<&crate::layer1::pop::PopName>();
+        assert_eq!(name_query.iter(app.world()).count(), 50);
+        let mut wallet_query = app.world_mut().query::<&crate::layer1::economy::Wallet>();
+        assert_eq!(wallet_query.iter(app.world()).count(), 50);
+        let mut pos_query = app.world_mut().query::<&crate::layer1::map::GridPosition>();
+        assert_eq!(pos_query.iter(app.world()).count(), 50);
     }
 
     #[test]

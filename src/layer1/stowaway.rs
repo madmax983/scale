@@ -3,20 +3,9 @@
 //! Handles stowaways hiding in buildings, stealing resources, and eventually being discovered.
 
 use crate::layer1::building::{Building, BuildingType};
-use crate::layer1::cabin_fever::CabinFever;
-use crate::layer1::factions::FactionMember;
-use crate::layer1::health::Health;
-use crate::layer1::items::Equipment;
-use crate::layer1::lifecycle::Age;
 use crate::layer1::map::GridPosition;
-use crate::layer1::memory::Memories;
-use crate::layer1::needs::Needs;
-use crate::layer1::pop::{Pop, PopName, Speed};
 use crate::layer1::resources::ColonyResources;
-use crate::layer1::rumor::Knowledge;
-use crate::layer1::skills::Skills;
 use crate::layer1::social::old_guard::Arrival;
-use crate::layer1::utility_ai::{PopAction, UtilityWeights};
 use crate::layer1::visitor::Visitor;
 use crate::shared::time::SimulationTime;
 use bevy_ecs::prelude::*;
@@ -130,26 +119,14 @@ pub fn discovery_system(
             // Reveal!
             commands.entity(entity).remove::<Stowaway>();
 
-            // Spawn new Pop
-            commands
-                .spawn((
-                    Pop,
-                    PopName::random(&mut rng), // Give them a name
-                    *pos,
-                    Health::default(),
-                    Needs::default(),
-                    Memories::default(),
-                    Skills::default(),
-                    Speed::default(),
-                    PopAction::default(),
-                    Equipment::default(),
-                    UtilityWeights::default(),
-                    Knowledge::default(),
-                    Age::new(rng.gen_range(20..40)),
-                    FactionMember::default(),
-                    Arrival { tick: time.tick },
-                ))
-                .insert(CabinFever::default());
+            // GHOST-POP FIX (2026-10-04): the revealed stowaway used to
+            // spawn as a hand-rolled partial bundle — no Wallet, no Morale,
+            // no Traits, no ContagionCooldown, ... — half-invisible to the
+            // sim. Spawn a full PopBundle with a real arrival tick instead.
+            let mut bundle =
+                crate::layer1::PopBundle::random(pos.x, pos.y, &mut rng);
+            bundle.arrival = Arrival { tick: time.tick };
+            commands.spawn(bundle);
 
             // Log event: "A stowaway was found hiding in the stockpile!"
         }
@@ -271,6 +248,13 @@ mod tests {
             .iter(&world)
             .count();
         assert_eq!(pop_count, 1);
+
+        // GHOST-POP FIX (2026-10-04): the revealed stowaway must be a
+        // complete colonist, not a partial-bundle ghost.
+        assert_eq!(world.query::<&crate::layer1::pop::PopName>().iter(&world).count(), 1);
+        assert_eq!(world.query::<&crate::layer1::health::Health>().iter(&world).count(), 1);
+        assert_eq!(world.query::<&crate::layer1::economy::Wallet>().iter(&world).count(), 1);
+        assert_eq!(world.query::<&crate::layer1::needs::Needs>().iter(&world).count(), 1);
 
         // Verify Arrival tick
         let arrival = world.query::<&Arrival>().single(&world);

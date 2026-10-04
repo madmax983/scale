@@ -1,5 +1,6 @@
 use crate::layer1::core::integration::PirateAmnestyEvent;
 use crate::layer1::economy::Wallet;
+use crate::layer1::map::GridPosition;
 use crate::layer1::pop::Pop;
 use crate::layer1::traits::{Trait, Traits};
 use bevy::prelude::*;
@@ -12,18 +13,33 @@ use rand::Rng;
 pub fn process_pirate_amnesty_system(
     mut commands: Commands,
     mut amnesty_events: EventReader<PirateAmnestyEvent>,
+    pop_positions: Query<&GridPosition, With<Pop>>,
 ) {
+    use rand::seq::SliceRandom;
+    let mut rng = rand::thread_rng();
+    // Amnestied pirates join the colony proper: land on a living pop's
+    // tile so they arrive inside the pressurized habitat, not at (0, 0).
+    let colony_tiles: Vec<GridPosition> = pop_positions.iter().copied().collect();
     for _ev in amnesty_events.read() {
         // Spawn multiple pirate pops per fleet
         for _ in 0..5 {
             let mut pirate_traits = Traits::default();
             pirate_traits.add(Trait::Pirate);
 
-            commands.spawn((
-                Pop,
-                pirate_traits,
-                Wallet { credits: 1000.0 }, // Massive credit boost
-            ));
+            // GHOST-POP FIX (2026-10-04): amnestied pirates used to spawn
+            // as bare Pop+Traits+Wallet — no Health, no PopName, no
+            // GridPosition — invisible to STATS and immune to damage.
+            // Spawn a full PopBundle instead, keeping the Pirate trait and
+            // the amnesty credit boost.
+            let spawn_pos = colony_tiles
+                .choose(&mut rng)
+                .copied()
+                .unwrap_or(GridPosition { x: 0, y: 0 });
+            let mut bundle =
+                crate::layer1::PopBundle::random(spawn_pos.x, spawn_pos.y, &mut rng);
+            bundle.traits = pirate_traits;
+            bundle.wallet = Wallet { credits: 1000.0 }; // Massive credit boost
+            commands.spawn(bundle);
         }
     }
 }
@@ -122,10 +138,19 @@ mod tests {
         app.add_systems(Update, process_pirate_amnesty_system);
         app.update();
 
-        // Verify that pirate pops were spawned
-        let mut query = app.world_mut().query::<(&Pop, &Traits, &Wallet)>();
+        // Verify that pirate pops were spawned as COMPLETE colonists
+        // (GHOST-POP FIX 2026-10-04): Health, PopName, GridPosition —
+        // not bare Pop+Traits+Wallet ghosts.
+        let mut query = app.world_mut().query::<(
+            &Pop,
+            &Traits,
+            &Wallet,
+            &crate::layer1::pop::PopName,
+            &crate::layer1::health::Health,
+            &GridPosition,
+        )>();
         let mut count = 0;
-        for (_pop, traits, wallet) in query.iter(app.world()) {
+        for (_pop, traits, wallet, _name, _health, _pos) in query.iter(app.world()) {
             assert!(traits.has(Trait::Pirate));
             assert_eq!(wallet.credits, 1000.0);
             count += 1;

@@ -54,8 +54,13 @@ pub fn process_refugee_arrival_system(
 ) {
     for event in arrival_events.read() {
         // Spawn pops for incoming_population
+        // GHOST-POP FIX (2026-10-04): refugees used to spawn as bare
+        // Pop+Morale — no Health, no PopName, no Wallet. Full PopBundle
+        // instead (it already includes Morale::default()).
+        let mut rng = rand::thread_rng();
         for _ in 0..event.incoming_population {
-            commands.spawn((Pop, Morale::default()));
+            let bundle = crate::layer1::PopBundle::random(0, 0, &mut rng);
+            commands.spawn(bundle);
         }
 
         if let Some(res) = resources.as_deref_mut() {
@@ -168,9 +173,16 @@ mod tests {
         let res = app.world().resource::<ColonyResources>();
         assert_eq!(res.knowledge, 150.0);
 
-        // Verify pops spawned
+        // Verify pops spawned as complete colonists
+        // (GHOST-POP FIX 2026-10-04): not bare Pop+Morale ghosts.
         let mut pop_query = app.world_mut().query::<&Pop>();
         let pop_count = pop_query.iter(app.world()).count();
         assert_eq!(pop_count, 50);
+        let mut name_query = app.world_mut().query::<&crate::layer1::pop::PopName>();
+        assert_eq!(name_query.iter(app.world()).count(), 50);
+        let mut health_query = app.world_mut().query::<&crate::layer1::health::Health>();
+        assert_eq!(health_query.iter(app.world()).count(), 50);
+        let mut wallet_query = app.world_mut().query::<&crate::layer1::economy::Wallet>();
+        assert_eq!(wallet_query.iter(app.world()).count(), 50);
     }
 }

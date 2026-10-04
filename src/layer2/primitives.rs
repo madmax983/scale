@@ -3,7 +3,6 @@
 //! Defines primitive civilizations and the interactions with them.
 
 use crate::layer1::architecture::structure::Structure;
-use crate::layer1::pop::Pop;
 use crate::layer1::resources::ColonyResources;
 use crate::layer3::diplomacy_reflection::DiplomaticRelations;
 use bevy::prelude::*;
@@ -126,8 +125,13 @@ pub fn resolve_primitive_invasions(
                 .remove::<PrimitiveCivilization>();
 
             // Spawn some slaves
+            // GHOST-POP FIX (2026-10-04): these used to spawn as bare
+            // Pop+SlaveMarker — no Health, no PopName, no Wallet. Full
+            // PopBundle instead so freed/invaded pops are real colonists.
+            let mut rng = rand::thread_rng();
             for _ in 0..5 {
-                commands.spawn((Pop, SlaveMarker));
+                let bundle = crate::layer1::PopBundle::random(0, 0, &mut rng);
+                commands.spawn((bundle, SlaveMarker));
             }
         }
     }
@@ -137,6 +141,7 @@ pub fn resolve_primitive_invasions(
 mod tests {
 
     use super::*;
+    use crate::layer1::pop::Pop;
     use crate::layer2::generation::Planet;
 
     #[test]
@@ -200,6 +205,21 @@ mod tests {
             .iter(app.world())
             .count();
         assert!(slave_count > 0, "Invasion should result in new slave pops");
+
+        // GHOST-POP FIX (2026-10-04): freed slaves must be complete
+        // colonists, not bare Pop+SlaveMarker ghosts.
+        let named_slaves = app
+            .world_mut()
+            .query_filtered::<&crate::layer1::pop::PopName, With<SlaveMarker>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(named_slaves, slave_count, "Every slave must have a name");
+        let healthy_slaves = app
+            .world_mut()
+            .query_filtered::<&crate::layer1::health::Health, With<SlaveMarker>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(healthy_slaves, slave_count, "Every slave must have Health");
     }
 
     use crate::layer1::architecture::structure::Structure;
