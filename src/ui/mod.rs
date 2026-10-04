@@ -38,6 +38,8 @@ pub mod notifications;
 pub mod oral_tradition;
 /// Info panels (inspector, etc).
 pub mod panels;
+/// Reign & Sky panels: constellation, god-mind, sovereign, possess HUD.
+pub mod reign_sky;
 /// Seasonal graphics helpers.
 pub mod seasonal_gfx;
 /// Hypertile shell scaffolding.
@@ -101,6 +103,8 @@ pub fn render(world: &World, frame: &mut Frame) {
         // Full screen map
         render_map(frame, frame.area(), world);
         render_notifications(frame, frame.area(), world);
+        // Adventurer-mode HUD: possessed pop readout + available actions.
+        reign_sky::render_possess_hud(frame, frame.area(), world);
         return;
     }
 
@@ -152,6 +156,8 @@ pub fn render_with_shell(world: &World, shell: &mut UiShell, frame: &mut Frame) 
     if suppress_ui {
         render_map(frame, frame.area(), world);
         render_notifications(frame, frame.area(), world);
+        // Adventurer-mode HUD: possessed pop readout + available actions.
+        reign_sky::render_possess_hud(frame, frame.area(), world);
         return;
     }
 

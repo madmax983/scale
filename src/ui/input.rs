@@ -3,14 +3,14 @@ use bevy_ecs::prelude::*;
 
 use crate::layer1::{
     try_cancel_designation, try_designate_area, try_place_building, BuildMode, CameraTarget,
-    ChronicleUiState, DesignationMode, DesignationType, GridPosition, Viewport,
+    ChronicleUiState, DesignationMode, DesignationType, GridPosition, Pop, Viewport,
 };
 use crate::shared::keyboard::{GameKeyCode, GameKeyEvent, GameMouseEvent};
 use crate::shared::state::GameState;
 use crate::shared::time::{SimSpeed, SimulationTime};
 use crate::shared::view_mode::ViewMode;
 use crate::ui::menu_state::MenuState;
-use crate::ui::selection::{handle_selection_click, screen_to_world, Selection};
+use crate::ui::selection::{handle_selection_click, screen_to_world, Selection, SelectionTarget};
 use crate::ui::shell::plugins::{SharedWorld, COLONY_MAP_PLUGIN_TYPE, SYSTEM_MAP_PLUGIN_TYPE};
 use crate::ui::shell::UiShell;
 
@@ -172,6 +172,14 @@ pub fn route_root_mouse_input(world: &SharedWorld, shell: &UiShell, mouse: GameM
 }
 
 fn handle_direct_control_mode(world: &mut World, key: GameKeyEvent) {
+    // Interact is a headless-console command (`interact`) in this build; the
+    // TUI documents the gap instead of silently eating the key.
+    if matches!(key.code, GameKeyCode::Char(' ')) {
+        if let Some(mut log) = world.get_resource_mut::<crate::shared::log::MessageLog>() {
+            log.add("Interact is a console command in this build (headless `interact`).");
+        }
+        return;
+    }
     // Map to KeyCode and update Input resource
     let bevy_key = map_game_key_to_bevy_key(key.code);
     if let Some(mut input) = world.get_resource_mut::<Input>() {
@@ -333,6 +341,19 @@ fn handle_normal_mode_modes(world: &mut World, key: GameKeyEvent) -> bool {
                     }
                 }
                 ViewMode::System => *view_mode = ViewMode::Colony,
+            }
+            true
+        }
+        GameKeyCode::Char('p') => {
+            // Adventurer mode: possess the selected pop.
+            // The `PossessEntityEvent` is consumed by `handle_possession` (sim)
+            // and `handle_possession_ui_state` (UI suppression + input context).
+            if let SelectionTarget::Entity(entity) = world.resource::<Selection>().target() {
+                if world.get::<Pop>(entity).is_some() {
+                    world
+                        .resource_mut::<Events<PossessEntityEvent>>()
+                        .send(PossessEntityEvent(entity));
+                }
             }
             true
         }
@@ -639,6 +660,86 @@ mod tests {
         assert!(shell_buffer_contains(&mut shell, "Command Palette"));
         assert!(shell_buffer_contains(&mut shell, "Open Chronicle"));
         assert_eq!(*world.borrow().resource::<GameState>(), GameState::Running);
+    }
+
+    #[test]
+    fn possess_key_sends_possess_event_for_selected_pop() {
+        let (world, _shell) = setup_shell_world_for_test();
+        let pop = {
+            let world_ref = world.borrow();
+            let found = world_ref
+                .iter_entities()
+                .filter(|e| e.get::<Pop>().is_some())
+                .map(|e| e.id())
+                .next();
+            found.expect("headless setup spawns pops")
+        };
+        world
+            .borrow_mut()
+            .resource_mut::<Selection>()
+            .select_entity(pop);
+
+        route_input(&mut world.borrow_mut(), key_event(GameKeyCode::Char('p')));
+
+        let world_ref = world.borrow();
+        let events = world_ref.resource::<Events<PossessEntityEvent>>();
+        assert_eq!(
+            events.len(),
+            1,
+            "'p' with a selected pop should send exactly one PossessEntityEvent"
+        );
+        let mut cursor = events.get_cursor();
+        let sent: Vec<Entity> = cursor.read(&events).map(|e| e.0).collect();
+        assert_eq!(sent, vec![pop]);
+    }
+
+    #[test]
+    fn possession_ui_state_syncs_with_possess_events() {
+        let mut world = World::new();
+        world.init_resource::<Events<PossessEntityEvent>>();
+        world.init_resource::<Events<UnpossessEvent>>();
+        world.init_resource::<InputContextStack>();
+        world.init_resource::<UiState>();
+        world
+            .resource_mut::<InputContextStack>()
+            .push(InputContext::Normal);
+
+        let pop = world.spawn_empty().id();
+        world
+            .resource_mut::<Events<PossessEntityEvent>>()
+            .send(PossessEntityEvent(pop));
+
+        let system_id = world.register_system(handle_possession_ui_state);
+        world
+            .run_system(system_id)
+            .expect("possession UI sync system should run");
+
+        assert!(
+            world.resource::<UiState>().suppress_global_ui,
+            "possess event should suppress the global UI"
+        );
+        assert_eq!(
+            world.resource::<InputContextStack>().current(),
+            InputContext::DirectControl,
+            "possess event should push the DirectControl context"
+        );
+
+        world
+            .resource_mut::<Events<UnpossessEvent>>()
+            .send(UnpossessEvent);
+        world
+            .run_system(system_id)
+            .expect("possession UI sync system should run");
+
+        assert!(
+            !world.resource::<UiState>().suppress_global_ui,
+            "unpossess event should restore the global UI"
+        );
+        assert_eq!(
+            world.resource::<InputContextStack>().current(),
+            InputContext::Normal,
+            "unpossess event should pop back to Normal"
+        );
     }
 
     #[test]

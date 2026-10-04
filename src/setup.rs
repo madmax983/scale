@@ -562,6 +562,11 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
         .init_resource::<Events<crate::layer2::communications::signal_latency::ExecuteOrderEvent>>(
         );
     world.init_resource::<bevy::prelude::Events<crate::layer1::energy::gravity_siphon::OrbitalDecayEvent>>();
+    // Adventurer mode: possession events drive both the sim (`handle_possession`)
+    // and the UI state (`handle_possession_ui_state`); previously only the
+    // direct_link unit tests initialized these, so the UI could never react.
+    world.init_resource::<Events<crate::layer1::direct_link::PossessEntityEvent>>();
+    world.init_resource::<Events<crate::layer1::direct_link::UnpossessEvent>>();
 
     world.init_resource::<bevy::prelude::Time>();
     world.init_resource::<crate::layer1::tech::machine_awakening::GlobalSentience>();

@@ -11,8 +11,8 @@ use super::{
     },
     plugins::{
         register_default_plugins_with_runtime, SharedWorld, CHRONICLE_PLUGIN_TYPE,
-        COLONY_MAP_PLUGIN_TYPE, INSPECTOR_PLUGIN_TYPE, STATUS_PLUGIN_TYPE, SYSTEM_MAP_PLUGIN_TYPE,
-        TECH_PLUGIN_TYPE,
+        COLONY_MAP_PLUGIN_TYPE, INSPECTOR_PLUGIN_TYPE, REIGN_SKY_PLUGIN_TYPE, STATUS_PLUGIN_TYPE,
+        SYSTEM_MAP_PLUGIN_TYPE, TECH_PLUGIN_TYPE,
     },
 };
 use crate::shared::keyboard::{GameKeyCode, GameKeyEvent};
@@ -671,6 +671,14 @@ fn preferred_pane_placement(plugin_type: &str) -> PanePlacement {
             ],
             direction: Direction::Horizontal,
         },
+        REIGN_SKY_PLUGIN_TYPE => PanePlacement {
+            anchor_plugin_types: &[
+                CHRONICLE_PLUGIN_TYPE,
+                TECH_PLUGIN_TYPE,
+                INSPECTOR_PLUGIN_TYPE,
+            ],
+            direction: Direction::Vertical,
+        },
         #[cfg(feature = "nova")]
         ORAL_TRADITION_PLUGIN_TYPE => PanePlacement {
             anchor_plugin_types: &[
@@ -887,9 +895,15 @@ fn director_layout() -> PersistedWorkspaceLayout {
                 first: Box::new(LayoutNode::Pane(PaneId::ROOT)),
                 second: Box::new(LayoutNode::Split {
                     direction: Direction::Vertical,
-                    ratio: 0.58,
-                    first: Box::new(LayoutNode::Pane(PaneId::new(1))),
-                    second: Box::new(LayoutNode::Pane(PaneId::new(2))),
+                    ratio: 0.5,
+                    first: Box::new(LayoutNode::Split {
+                        direction: Direction::Horizontal,
+                        ratio: 0.5,
+                        first: Box::new(LayoutNode::Pane(PaneId::new(1))),
+                        second: Box::new(LayoutNode::Pane(PaneId::new(2))),
+                    }),
+                    // Reign & Sky: constellation, god-mind, sovereign panels.
+                    second: Box::new(LayoutNode::Pane(PaneId::new(4))),
                 }),
             }),
             second: Box::new(LayoutNode::Pane(PaneId::new(3))),
@@ -912,6 +926,10 @@ fn director_layout() -> PersistedWorkspaceLayout {
                 pane_id: PaneId::new(3),
                 plugin_type: STATUS_PLUGIN_TYPE.to_string(),
             },
+            PersistedPaneBinding {
+                pane_id: PaneId::new(4),
+                plugin_type: REIGN_SKY_PLUGIN_TYPE.to_string(),
+            },
         ],
     }
 }
@@ -929,6 +947,18 @@ mod tests {
         assert!(shell.has_workspace(COLONY_OPS_WORKSPACE));
         assert!(shell.has_workspace(SYSTEM_SURVEY_WORKSPACE));
         assert!(shell.has_workspace(DIRECTOR_WORKSPACE));
+    }
+
+    #[test]
+    fn director_workspace_contains_reign_sky_pane() {
+        let mut shell = build_default_shell_for_test();
+        let switched = shell.switch_to_workspace(DIRECTOR_WORKSPACE);
+
+        assert!(switched);
+        assert!(
+            shell.active_workspace_contains_plugin(REIGN_SKY_PLUGIN_TYPE),
+            "Director workspace should surface the Reign & Sky pane"
+        );
     }
 
     #[test]

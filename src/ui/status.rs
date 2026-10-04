@@ -121,7 +121,7 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, world: &World) {
         None
     };
 
-    let status = get_status_line(
+    let mut status = get_status_line(
         sim_time.tick,
         sim_time.speed,
         paused,
@@ -140,6 +140,12 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, world: &World) {
         risk_pct,
         active_singularity_mass,
     );
+
+    // Reign & sky segments: constellation broadcast, god-mind bit-rot,
+    // sovereign legitimacy, and the possessed pop. Quiet unless live.
+    status
+        .spans
+        .extend(crate::ui::reign_sky::build_reign_spans(world));
 
     let status = truncate_line(status, area.width);
 

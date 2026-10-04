@@ -116,6 +116,15 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Execution),
     );
 
+    // UI state sync for adventurer possession: updates
+    // `UiState::suppress_global_ui` and the input context stack from the same
+    // possess/unpossess events. Read-only w.r.t. the sim.
+    schedule.add_systems(
+        crate::ui::input::handle_possession_ui_state
+            .after(handle_possession)
+            .in_set(Layer1SystemSet::Execution),
+    );
+
     schedule.add_systems(
         (crate::layer1::core::integration::trigger_shift_end_system
             .after(crate::layer1::day_night::update_day_night_cycle_system),)
