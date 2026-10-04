@@ -301,9 +301,15 @@ pub fn update_temperature_system(
         }
 
         // Life-support habitat thermoregulation (see match arm above):
-        // warm every tile within radius 3 of a LifeSupport building toward
+        // warm every tile within radius 4 of a LifeSupport building toward
         // 20C. The habitat stays livable through winter as long as life
         // support stands.
+        //
+        // WINTER-WIPE FIX (2026-10-04): the old +6/tick cap lost to diffusion
+        // against -5C winter ambient, leaving habitat tiles at 2-3C — below
+        // the 10C hypothermia threshold for uninsulated pops, who then took
+        // 0.5/tick all winter and died en masse ~tick 925. The stronger
+        // +12/tick push actually holds the habitat above 10C.
         if b.building_type == BuildingType::LifeSupport {
             for dy in -4i32..=4 {
                 for dx in -4i32..=4 {
@@ -314,7 +320,7 @@ pub fn update_temperature_system(
                     let ty = pos.y + dy;
                     let tile_temp = grid.get_safe(tx, ty);
                     if tile_temp < 20.0 {
-                        grid.add(tx, ty, (20.0 - tile_temp).min(6.0));
+                        grid.add(tx, ty, (20.0 - tile_temp).min(12.0));
                     }
                 }
             }
@@ -411,6 +417,7 @@ pub fn thermal_damage_system(
 #[cfg(test)]
 mod tests {
     use crate::layer1::building::{Building, BuildingType};
+    use crate::layer1::day_night::{DayNightCycle, TimeOfDay};
     use crate::layer1::energy::PowerConsumer;
     use crate::layer1::health::Health;
     use crate::layer1::items::{Clothing, ClothingType, Equipment};
@@ -618,6 +625,64 @@ mod tests {
 
         let grid = world.resource::<TemperatureGrid>();
         assert!(grid.get(0, 0) < 20.0, "Should cool down towards ambient");
+    }
+
+    #[test]
+    fn test_lifesupport_thermoregulation_holds_habitat_above_hypothermia() {
+        // WINTER-WIPE FIX (2026-10-04): LifeSupport must hold its habitat
+        // above the 10C hypothermia threshold for uninsulated pops through
+        // a winter night. Regression test: with -5C ambient and no solar
+        // input, tiles within radius 4 of a LifeSupport must stay >= 10C
+        // after the grid reaches equilibrium.
+        let mut world = World::new();
+        world.insert_resource(SeasonState {
+            current_season: Season::Winter,
+        });
+        world.insert_resource(DayNightCycle {
+            time_of_day: TimeOfDay::Night,
+            day_count: 0,
+            ticks_per_day: 1000,
+        });
+        let mut grid = TemperatureGrid::new(20, 20, -5.0);
+        grid.ambient = -5.0;
+        world.insert_resource(grid);
+        world.insert_resource(TerrainGrid {
+            width: 20,
+            height: 20,
+            tiles: vec![TerrainType::Grass; 400],
+        });
+
+        // LifeSupport at center (10,10), no PowerConsumer = always on.
+        world.spawn((
+            Building {
+                building_type: BuildingType::LifeSupport,
+                ..Default::default()
+            },
+            GridPosition { x: 10, y: 10 },
+        ));
+
+        // Run many ticks to reach thermal equilibrium.
+        for _ in 0..300 {
+            world.run_system_once(update_temperature_system).unwrap();
+        }
+
+        let grid = world.resource::<TemperatureGrid>();
+        // Hypothermia threshold for uninsulated pops is 10C.
+        for dy in -4i32..=4 {
+            for dx in -4i32..=4 {
+                if dx.abs() + dy.abs() > 4 {
+                    continue;
+                }
+                let t = grid.get_safe(10 + dx, 10 + dy);
+                assert!(
+                    t >= 10.0,
+                    "Habitat tile ({},{}) at {:.1}C below hypothermia threshold",
+                    10 + dx,
+                    10 + dy,
+                    t
+                );
+            }
+        }
     }
 
     #[test]
