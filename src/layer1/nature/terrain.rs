@@ -116,6 +116,13 @@ impl TerrainType {
                 | Self::IndestructibleStump
                 | Self::FaultLine(true)
                 | Self::Void
+                // Geome hazard tiles are lethal to stand on (MagmaRock 10/tick,
+                // SporeBloom 5/tick via environmental_damage_system), so treat
+                // them as unwalkable: keeps starter-colony site selection and
+                // pathfinding off them instead of letting pops wander on and
+                // die in the first ticks.
+                | Self::MagmaRock
+                | Self::SporeBloom
         )
     }
 
@@ -490,6 +497,11 @@ mod tests {
         assert!(!TerrainType::Artifact.is_walkable());
         assert!(!TerrainType::FaultLine(true).is_walkable());
         assert!(TerrainType::FaultLine(false).is_walkable());
+        // Geome hazard tiles are lethal to stand on; they must be unwalkable
+        // so colony site selection and pathfinding avoid them (early-game
+        // multi-death forensics 2026-10-05).
+        assert!(!TerrainType::MagmaRock.is_walkable());
+        assert!(!TerrainType::SporeBloom.is_walkable());
     }
 
     #[test]
