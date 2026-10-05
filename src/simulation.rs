@@ -967,6 +967,15 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
             crate::layer1::physics::pressure::pressure_damage_system,
         ),
     ));
+    // The Improbable Pilot systems (adventurer origin: the Longshot Drive).
+    // The tick holds a pressure envelope around the shuttle, so it must
+    // run before the pressure damage system.
+    schedule.add_systems((
+        crate::layer1::culture::improbable::spawn_shuttle_once,
+        crate::layer1::culture::improbable::pilot_tick.before(
+            crate::layer1::physics::pressure::pressure_damage_system,
+        ),
+    ));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,
         crate::layer2::orbit::debris_cult::apply_debris_cult_morale_system

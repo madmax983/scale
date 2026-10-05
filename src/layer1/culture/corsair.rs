@@ -36,6 +36,7 @@ use crate::layer1::map::GridPosition;
 use crate::layer1::pop::{Pop, PopBundle, PopName};
 use crate::layer1::pressure::PressureGrid;
 use crate::layer1::psychology::needs::Needs;
+use crate::layer1::temperature::TemperatureGrid;
 use crate::layer1::terrain::{TerrainGrid, TerrainType};
 
 // ---------------------------------------------------------------------------
@@ -115,6 +116,15 @@ pub const CREW_MEAL_HUNGER_GATE: f32 = 0.95;
 /// The skiff is a sealed vessel: pressure envelope radius (tiles) maintained
 /// around her so the crew doesn't suffocate on the open regolith.
 pub const SKIFF_PRESSURE_RADIUS: i32 = 3;
+/// The sealed envelope is also kept livable: thermostat target (Celsius).
+/// The tethered crew winters outside the habitat's LifeSupport radius; without
+/// her own heat the crew takes 0.5/tick hypothermia all winter and is gone
+/// by tick ~900 (observed in every tick-1000 trial).
+pub const SKIFF_ENVELOPE_TEMP: f32 = 15.0;
+/// Max heat pushed per tick toward the envelope target (LifeSupport's cap).
+/// Thermostat-style: only pushes tiles below the target, so it can never
+/// overheat the crew in summer.
+pub const SKIFF_HEAT_PER_TICK: f32 = 12.0;
 
 /// Chronicle text when the writ changes hands.
 pub const WRIT_CHRONICLE: &str =
@@ -1188,14 +1198,29 @@ pub fn corsair_tick(world: &mut World) {
     }
 
     // The skiff is a sealed vessel: hold a pressure envelope around her so
-    // the crew (tethered within [`CREW_TETHER_RADIUS`]) doesn't suffocate.
-    // Runs before the pressure damage system (see schedule ordering).
+    // the crew (tethered within [`CREW_TETHER_RADIUS`]) doesn't suffocate,
+    // and keep the envelope warm so they don't freeze in winter. Both run
+    // before the damage systems (see schedule ordering).
     if let Some(skiff) = world.resource::<CorsairState>().skiff {
         if let Some(spos) = world.get::<GridPosition>(skiff).copied() {
             if let Some(mut grid) = world.get_resource_mut::<PressureGrid>() {
                 for dx in -SKIFF_PRESSURE_RADIUS..=SKIFF_PRESSURE_RADIUS {
                     for dy in -SKIFF_PRESSURE_RADIUS..=SKIFF_PRESSURE_RADIUS {
                         grid.set(spos.x + dx, spos.y + dy, 1.0);
+                    }
+                }
+            }
+            // Thermostat-style heat (LifeSupport pattern): only pushes tiles
+            // below the target up, capped per tick — never overheats summer.
+            if let Some(mut tgrid) = world.get_resource_mut::<TemperatureGrid>() {
+                for dx in -SKIFF_PRESSURE_RADIUS..=SKIFF_PRESSURE_RADIUS {
+                    for dy in -SKIFF_PRESSURE_RADIUS..=SKIFF_PRESSURE_RADIUS {
+                        let tx = spos.x + dx;
+                        let ty = spos.y + dy;
+                        let temp = tgrid.get_safe(tx, ty);
+                        if temp < SKIFF_ENVELOPE_TEMP {
+                            tgrid.add(tx, ty, (SKIFF_ENVELOPE_TEMP - temp).min(SKIFF_HEAT_PER_TICK));
+                        }
                     }
                 }
             }
@@ -1792,6 +1817,45 @@ mod tests {
         assert!((grid.get(10 + SKIFF_PRESSURE_RADIUS, 10) - 1.0).abs() < f32::EPSILON);
         // Outside the envelope stays vacuum.
         assert!((grid.get(10 + SKIFF_PRESSURE_RADIUS + 2, 10)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_corsair_tick_warms_skiff_envelope_above_hypothermia() {
+        let mut world = setup();
+        let (_captain, _skiff) = make_captain(&mut world, 10, 10);
+        // Deep winter everywhere: -5C, below the 10C hypothermia threshold.
+        world.insert_resource(TemperatureGrid::new(40, 40, -5.0));
+        assert!(world.resource::<TemperatureGrid>().get_safe(10, 10) < 10.0);
+        corsair_tick(&mut world);
+        corsair_tick(&mut world);
+        let grid = world.resource::<TemperatureGrid>();
+        // The skiff envelope is pushed above the hypothermia threshold.
+        assert!(
+            grid.get_safe(10, 10) >= 10.0,
+            "skiff tile must stay above the hypothermia threshold, got {}",
+            grid.get_safe(10, 10)
+        );
+        assert!(
+            grid.get_safe(10 + SKIFF_PRESSURE_RADIUS, 10) >= 10.0,
+            "envelope edge must stay above the hypothermia threshold"
+        );
+        // Outside the envelope stays freezing.
+        assert!(world.resource::<TemperatureGrid>().get_safe(10 + SKIFF_PRESSURE_RADIUS + 2, 10) < 10.0);
+    }
+
+    #[test]
+    fn test_corsair_tick_never_overheats_summer_envelope() {
+        let mut world = setup();
+        let (_captain, _skiff) = make_captain(&mut world, 10, 10);
+        // Hot summer day: 33C, just under the 35C heatstroke threshold.
+        world.insert_resource(TemperatureGrid::new(40, 40, 33.0));
+        corsair_tick(&mut world);
+        let t = world.resource::<TemperatureGrid>().get_safe(10, 10);
+        assert!(
+            t <= 35.0,
+            "thermostat heat must never push a summer tile over heatstroke, got {t}"
+        );
+        assert!((t - 33.0).abs() < f32::EPSILON, "summer tiles are untouched");
     }
 
     #[test]

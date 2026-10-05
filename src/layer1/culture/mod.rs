@@ -62,4 +62,7 @@ pub use governor::*;
 /// The Salvager: wreck-diver adventurer origin.
 pub mod salvager;
 pub use salvager::*;
+/// The Improbable Pilot: Longshot Drive adventurer origin.
+pub mod improbable;
+pub use improbable::*;
 pub use invasive_xeno_aesthetics::*;

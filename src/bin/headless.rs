@@ -62,6 +62,10 @@ use scale::layer1::culture::salvager::{
     claim_hulk, describe_salvager, patch_breach, salvager_stats, scuttle_hulk, start_strip,
     start_tow, survey_wreck, try_take_spike, wreck_within_reach, Salvager, WreckSystemKind,
 };
+use scale::layer1::culture::improbable::{
+    describe_pilot, file_scheme, fire_jump, pilot_stats, shuttle_within_reach, skim_cache,
+    try_take_yoke, unload_cache, ImprobablePilot,
+};
 use scale::layer1::direct_link::{
     possessed_entity, try_player_step, DirectControlState, Possessed,
 };
@@ -430,6 +434,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "claim" => handle_claim_command(world),
         "tow" => handle_tow_command(world),
         "scuttle" => handle_scuttle_command(world),
+        "pilot" => handle_pilot_command(world),
+        "scheme" => handle_scheme_command(world, &parts),
+        "jump" => handle_jump_command(world),
         "directive" => handle_directive_command(world, &parts),
         "tithe" => handle_tithe_command(world),
         "hearing" => handle_hearing_command(world),
@@ -855,6 +862,30 @@ fn handle_interact_command(world: &mut World) {
         return;
     }
 
+    // The Improbable Pilot: a junker shuttle within reach offers the pilot's yoke.
+    if world.get::<ImprobablePilot>(entity).is_none()
+        && shuttle_within_reach(world, entity).is_some()
+    {
+        match try_take_yoke(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, &format!("{name} takes up the pilot's yoke."));
+                print_dashboard_panel(
+                    "YOKE",
+                    &msg,
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+
     // What building (if any) sits on this tile?
     let building_here: Option<BuildingType> = world
         .query::<(&Building, &GridPosition)>()
@@ -1007,26 +1038,6 @@ fn handle_raid_command(world: &mut World, parts: &[&str]) {
     }
 }
 
-fn handle_unload_command(world: &mut World) {
-    let Some(entity) = require_corsair_captain(world) else {
-        return;
-    };
-    match unload_hold(world, entity) {
-        Ok(msg) => print_dashboard_panel(
-            "UNLOAD",
-            &msg,
-            Some(comfy_table::Color::Green),
-            None,
-        ),
-        Err(err) => print_dashboard_panel(
-            "ERROR",
-            &err,
-            Some(comfy_table::Color::Red),
-            Some(comfy_table::Attribute::Bold),
-        ),
-    }
-}
-
 fn handle_fence_command(world: &mut World) {
     let Some(entity) = require_corsair_captain(world) else {
         return;
@@ -1036,38 +1047,6 @@ fn handle_fence_command(world: &mut World) {
             "FENCE",
             &msg,
             Some(comfy_table::Color::Green),
-            None,
-        ),
-        Err(err) => print_dashboard_panel(
-            "ERROR",
-            &err,
-            Some(comfy_table::Color::Red),
-            Some(comfy_table::Attribute::Bold),
-        ),
-    }
-}
-
-fn handle_skim_command(world: &mut World, parts: &[&str]) {
-    let Some(entity) = require_corsair_captain(world) else {
-        return;
-    };
-    let amount: f32 = match parts.get(1).and_then(|s| s.parse().ok()) {
-        Some(a) => a,
-        None => {
-            print_dashboard_panel(
-                "ERROR",
-                "Usage: skim <amount>",
-                Some(comfy_table::Color::Red),
-                Some(comfy_table::Attribute::Bold),
-            );
-            return;
-        }
-    };
-    match skim_credits(world, entity, amount) {
-        Ok(msg) => print_dashboard_panel(
-            "SKIM",
-            &msg,
-            Some(comfy_table::Color::Yellow),
             None,
         ),
         Err(err) => print_dashboard_panel(
@@ -1312,6 +1291,180 @@ fn handle_scuttle_command(world: &mut World) {
                 Some(comfy_table::Attribute::Bold),
             );
         }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+// --- The Improbable Pilot: Longshot Drive commands ---------------------------
+
+fn pilot_entity(world: &mut World) -> Option<Entity> {
+    let entity = possessed_entity(world)?;
+    world.get::<ImprobablePilot>(entity).is_some().then_some(entity)
+}
+
+fn require_pilot(world: &mut World) -> Option<Entity> {
+    let entity = pilot_entity(world);
+    if entity.is_none() {
+        print_dashboard_panel(
+            "ERROR",
+            "No pilot is possessed. Possess the pilot pop waiting aboard the junker shuttle (find them with `pops`).",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+    entity
+}
+
+fn handle_pilot_command(world: &mut World) {
+    print_dashboard_panel(
+        "PILOT",
+        &describe_pilot(world),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_scheme_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = require_pilot(world) else {
+        return;
+    };
+    let plan = parts.get(1..).map(|s| s.join(" ")).unwrap_or_default();
+    match file_scheme(world, entity, &plan) {
+        Ok(msg) => {
+            log_adventurer(world, &format!("Filed a flight plan: \"{plan}\"."));
+            print_dashboard_panel(
+                "SCHEME",
+                &msg,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_jump_command(world: &mut World) {
+    let Some(entity) = require_pilot(world) else {
+        return;
+    };
+    match fire_jump(world, entity) {
+        Ok(msg) => {
+            log_adventurer(world, "Fired the Longshot Drive.");
+            print_dashboard_panel(
+                "JUMP",
+                &msg,
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+/// `unload` is origin-aware: the corsair captain unloads the skiff hold,
+/// the Improbable Pilot unloads the shuttle's exotic cache.
+fn handle_unload_command(world: &mut World) {
+    if pilot_entity(world).is_some() {
+        let entity = pilot_entity(world).unwrap();
+        match unload_cache(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, "Unloaded the exotic cache to the colony stockpile.");
+                print_dashboard_panel(
+                    "UNLOAD",
+                    &msg,
+                    Some(comfy_table::Color::Green),
+                    None,
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+    let Some(entity) = require_corsair_captain(world) else {
+        return;
+    };
+    match unload_hold(world, entity) {
+        Ok(msg) => print_dashboard_panel(
+            "UNLOAD",
+            &msg,
+            Some(comfy_table::Color::Green),
+            None,
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+/// `skim` is origin-aware: the corsair captain skims the skiff hold, the
+/// Improbable Pilot skims the shuttle's exotic cache.
+fn handle_skim_command(world: &mut World, parts: &[&str]) {
+    let amount: f32 = match parts.get(1).and_then(|s| s.parse().ok()) {
+        Some(a) => a,
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: skim <amount>",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    if pilot_entity(world).is_some() {
+        let entity = pilot_entity(world).unwrap();
+        match skim_cache(world, entity, amount) {
+            Ok(msg) => {
+                log_adventurer(world, "Skimmed a cut of the exotic cache.");
+                print_dashboard_panel(
+                    "SKIM",
+                    &msg,
+                    Some(comfy_table::Color::Yellow),
+                    None,
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+    let Some(entity) = require_corsair_captain(world) else {
+        return;
+    };
+    match skim_credits(world, entity, amount) {
+        Ok(msg) => print_dashboard_panel(
+            "SKIM",
+            &msg,
+            Some(comfy_table::Color::Yellow),
+            None,
+        ),
         Err(err) => print_dashboard_panel(
             "ERROR",
             &err,
@@ -1874,12 +2027,13 @@ fn print_stats(world: &mut World) {
     let (gov_id, gov_legitimacy, treasury, rivals) = governor_stats(world);
 
     let (wreck, salvage) = salvager_stats(world);
+    let longshot = pilot_stats(world);
     let governor = gov_id
         .map(|i| i.to_string())
         .unwrap_or_else(|| "none".to_string());
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={}",
         tick,
         pops,
         avg_health,
@@ -1905,6 +2059,7 @@ fn print_stats(world: &mut World) {
         rivals,
         wreck,
         salvage,
+        longshot,
     );
 }
 
@@ -4018,7 +4173,7 @@ fn print_help() {
                 (
                     "unload",
                     "",
-                    "Ferry the hold's food into the colony stores",
+                    "Ferry the hold's food into the colony stores (corsair) — or unload the pilot's exotic cache to the stockpile for a morale bump (pilot)",
                 ),
                 (
                     "fence",
@@ -4028,7 +4183,7 @@ fn print_help() {
                 (
                     "skim <amount>",
                     "",
-                    "Pocket hold credits into the captain's own wallet (the crew may notice at the divide)",
+                    "Pocket hold credits into the captain's own wallet (the crew may notice at the divide) — or skim a cut of the pilot's exotic cache (pilot)",
                 ),
                 (
                     "divide",
@@ -4119,6 +4274,21 @@ fn print_help() {
                     "scuttle",
                     "",
                     "Sell the wreck's coordinates for a one-shot credit payout to your own wallet",
+                ),
+                (
+                    "pilot",
+                    "",
+                    "Pilot status: Longshot Drive charge/audacity, filed plan, hold cache (possess the pilot aboard the junker shuttle)",
+                ),
+                (
+                    "scheme <plan-text>",
+                    "",
+                    "File a flight plan — scored for Audacity from a documented absurd-keyword lexicon (dumber plans jump further and safer; costs 5 charge)",
+                ),
+                (
+                    "jump",
+                    "",
+                    "Fire the Longshot Drive (costs 25 charge; success scales with audacity; misfires are never soft-locks)",
                 ),
                 (
                     "treasury",

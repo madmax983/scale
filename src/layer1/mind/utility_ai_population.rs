@@ -605,6 +605,8 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
                 Without<crate::layer1::artifacts::vr_pod::InVrPod>,
                 // The Salvager waits aboard the derelict — never a colony worker.
                 Without<crate::layer1::culture::salvager::Salvager>,
+                // The Improbable Pilot waits aboard the shuttle — never a colony worker.
+                Without<crate::layer1::culture::improbable::ImprobablePilot>,
             )>()
             .iter(world)
             .filter(|item| {
