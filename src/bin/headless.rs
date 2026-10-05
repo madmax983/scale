@@ -58,6 +58,10 @@ use scale::layer1::culture::governor::{
     file_paperwork, governor_stats, hold_hearing, issue_directive, purge_rival, resign,
     seal_within_reach, try_sign_seal, DirectiveKind, Governor,
 };
+use scale::layer1::culture::salvager::{
+    claim_hulk, describe_salvager, patch_breach, salvager_stats, scuttle_hulk, start_strip,
+    start_tow, survey_wreck, try_take_spike, wreck_within_reach, Salvager, WreckSystemKind,
+};
 use scale::layer1::direct_link::{
     possessed_entity, try_player_step, DirectControlState, Possessed,
 };
@@ -419,6 +423,13 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "skim" => handle_skim_command(world, &parts),
         "divide" => handle_divide_command(world),
         "repair" => handle_repair_command(world, &parts),
+        "salvager" => handle_salvager_command(world),
+        "survey" => handle_survey_command(world),
+        "strip" => handle_strip_command(world, &parts),
+        "patch" => handle_patch_command(world),
+        "claim" => handle_claim_command(world),
+        "tow" => handle_tow_command(world),
+        "scuttle" => handle_scuttle_command(world),
         "directive" => handle_directive_command(world, &parts),
         "tithe" => handle_tithe_command(world),
         "hearing" => handle_hearing_command(world),
@@ -822,6 +833,28 @@ fn handle_interact_command(world: &mut World) {
         return;
     }
 
+    // The Salvager: a derelict hulk within reach offers the salvager's spike.
+    if world.get::<Salvager>(entity).is_none() && wreck_within_reach(world, entity).is_some() {
+        match try_take_spike(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, &format!("{name} takes up the salvager's spike."));
+                print_dashboard_panel(
+                    "BOARDED",
+                    &msg,
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+
     // What building (if any) sits on this tile?
     let building_here: Option<BuildingType> = world
         .query::<(&Building, &GridPosition)>()
@@ -1108,6 +1141,184 @@ fn require_governor(world: &mut World) -> Option<Entity> {
         );
     }
     entity
+}
+
+/// The possessed pop, if it walks the wreck-diver's path.
+fn salvager_entity(world: &mut World) -> Option<Entity> {
+    let entity = possessed_entity(world)?;
+    world.get::<Salvager>(entity).is_some().then_some(entity)
+}
+
+fn require_salvager(world: &mut World) -> Option<Entity> {
+    let entity = salvager_entity(world);
+    if entity.is_none() {
+        print_dashboard_panel(
+            "ERROR",
+            "No salvager is possessed. Possess the salvager pop waiting aboard the derelict hulk (find them with `pops`).",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+    entity
+}
+
+fn handle_salvager_command(world: &mut World) {
+    print_dashboard_panel(
+        "SALVAGER",
+        &describe_salvager(world),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_survey_command(world: &mut World) {
+    let Some(entity) = require_salvager(world) else {
+        return;
+    };
+    match survey_wreck(world, entity) {
+        Ok(msg) => {
+            log_adventurer(world, "Surveyed the derelict hulk.");
+            print_dashboard_panel(
+                "SURVEY",
+                &msg,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_strip_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = require_salvager(world) else {
+        return;
+    };
+    let kind = match parts.get(1).and_then(|s| WreckSystemKind::parse(s)) {
+        Some(k) => k,
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: strip <reactor|life|engine|cargo|comms|sensors|thrusters>",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    match start_strip(world, entity, kind) {
+        Ok(msg) => {
+            log_adventurer(world, &format!("Began stripping the {}.", kind.name()));
+            print_dashboard_panel(
+                "STRIP",
+                &msg,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_patch_command(world: &mut World) {
+    let Some(entity) = require_salvager(world) else {
+        return;
+    };
+    match patch_breach(world, entity) {
+        Ok(msg) => {
+            log_adventurer(world, "Patched a hull breach.");
+            print_dashboard_panel(
+                "PATCHED",
+                &msg,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_claim_command(world: &mut World) {
+    let Some(entity) = require_salvager(world) else {
+        return;
+    };
+    match claim_hulk(world, entity) {
+        Ok(msg) => {
+            log_adventurer(world, "Planted a claim beacon on the derelict.");
+            print_dashboard_panel(
+                "CLAIMED",
+                &msg,
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_tow_command(world: &mut World) {
+    let Some(entity) = require_salvager(world) else {
+        return;
+    };
+    match start_tow(world, entity) {
+        Ok(msg) => {
+            log_adventurer(world, "The tow is underway.");
+            print_dashboard_panel(
+                "TOW",
+                &msg,
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_scuttle_command(world: &mut World) {
+    let Some(entity) = require_salvager(world) else {
+        return;
+    };
+    match scuttle_hulk(world, entity) {
+        Ok(msg) => {
+            log_adventurer(world, "Sold the wreck's coordinates.");
+            print_dashboard_panel(
+                "SCUTTLED",
+                &msg,
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
 }
 
 fn handle_directive_command(world: &mut World, parts: &[&str]) {
@@ -1661,12 +1872,14 @@ fn print_stats(world: &mut World) {
     let (heat, hull, crew, loyalty) = corsair_stats(world);
 
     let (gov_id, gov_legitimacy, treasury, rivals) = governor_stats(world);
+
+    let (wreck, salvage) = salvager_stats(world);
     let governor = gov_id
         .map(|i| i.to_string())
         .unwrap_or_else(|| "none".to_string());
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1}",
         tick,
         pops,
         avg_health,
@@ -1690,6 +1903,8 @@ fn print_stats(world: &mut World) {
         gov_legitimacy,
         treasury,
         rivals,
+        wreck,
+        salvage,
     );
 }
 
@@ -2738,7 +2953,7 @@ fn handle_give_command(world: &mut World, parts: &[&str]) {
         _ => {
             print_dashboard_panel(
                 "ERROR",
-                "Usage: give <food|wood|stone|metal|tools> <amount>",
+                "Usage: give <food|wood|stone|metal|tools|fuel> <amount>",
                 Some(comfy_table::Color::Red),
                 Some(comfy_table::Attribute::Bold),
             );
@@ -2752,6 +2967,7 @@ fn handle_give_command(world: &mut World, parts: &[&str]) {
         "stone" => resources.stone += amount,
         "metal" => resources.metal += amount,
         "tools" => resources.tools += amount,
+        "fuel" => resources.fuel += amount,
         _ => {
             print_dashboard_panel(
                 "ERROR",
@@ -3742,7 +3958,7 @@ fn print_help() {
                 ("unplug", "", "Debug: unplug the Eternal Ruler (risks schism)"),
                 ("hack_sat <msg>", "", "Rival hack: flip the sky-message to despair"),
                 ("shootdown <id>", "", "Shoot down your own satellite (feeds orbital debris)"),
-                ("give <res> <n>", "", "Debug: grant resources (food|wood|stone|metal|tools)"),
+                ("give <res> <n>", "", "Debug: grant resources (food|wood|stone|metal|tools|fuel)"),
                 ("find <type> [N]", "", "Find N terrain coords (default 10)"),
                 (
                     "research <name>",
@@ -3868,6 +4084,41 @@ fn print_help() {
                     "resign",
                     "",
                     "Lay down the appointment seal on the current tile",
+                ),
+                (
+                    "salvager",
+                    "",
+                    "Salvager status: hulk hold, reactor instability, breaches, strip progress (possess the salvager aboard the derelict)",
+                ),
+                (
+                    "survey",
+                    "",
+                    "Survey the wreck: reveal systems + appraisal roll (relic/scrap/deadweight) + value ledger",
+                ),
+                (
+                    "strip <reactor|life|engine|cargo|comms|sensors|thrusters>",
+                    "",
+                    "Strip a wreck system for scrap/relics over time (heats the reactor; the reactor job is long and hot)",
+                ),
+                (
+                    "patch",
+                    "",
+                    "Patch the nearest hull breach within reach (costs 1 scrap from the hold)",
+                ),
+                (
+                    "claim",
+                    "",
+                    "Plant a claim beacon on the wreck (starts tow-prep)",
+                ),
+                (
+                    "tow",
+                    "",
+                    "Tow the claimed wreck home: costs 15 colony fuel, claim-jumpers may intercept",
+                ),
+                (
+                    "scuttle",
+                    "",
+                    "Sell the wreck's coordinates for a one-shot credit payout to your own wallet",
                 ),
                 (
                     "treasury",

@@ -957,6 +957,16 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         crate::layer1::culture::governor::apply_governor_morale
             .before(crate::layer1::social::morale::update_morale_cache_system),
     ));
+    // The Salvager systems (adventurer origin: the derelict hulk).
+    // The tick holds the hulk's pressure envelope (sealed cabin + patched
+    // breaches) and drops open breaches to vacuum, so it must run before
+    // the pressure damage system.
+    schedule.add_systems((
+        crate::layer1::culture::salvager::spawn_derelict_hulk_once,
+        crate::layer1::culture::salvager::salvager_tick.before(
+            crate::layer1::physics::pressure::pressure_damage_system,
+        ),
+    ));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,
         crate::layer2::orbit::debris_cult::apply_debris_cult_morale_system

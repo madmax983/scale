@@ -603,6 +603,8 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
                 Without<Possessed>,
                 Without<crate::layer1::mind::sleep_debt::ForcedComa>,
                 Without<crate::layer1::artifacts::vr_pod::InVrPod>,
+                // The Salvager waits aboard the derelict — never a colony worker.
+                Without<crate::layer1::culture::salvager::Salvager>,
             )>()
             .iter(world)
             .filter(|item| {

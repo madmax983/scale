@@ -59,4 +59,7 @@ pub use corsair::*;
 /// The Planetary Governor: bureaucratic adventurer origin.
 pub mod governor;
 pub use governor::*;
+/// The Salvager: wreck-diver adventurer origin.
+pub mod salvager;
+pub use salvager::*;
 pub use invasive_xeno_aesthetics::*;
