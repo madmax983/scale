@@ -71,4 +71,7 @@ pub use lawbound::*;
 /// The Chronostalker: walks-between-moments adventurer origin.
 pub mod chronostalker;
 pub use chronostalker::*;
+/// The Bloom-Touched: anomalous-zone expedition adventurer origin.
+pub mod bloomtouched;
+pub use bloomtouched::*;
 pub use invasive_xeno_aesthetics::*;

@@ -615,6 +615,12 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
                 Without<crate::layer1::culture::chronostalker::Chronostalker>,
                 // The dormant stranger waits in the moment-wound — never a colony worker.
                 Without<crate::layer1::culture::chronostalker::DormantStalker>,
+                // The Bloom-Touched walks the bloom's path — never a colony worker.
+                Without<crate::layer1::culture::bloomtouched::BloomTouched>,
+                // The dormant scout waits by the scar — never a colony worker.
+                Without<crate::layer1::culture::bloomtouched::DormantTouched>,
+                // Bloomkin are no longer quite colonists — never colony workers.
+                Without<crate::layer1::culture::bloomtouched::BloomKin>,
             )>()
             .iter(world)
             .filter(|item| {

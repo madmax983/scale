@@ -75,6 +75,10 @@ use scale::layer1::culture::chronostalker::{
     chronostalker_debt, describe_stalker, rewind_time, toggle_anchor, toggle_phase,
     try_take_stalker_path, wound_within_reach, Chronostalker,
 };
+use scale::layer1::culture::bloomtouched::{
+    bloom_stats, bloom_survey_report, bloom_within_reach, describe_touched, embrace_bloom,
+    resist_bloom, sporecast, take_bloom_mutation, try_take_bloom_path, BloomTouched,
+};
 use scale::layer1::direct_link::{
     possessed_entity, try_player_step, DirectControlState, Possessed,
 };
@@ -453,6 +457,11 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "anchor" => handle_anchor_command(world),
         "rewind" => handle_rewind_command(world, &parts),
         "stalker" => handle_stalker_command(world),
+        "bloom" => handle_bloom_command(world),
+        "sporecast" => handle_sporecast_command(world),
+        "embrace" => handle_embrace_command(world),
+        "resist" => handle_resist_command(world),
+        "touched" => handle_touched_command(world),
         "directive" => handle_directive_command(world, &parts),
         "tithe" => handle_tithe_command(world),
         "hearing" => handle_hearing_command(world),
@@ -974,6 +983,30 @@ fn handle_interact_command(world: &mut World) {
         return;
     }
 
+    // The Bloom-Touched: a bloom scar within reach offers the bloom's path.
+    if world.get::<BloomTouched>(entity).is_none()
+        && bloom_within_reach(world, entity).is_some()
+    {
+        match try_take_bloom_path(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, &format!("{name} steps into the bloom scar."));
+                print_dashboard_panel(
+                    "AWAKENED",
+                    &msg,
+                    Some(comfy_table::Color::Green),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+
     // The Lawbound: a cradle-coffin within reach offers the waking words.
     if world.get::<LawboundAutomaton>(entity).is_none()
         && cradle_within_reach(world, entity).is_some()
@@ -1354,6 +1387,97 @@ fn handle_stalker_command(world: &mut World) {
     );
 }
 
+// --- The Bloom-Touched: anomalous-zone expedition commands -------------------
+
+fn handle_bloom_command(world: &mut World) {
+    match take_bloom_mutation(world) {
+        Ok(msg) => {
+            log_adventurer(world, "Quill takes the Bloom's gift.");
+            print_dashboard_panel(
+                "BLOOM",
+                &msg,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            None,
+        ),
+    }
+}
+
+fn handle_sporecast_command(world: &mut World) {
+    match sporecast(world) {
+        Ok(msg) => {
+            log_adventurer(world, "Quill breathes out spores.");
+            print_dashboard_panel(
+                "SPORECAST",
+                &msg,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            None,
+        ),
+    }
+}
+
+fn handle_embrace_command(world: &mut World) {
+    match embrace_bloom(world) {
+        Ok(msg) => {
+            log_adventurer(world, "Quill embraces the Bloom.");
+            print_dashboard_panel(
+                "EMBRACE",
+                &msg,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            None,
+        ),
+    }
+}
+
+fn handle_resist_command(world: &mut World) {
+    match resist_bloom(world) {
+        Ok(msg) => {
+            log_adventurer(world, "Quill resists the Bloom.");
+            print_dashboard_panel(
+                "RESIST",
+                &msg,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            None,
+        ),
+    }
+}
+
+fn handle_touched_command(world: &mut World) {
+    print_dashboard_panel(
+        "TOUCHED",
+        &describe_touched(world),
+        Some(comfy_table::Color::Green),
+        None,
+    );
+}
+
 fn handle_fence_command(world: &mut World) {
     let Some(entity) = require_corsair_captain(world) else {
         return;
@@ -1467,6 +1591,19 @@ fn handle_salvager_command(world: &mut World) {
 }
 
 fn handle_survey_command(world: &mut World) {
+    // The Bloom refuses to be mapped: a possessed pop standing in it gets
+    // the refusal instead of a wreck survey.
+    if let Some(entity) = possessed_entity(world) {
+        if let Some(report) = bloom_survey_report(world, entity) {
+            print_dashboard_panel(
+                "SURVEY",
+                &report,
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    }
     let Some(entity) = require_salvager(world) else {
         return;
     };
@@ -2348,12 +2485,13 @@ fn print_stats(world: &mut World) {
     let chronodebt = chronostalker_debt(world)
         .map(|d| format!("{d:.1}"))
         .unwrap_or_else(|| "none".to_string());
+    let bloom = bloom_stats(world);
     let governor = gov_id
         .map(|i| i.to_string())
         .unwrap_or_else(|| "none".to_string());
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={}",
         tick,
         pops,
         avg_health,
@@ -2382,6 +2520,7 @@ fn print_stats(world: &mut World) {
         longshot,
         lawbound,
         chronodebt,
+        bloom,
     );
 }
 
@@ -4646,6 +4785,31 @@ fn print_help() {
                     "stalker",
                     "",
                     "Tock's ledger state: temporal debt, phase/anchor, haunting, moments walked",
+                ),
+                (
+                    "bloom",
+                    "",
+                    "Quill takes a mutation strain from the Bloom: random trait draw, costs a little of the self (possess the Bloom-Touched)",
+                ),
+                (
+                    "sporecast",
+                    "",
+                    "Quill breathes out spores: seeds/extends the Bloom field around their tile (radius grows with glands + embrace)",
+                ),
+                (
+                    "embrace",
+                    "",
+                    "Quill embraces the Bloom: escalating power for steepening loss-of-self (at 100, Quill becomes Bloomkin)",
+                ),
+                (
+                    "resist",
+                    "",
+                    "Quill tears free a little: costly in health and hunger, pushes self-loss back down",
+                ),
+                (
+                    "touched",
+                    "",
+                    "Quill's ledger: mutations, self-loss bar, embrace level, casts",
                 ),
                 (
                     "treasury",

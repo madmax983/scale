@@ -979,8 +979,16 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     // The Lawbound systems (adventurer origin: the Three Statutes).
     // The sabotage bridge reads SabotageEvent, so it runs after the
     // symbiont sabotage trigger (same pattern as the sovereign bridge).
+    // NOTE (bloom-touched, 2026-10-06): the spawn is explicitly ordered
+    // before the bridge. The bridge takes ResMut<LawboundState> directly
+    // while only the spawn/tick insert it via ensure — and schedule order
+    // for unordered systems is not guaranteed. Adding the bloom systems
+    // reshuffled the build order, the bridge ran first, and Bevy's param
+    // validation panicked on the missing resource.
     schedule.add_systems((
-        crate::layer1::culture::lawbound::spawn_lawbound_cradle_once,
+        crate::layer1::culture::lawbound::spawn_lawbound_cradle_once.before(
+            crate::layer1::culture::lawbound::sabotage_lawbound_bridge,
+        ),
         crate::layer1::culture::lawbound::lawbound_tick,
         crate::layer1::culture::lawbound::sabotage_lawbound_bridge.after(
             crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
@@ -989,13 +997,24 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     // The Chronostalker systems (adventurer origin: the Moment-Wound).
     // The crisis bridge reads SabotageEvent, PirateRaidEvent, and
     // DepressurizationEvent, so it runs after the symbiont sabotage
-    // trigger (same pattern as the lawbound bridge).
+    // trigger (same pattern as the lawbound bridge). Same explicit
+    // spawn-before-bridge edge as above: the bridge needs
+    // ChronostalkerState, which only the spawn/tick insert.
     schedule.add_systems((
-        crate::layer1::culture::chronostalker::spawn_moment_wound_once,
+        crate::layer1::culture::chronostalker::spawn_moment_wound_once.before(
+            crate::layer1::culture::chronostalker::crisis_chronostalker_bridge,
+        ),
         crate::layer1::culture::chronostalker::chronostalker_tick,
         crate::layer1::culture::chronostalker::crisis_chronostalker_bridge.after(
             crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
         ),
+    ));
+    // The Bloom-Touched systems (adventurer origin: the bloom scar).
+    // The tick holds the scar's expansion + entry-mutation passes; it has
+    // no ordering constraints beyond the other origin ticks.
+    schedule.add_systems((
+        crate::layer1::culture::bloomtouched::spawn_bloom_scar_once,
+        crate::layer1::culture::bloomtouched::bloomtouched_tick,
     ));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,
