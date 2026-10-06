@@ -59,10 +59,16 @@ pub fn diffuse_geome_hazards_system(
 }
 
 /// Applies damage to entities with Health that are standing on GeomeHazards.
+#[allow(clippy::type_complexity)]
 pub fn environmental_damage_system(
     mut health_query: Query<
         (&GridPosition, &mut crate::layer1::health::Health),
-        Without<crate::layer1::hive_mind_integration::IntegratedCollective>,
+        (
+            Without<crate::layer1::hive_mind_integration::IntegratedCollective>,
+            // The phased Chronostalker walks between moments: nothing
+            // in the stream can touch it.
+            Without<crate::layer1::culture::chronostalker::Phased>,
+        ),
     >,
     hazard_query: Query<(&GridPosition, &GeomeHazard)>,
 ) {

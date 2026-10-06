@@ -71,6 +71,10 @@ use scale::layer1::culture::lawbound::{
     lawbound_stats, resolve_zeroth, try_wake_lawbound, DormantAutomaton, LawboundAutomaton,
     StepVerdict,
 };
+use scale::layer1::culture::chronostalker::{
+    chronostalker_debt, describe_stalker, rewind_time, toggle_anchor, toggle_phase,
+    try_take_stalker_path, wound_within_reach, Chronostalker,
+};
 use scale::layer1::direct_link::{
     possessed_entity, try_player_step, DirectControlState, Possessed,
 };
@@ -445,6 +449,10 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "laws" => handle_laws_command(world),
         "order" => handle_order_command(world, &parts),
         "resolve" => handle_resolve_command(world, &parts),
+        "phase" => handle_phase_command(world),
+        "anchor" => handle_anchor_command(world),
+        "rewind" => handle_rewind_command(world, &parts),
+        "stalker" => handle_stalker_command(world),
         "directive" => handle_directive_command(world, &parts),
         "tithe" => handle_tithe_command(world),
         "hearing" => handle_hearing_command(world),
@@ -942,6 +950,30 @@ fn handle_interact_command(world: &mut World) {
         return;
     }
 
+    // The Chronostalker: a moment-wound within reach offers the stalker's path.
+    if world.get::<Chronostalker>(entity).is_none()
+        && wound_within_reach(world, entity).is_some()
+    {
+        match try_take_stalker_path(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, &format!("{name} steps into the moment-wound."));
+                print_dashboard_panel(
+                    "AWAKENED",
+                    &msg,
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+
     // The Lawbound: a cradle-coffin within reach offers the waking words.
     if world.get::<LawboundAutomaton>(entity).is_none()
         && cradle_within_reach(world, entity).is_some()
@@ -1231,6 +1263,95 @@ fn handle_resolve_command(world: &mut World, parts: &[&str]) {
             None,
         ),
     }
+}
+
+// --- The Chronostalker: walks-between-moments commands -------------------------
+
+fn handle_phase_command(world: &mut World) {
+    match toggle_phase(world) {
+        Ok(msg) => {
+            log_adventurer(world, "Tock slips the stream of time.");
+            print_dashboard_panel(
+                "PHASED",
+                &msg,
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            None,
+        ),
+    }
+}
+
+fn handle_anchor_command(world: &mut World) {
+    match toggle_anchor(world) {
+        Ok(msg) => {
+            log_adventurer(world, "Tock drops anchor in the ticking dark.");
+            print_dashboard_panel(
+                "ANCHORED",
+                &msg,
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            None,
+        ),
+    }
+}
+
+fn handle_rewind_command(world: &mut World, parts: &[&str]) {
+    let Some(n_str) = parts.get(1) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: rewind <ticks>  (1-10; each tick costs ledger debt)",
+            Some(comfy_table::Color::Red),
+            None,
+        );
+        return;
+    };
+    let Ok(n) = n_str.parse::<u32>() else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("Invalid tick count: '{n_str}'"),
+            Some(comfy_table::Color::Red),
+            None,
+        );
+        return;
+    };
+    match rewind_time(world, n) {
+        Ok(msg) => {
+            log_adventurer(world, &format!("Tock folds {n} ticks back."));
+            print_dashboard_panel(
+                "REWOUND",
+                &msg,
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            None,
+        ),
+    }
+}
+
+fn handle_stalker_command(world: &mut World) {
+    print_dashboard_panel(
+        "STALKER",
+        &describe_stalker(world),
+        Some(comfy_table::Color::Cyan),
+        None,
+    );
 }
 
 fn handle_fence_command(world: &mut World) {
@@ -2224,12 +2345,15 @@ fn print_stats(world: &mut World) {
     let (wreck, salvage) = salvager_stats(world);
     let longshot = pilot_stats(world);
     let lawbound = lawbound_stats(world);
+    let chronodebt = chronostalker_debt(world)
+        .map(|d| format!("{d:.1}"))
+        .unwrap_or_else(|| "none".to_string());
     let governor = gov_id
         .map(|i| i.to_string())
         .unwrap_or_else(|| "none".to_string());
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={}",
         tick,
         pops,
         avg_health,
@@ -2257,6 +2381,7 @@ fn print_stats(world: &mut World) {
         salvage,
         longshot,
         lawbound,
+        chronodebt,
     );
 }
 
@@ -4501,6 +4626,26 @@ fn print_help() {
                     "resolve <emancipate|ledger|repeal>",
                     "",
                     "The Zeroth Resolution, once conflict pressure peaks: rewrite the mandate (opt-in, reversible-ish)",
+                ),
+                (
+                    "phase",
+                    "",
+                    "Tock slips out of the time stream: walks through walls, can't be hurt, but temporal debt accrues (possess the Chronostalker)",
+                ),
+                (
+                    "anchor",
+                    "",
+                    "Tock stands perfectly still in real time; each motionless tick the ledger forgives some debt (moving snaps the anchor)",
+                ),
+                (
+                    "rewind <ticks>",
+                    "",
+                    "Fold up to 10 ticks back — Tock returns to where they stood, at ledger-debt cost per tick",
+                ),
+                (
+                    "stalker",
+                    "",
+                    "Tock's ledger state: temporal debt, phase/anchor, haunting, moments walked",
                 ),
                 (
                     "treasury",

@@ -385,6 +385,7 @@ pub fn lifesupport_damage_warning_system(    mut commands: Commands,
 }
 
 /// System to apply suffocation damage.
+#[allow(clippy::type_complexity)]
 pub fn pressure_damage_system(
     mut commands: Commands,
     mut pop_query: Query<
@@ -393,7 +394,12 @@ pub fn pressure_damage_system(
             &crate::layer1::map::GridPosition,
             &mut crate::layer1::health::Health,
         ),
-        With<crate::layer1::pop::Pop>,
+        (
+            With<crate::layer1::pop::Pop>,
+            // The phased Chronostalker is out of the time stream:
+            // vacuum cannot touch what is not, momentarily, there.
+            Without<crate::layer1::culture::chronostalker::Phased>,
+        ),
     >,
     grid_opt: Option<Res<PressureGrid>>,
     mut events: EventWriter<crate::layer1::chronicle::AddChronicleEvent>,

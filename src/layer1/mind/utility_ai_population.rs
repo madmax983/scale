@@ -611,6 +611,10 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
                 Without<crate::layer1::culture::lawbound::LawboundAutomaton>,
                 // The dormant automaton waits by its cradle — never a colony worker.
                 Without<crate::layer1::culture::lawbound::DormantAutomaton>,
+                // The Chronostalker walks between moments — never a colony worker.
+                Without<crate::layer1::culture::chronostalker::Chronostalker>,
+                // The dormant stranger waits in the moment-wound — never a colony worker.
+                Without<crate::layer1::culture::chronostalker::DormantStalker>,
             )>()
             .iter(world)
             .filter(|item| {

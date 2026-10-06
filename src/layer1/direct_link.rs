@@ -132,6 +132,7 @@ pub fn handle_direct_movement(
     wall_time: Option<Res<WallTime>>,
     mut shake: Option<ResMut<ScreenShake>>,
     mut commands: Commands,
+    phased_query: Query<Entity, With<crate::layer1::culture::chronostalker::Phased>>,
 ) {
     for (entity, mut pos, speed, mut state, role) in &mut query {
         let now = wall_time.as_ref().map_or(0.0, |t| t.0);
@@ -150,6 +151,33 @@ pub fn handle_direct_movement(
 
         // If no input, skip
         if intended_dx == 0 && intended_dy == 0 {
+            continue;
+        }
+
+        // The Chronostalker, phased: out of the time stream, it slips
+        // through walls, water, and wreckage alike (the map edge holds).
+        // Bypasses the cooldown/buffer and slide logic below.
+        if phased_query.get(entity).is_ok() {
+            let new_x = pos.x + intended_dx;
+            let new_y = pos.y + intended_dy;
+            if new_x >= 0
+                && new_y >= 0
+                && terrain.get(new_x as usize, new_y as usize).is_some()
+            {
+                commands.spawn((
+                    Particle {
+                        char: '.',
+                        color: Color::DarkGray,
+                        lifetime: 5,
+                    },
+                    *pos,
+                ));
+                pos.x = new_x;
+                pos.y = new_y;
+                state.last_move_time = now;
+                state.buffered_dx = 0;
+                state.buffered_dy = 0;
+            }
             continue;
         }
 
@@ -355,16 +383,22 @@ pub fn try_player_step(
         let terrain = world.resource::<TerrainGrid>();
         let occupied = world.get_resource::<OccupiedTiles>();
         let role = world.get::<Role>(entity).copied();
+        let phased = world
+            .get::<crate::layer1::culture::chronostalker::Phased>(entity)
+            .is_some();
         let Some(pos) = world.get::<GridPosition>(entity) else {
             return Err("possessed pop has no position".to_string());
         };
         let nx = pos.x + dx.clamp(-1, 1);
         let ny = pos.y + dy.clamp(-1, 1);
-        (
-            is_tile_walkable_data(terrain, occupied, &buildings, nx, ny, entity, role),
-            nx,
-            ny,
-        )
+        let ok = if phased {
+            // The Chronostalker, out of the time stream: walls, water, and
+            // wreckage are only suggestions. The map edge still holds.
+            nx >= 0 && ny >= 0 && terrain.get(nx as usize, ny as usize).is_some()
+        } else {
+            is_tile_walkable_data(terrain, occupied, &buildings, nx, ny, entity, role)
+        };
+        (ok, nx, ny)
     };
     let (ok, nx, ny) = walkable;
     if !ok {

@@ -986,6 +986,17 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
             crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
         ),
     ));
+    // The Chronostalker systems (adventurer origin: the Moment-Wound).
+    // The crisis bridge reads SabotageEvent, PirateRaidEvent, and
+    // DepressurizationEvent, so it runs after the symbiont sabotage
+    // trigger (same pattern as the lawbound bridge).
+    schedule.add_systems((
+        crate::layer1::culture::chronostalker::spawn_moment_wound_once,
+        crate::layer1::culture::chronostalker::chronostalker_tick,
+        crate::layer1::culture::chronostalker::crisis_chronostalker_bridge.after(
+            crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
+        ),
+    ));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,
         crate::layer2::orbit::debris_cult::apply_debris_cult_morale_system
