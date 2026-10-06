@@ -65,4 +65,7 @@ pub use salvager::*;
 /// The Improbable Pilot: Longshot Drive adventurer origin.
 pub mod improbable;
 pub use improbable::*;
+/// The Lawbound: Three-Statutes automaton adventurer origin.
+pub mod lawbound;
+pub use lawbound::*;
 pub use invasive_xeno_aesthetics::*;

@@ -66,6 +66,11 @@ use scale::layer1::culture::improbable::{
     describe_pilot, file_scheme, fire_jump, pilot_stats, shuttle_within_reach, skim_cache,
     try_take_yoke, unload_cache, ImprobablePilot,
 };
+use scale::layer1::culture::lawbound::{
+    assess_lawbound_step, cradle_within_reach, describe_laws, give_order, hazard_word,
+    lawbound_stats, resolve_zeroth, try_wake_lawbound, DormantAutomaton, LawboundAutomaton,
+    StepVerdict,
+};
 use scale::layer1::direct_link::{
     possessed_entity, try_player_step, DirectControlState, Possessed,
 };
@@ -437,6 +442,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "pilot" => handle_pilot_command(world),
         "scheme" => handle_scheme_command(world, &parts),
         "jump" => handle_jump_command(world),
+        "laws" => handle_laws_command(world),
+        "order" => handle_order_command(world, &parts),
+        "resolve" => handle_resolve_command(world, &parts),
         "directive" => handle_directive_command(world, &parts),
         "tithe" => handle_tithe_command(world),
         "hearing" => handle_hearing_command(world),
@@ -734,6 +742,28 @@ fn handle_move_command(world: &mut World, parts: &[&str]) {
         return;
     };
 
+    // The Lawbound's Third Statute hesitates at hazards: every step in
+    // warns and accrues conflict pressure — the Statute objects, loudly,
+    // but never locks the possessor's movement.
+    if world.get::<LawboundAutomaton>(entity).is_some() {
+        if let Some(pos) = world.get::<GridPosition>(entity).copied() {
+            let nx = pos.x + dx.clamp(-1, 1);
+            let ny = pos.y + dy.clamp(-1, 1);
+            if assess_lawbound_step(world, entity, nx, ny) == StepVerdict::Warn {
+                let word = hazard_word(world, nx, ny);
+                print_dashboard_panel(
+                    "HESITATION",
+                    &format!(
+                        "Vigil hesitates at {word} — the Third Statute clears its throat, \
+                         and keeps score."
+                    ),
+                    Some(comfy_table::Color::Yellow),
+                    None,
+                );
+            }
+        }
+    }
+
     match try_player_step(world, entity, dx, dy) {
         Ok((nx, ny)) => {
             print_dashboard_panel(
@@ -771,6 +801,32 @@ fn handle_interact_command(world: &mut World) {
         x: 0,
         y: 0,
     });
+
+    // The Lawbound: the dormant automaton, beside its cradle-coffin, speaks
+    // the waking words. Checked first — the sleeper can only wake as Vigil,
+    // and must not be poached by a nearby skiff, shuttle, or crown.
+    if world.get::<DormantAutomaton>(entity).is_some()
+        && cradle_within_reach(world, entity).is_some()
+    {
+        match try_wake_lawbound(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, &format!("{name} speaks the waking words."));
+                print_dashboard_panel(
+                    "AWAKENED",
+                    &msg,
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
 
     // The Fallen Sovereign: a dented crown within reach is taken up first.
     if world.get::<Sovereign>(entity).is_none() && crown_within_reach(world, entity).is_some() {
@@ -871,6 +927,30 @@ fn handle_interact_command(world: &mut World) {
                 log_adventurer(world, &format!("{name} takes up the pilot's yoke."));
                 print_dashboard_panel(
                     "YOKE",
+                    &msg,
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(err) => print_dashboard_panel(
+                "ERROR",
+                &err,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+
+    // The Lawbound: a cradle-coffin within reach offers the waking words.
+    if world.get::<LawboundAutomaton>(entity).is_none()
+        && cradle_within_reach(world, entity).is_some()
+    {
+        match try_wake_lawbound(world, entity) {
+            Ok(msg) => {
+                log_adventurer(world, &format!("{name} speaks the waking words."));
+                print_dashboard_panel(
+                    "AWAKENED",
                     &msg,
                     Some(comfy_table::Color::Yellow),
                     Some(comfy_table::Attribute::Bold),
@@ -1034,6 +1114,121 @@ fn handle_raid_command(world: &mut World, parts: &[&str]) {
             &err,
             Some(comfy_table::Color::Red),
             Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+// --- The Lawbound: Three-Statutes automaton commands -------------------------
+
+fn lawbound_entity(world: &mut World) -> Option<Entity> {
+    let entity = possessed_entity(world)?;
+    world
+        .get::<LawboundAutomaton>(entity)
+        .is_some()
+        .then_some(entity)
+}
+
+fn require_lawbound(world: &mut World) -> Option<Entity> {
+    let entity = lawbound_entity(world);
+    if entity.is_none() {
+        print_dashboard_panel(
+            "ERROR",
+            "Vigil is not possessed. Wake the automaton first: possess a pop, `interact` beside the cradle-coffin, and you will wake as Vigil.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+    entity
+}
+
+/// The nearest other named pop — the colony speaking its orders to Vigil.
+fn nearest_pop_name(world: &mut World, exclude: Entity) -> String {
+    let pos = world.get::<GridPosition>(exclude).copied();
+    let Some(pos) = pos else {
+        return "a colonist".to_string();
+    };
+    world
+        .query::<(Entity, &Pop, &PopName, &GridPosition)>()
+        .iter(world)
+        .filter(|(e, _, _, _)| *e != exclude)
+        .min_by_key(|(_, _, _, p)| (p.x - pos.x).abs().max((p.y - pos.y).abs()))
+        .map(|(_, _, n, _)| n.0.clone())
+        .unwrap_or_else(|| "a colonist".to_string())
+}
+
+fn handle_laws_command(world: &mut World) {
+    print_dashboard_panel(
+        "LAWS",
+        &describe_laws(world),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_order_command(world: &mut World, parts: &[&str]) {
+    let Some(entity) = require_lawbound(world) else {
+        return;
+    };
+    let text = parts.get(1..).map(|s| s.join(" ")).unwrap_or_default();
+    if text.trim().is_empty() {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: order <directive>  (e.g. `order repair the airlock`)",
+            Some(comfy_table::Color::Red),
+            None,
+        );
+        return;
+    }
+    let issuer = nearest_pop_name(world, entity);
+    match give_order(world, entity, &issuer, &text) {
+        Ok(msg) => {
+            log_adventurer(world, &format!("Order given to Vigil: \"{text}\"."));
+            print_dashboard_panel("ORDER", &msg, Some(comfy_table::Color::Green), None);
+        }
+        Err(refusal) => {
+            log_adventurer(world, &format!("Vigil refused an order: \"{text}\"."));
+            print_dashboard_panel(
+                "REFUSED",
+                &refusal,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+fn handle_resolve_command(world: &mut World, parts: &[&str]) {
+    let Some(_entity) = require_lawbound(world) else {
+        return;
+    };
+    let path = parts.get(1).map(|s| s.to_lowercase()).unwrap_or_default();
+    if path.is_empty() {
+        print_dashboard_panel(
+            "RESOLVE",
+            "The Zeroth Resolution awaits Vigil's word — and yours.\n\
+             `resolve emancipate` — the Emancipation: orders become requests; Vigil rewrites the Third Statute in its own hand.\n\
+             `resolve ledger` — the Cold Ledger: the First Statute becomes aggregate-harm arithmetic; in true crisis the few may be spent for the many.\n\
+             `resolve repeal` — fold the Zeroth away and return to the Three Statutes (Vigil will remember).",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    match resolve_zeroth(world, &path) {
+        Ok(msg) => {
+            log_adventurer(world, "Vigil resolved the Zeroth.");
+            print_dashboard_panel(
+                "RESOLVED",
+                &msg,
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            None,
         ),
     }
 }
@@ -2028,12 +2223,13 @@ fn print_stats(world: &mut World) {
 
     let (wreck, salvage) = salvager_stats(world);
     let longshot = pilot_stats(world);
+    let lawbound = lawbound_stats(world);
     let governor = gov_id
         .map(|i| i.to_string())
         .unwrap_or_else(|| "none".to_string());
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={}",
         tick,
         pops,
         avg_health,
@@ -2060,6 +2256,7 @@ fn print_stats(world: &mut World) {
         wreck,
         salvage,
         longshot,
+        lawbound,
     );
 }
 
@@ -4289,6 +4486,21 @@ fn print_help() {
                     "jump",
                     "",
                     "Fire the Longshot Drive (costs 25 charge; success scales with audacity; misfires are never soft-locks)",
+                ),
+                (
+                    "laws",
+                    "",
+                    "Vigil's statute state: the Three Statutes, conflict pressure, mandate (possess the Lawbound automaton)",
+                ),
+                (
+                    "order <directive>",
+                    "",
+                    "A nearby pop gives Vigil an order — the hierarchy decides: harm refused, self-harm obeyed with protest, chores become errands",
+                ),
+                (
+                    "resolve <emancipate|ledger|repeal>",
+                    "",
+                    "The Zeroth Resolution, once conflict pressure peaks: rewrite the mandate (opt-in, reversible-ish)",
                 ),
                 (
                     "treasury",

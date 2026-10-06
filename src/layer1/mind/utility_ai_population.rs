@@ -607,6 +607,10 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
                 Without<crate::layer1::culture::salvager::Salvager>,
                 // The Improbable Pilot waits aboard the shuttle — never a colony worker.
                 Without<crate::layer1::culture::improbable::ImprobablePilot>,
+                // The Lawbound serves the Statutes, not the chore wheel — never a colony worker.
+                Without<crate::layer1::culture::lawbound::LawboundAutomaton>,
+                // The dormant automaton waits by its cradle — never a colony worker.
+                Without<crate::layer1::culture::lawbound::DormantAutomaton>,
             )>()
             .iter(world)
             .filter(|item| {

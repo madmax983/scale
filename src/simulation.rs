@@ -976,6 +976,16 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
             crate::layer1::physics::pressure::pressure_damage_system,
         ),
     ));
+    // The Lawbound systems (adventurer origin: the Three Statutes).
+    // The sabotage bridge reads SabotageEvent, so it runs after the
+    // symbiont sabotage trigger (same pattern as the sovereign bridge).
+    schedule.add_systems((
+        crate::layer1::culture::lawbound::spawn_lawbound_cradle_once,
+        crate::layer1::culture::lawbound::lawbound_tick,
+        crate::layer1::culture::lawbound::sabotage_lawbound_bridge.after(
+            crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
+        ),
+    ));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,
         crate::layer2::orbit::debris_cult::apply_debris_cult_morale_system
