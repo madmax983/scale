@@ -142,6 +142,8 @@ pub enum Trait {
     Refugee,
     /// Suffered extreme trauma.
     Traumatized,
+    /// Braver than most: resists panic cascades (Spec 1371).
+    Courage,
 }
 
 impl Trait {
@@ -221,6 +223,7 @@ impl Trait {
             Self::Artistic => "Artistic",
             Self::Trauma => "Trauma",
             Self::Hacker => "Hacker",
+            Self::Courage => "Courageous",
         }
     }
 }
@@ -295,6 +298,7 @@ impl Traits {
             Trait::EmpathicLink,
             Trait::Bureaucrat,
             Trait::InsomniaDrive,
+            Trait::Courage,
         ];
 
         let mut added = 0;
@@ -342,6 +346,18 @@ impl Traits {
                 continue;
             }
             if t == Trait::Compassionate && traits.has(Trait::Spiteful) {
+                continue;
+            }
+            if t == Trait::Courage && traits.has(Trait::Anxious) {
+                continue;
+            }
+            if t == Trait::Anxious && traits.has(Trait::Courage) {
+                continue;
+            }
+            if t == Trait::Courage && traits.has(Trait::Agoraphobic) {
+                continue;
+            }
+            if t == Trait::Agoraphobic && traits.has(Trait::Courage) {
                 continue;
             }
 

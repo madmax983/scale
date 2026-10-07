@@ -418,6 +418,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "stats" => print_stats(world),
         "pops" | "p" => print_pops(world),
         "ghosts" => print_ghost_audit(world),
+        "scare" => handle_scare_command(world, &parts),
+        "panics" => print_panics(world),
         "map" | "m" => handle_map_command(world, &parts),
         "tick" | "t" => handle_tick_command(world, &parts),
         "build" | "b" => handle_build_command(world, &parts),
@@ -2628,9 +2630,13 @@ fn print_stats(world: &mut World) {
     let governor = gov_id
         .map(|i| i.to_string())
         .unwrap_or_else(|| "none".to_string());
+    let panicking = {
+        use scale::layer1::psychology::panic_spirals::panicking_count;
+        panicking_count(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={}",
         tick,
         pops,
         avg_health,
@@ -2661,6 +2667,7 @@ fn print_stats(world: &mut World) {
         chronodebt,
         bloom,
         origin_roster_summary(world),
+        panicking,
     );
 }
 
@@ -3108,6 +3115,73 @@ fn print_ghost_audit(world: &mut World) {
         Cell::new(verdict),
     ]);
     print_dashboard_table("GHOST-POP AUDIT", table);
+}
+
+/// Debug: spawn a terrifying sighting at a tile (Spec 1371).
+///
+/// `scare [x] [y]` — drops a monster-sighting [`Terrifying`] marker so the
+/// panic cascade can be exercised from the console. Defaults to the first
+/// living pop's tile.
+fn handle_scare_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::psychology::panic_spirals::{spawn_terrifying, TerrifyingKind};
+
+    let (mut x, mut y) = (40, 25);
+    if let (Some(px), Some(py)) = (parts.get(1), parts.get(2)) {
+        if let (Ok(px), Ok(py)) = (px.parse::<i32>(), py.parse::<i32>()) {
+            x = px;
+            y = py;
+        }
+    } else {
+        // Default: right next to the first pop with a position.
+        let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+        if let Some(pos) = q.iter(world).next() {
+            x = pos.x + 1;
+            y = pos.y;
+        }
+    }
+    let entity = spawn_terrifying(world, x, y, TerrifyingKind::Monster);
+    print_dashboard_panel(
+        "TERRIFYING SIGHTING",
+        &format!(
+            "A monster sighting materializes at ({x}, {y}) (entity #{}).\nNearby pops will panic and flee; panic spreads on contact.",
+            entity.index()
+        ),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// List currently panicking pops (Spec 1371).
+fn print_panics(world: &mut World) {
+    use scale::layer1::psychology::panic_spirals::Panic;
+
+    let mut rows: Vec<String> = Vec::new();
+    let mut q = world.query_filtered::<(Entity, Option<&PopName>, &GridPosition, &Panic), With<Pop>>();
+    for (entity, name, pos, panic) in q.iter(world) {
+        let name = name.map_or_else(|| "?".to_string(), |n| n.0.clone());
+        rows.push(format!(
+            "#{} {name} at ({}, {}) — {} ticks of panic left",
+            entity.index(),
+            pos.x,
+            pos.y,
+            panic.timer
+        ));
+    }
+    if rows.is_empty() {
+        print_dashboard_panel(
+            "PANIC STATUS",
+            "No pops are panicking. The colony is (for now) calm.",
+            Some(comfy_table::Color::Green),
+            None,
+        );
+    } else {
+        print_dashboard_panel(
+            "PANIC STATUS",
+            &format!("{} panicking:\n{}", rows.len(), rows.join("\n")),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
 }
 
 /// Diagnostic: dump raw entity/component counts for pop-related entities.
@@ -4708,6 +4782,8 @@ fn print_help() {
                 ("destroy <x> <y>", "", "Designate building for destruction"),
                 ("excavate <x> <y>", "", "Excavate Desire Dust from a tile"),
                 ("dust", "", "Show Desire Dust and RoadMind status"),
+                ("scare [x] [y]", "", "Debug: spawn a terrifying sighting (Spec 1371)"),
+                ("panics", "", "List panicking pops (Spec 1371)"),
                 ("launch_sat", "", "Launch a slogan satellite (Propaganda Constellation)"),
                 ("constellation", "", "Show Propaganda Constellation status"),
                 ("godmind", "", "Debug: upload a dying leader as the Eternal Ruler (Spec 1381)"),

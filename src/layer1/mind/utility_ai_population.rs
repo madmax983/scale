@@ -621,6 +621,8 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
                 Without<crate::layer1::culture::bloomtouched::DormantTouched>,
                 // Bloomkin are no longer quite colonists — never colony workers.
                 Without<crate::layer1::culture::bloomtouched::BloomKin>,
+                // Panicking pops flee, they don't work (Spec 1371).
+                Without<crate::layer1::psychology::panic_spirals::Panic>,
             )>()
             .iter(world)
             .filter(|item| {

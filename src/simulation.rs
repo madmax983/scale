@@ -111,6 +111,17 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 1371 Panic Spirals: fear contagion — terrifying events panic pops,
+    // panic spreads on contact, panicked pops flee and drop what they carry.
+    schedule.add_systems(
+        (
+            crate::layer1::psychology::panic_spirals::trigger_panic_system,
+            crate::layer1::psychology::panic_spirals::spread_panic_system,
+            crate::layer1::psychology::panic_spirals::panic_timer_system,
+            crate::layer1::psychology::panic_spirals::panic_flee_system,
+        )
+            .chain(),
+    );
 
     schedule
 }
