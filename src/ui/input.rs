@@ -9,7 +9,8 @@ use crate::shared::keyboard::{GameKeyCode, GameKeyEvent, GameMouseEvent};
 use crate::shared::state::GameState;
 use crate::shared::time::{SimSpeed, SimulationTime};
 use crate::shared::view_mode::ViewMode;
-use crate::ui::menu_state::MenuState;
+use crate::layer1::culture::origins::OriginChoice;
+use crate::ui::menu_state::{MenuSelector, MenuState};
 use crate::ui::selection::{handle_selection_click, screen_to_world, Selection, SelectionTarget};
 use crate::ui::shell::plugins::{SharedWorld, COLONY_MAP_PLUGIN_TYPE, SYSTEM_MAP_PLUGIN_TYPE};
 use crate::ui::shell::UiShell;
@@ -393,10 +394,20 @@ fn handle_tech_tree_mode(world: &mut World, key: GameKeyEvent) {
 fn handle_main_menu_mode(world: &mut World, key: GameKeyEvent) {
     match key.code {
         GameKeyCode::Left | GameKeyCode::Char('a') => {
-            world.resource_mut::<MenuState>().prev_scenario();
+            // ←/→ edits whichever setup row (scenario / origin) has focus.
+            match world.resource::<MenuState>().selector {
+                MenuSelector::Scenario => world.resource_mut::<MenuState>().prev_scenario(),
+                MenuSelector::Origin => world.resource_mut::<MenuState>().prev_origin(),
+            }
         }
         GameKeyCode::Right | GameKeyCode::Char('d') => {
-            world.resource_mut::<MenuState>().next_scenario();
+            match world.resource::<MenuState>().selector {
+                MenuSelector::Scenario => world.resource_mut::<MenuState>().next_scenario(),
+                MenuSelector::Origin => world.resource_mut::<MenuState>().next_origin(),
+            }
+        }
+        GameKeyCode::Tab => {
+            world.resource_mut::<MenuState>().cycle_selector();
         }
         GameKeyCode::Up | GameKeyCode::Char('w') => {
             world.resource_mut::<MenuState>().prev();
@@ -410,6 +421,7 @@ fn handle_main_menu_mode(world: &mut World, key: GameKeyEvent) {
                 0 => {
                     // Start Game
                     let selected_scenario = world.resource::<MenuState>().selected_scenario;
+                    let selected_origin = world.resource::<MenuState>().selected_origin;
                     let scenario =
                         crate::shared::scenario::start_scenario_definition(selected_scenario);
                     *world.resource_mut::<crate::shared::scenario::ActiveStartScenario>() =
@@ -418,6 +430,12 @@ fn handle_main_menu_mode(world: &mut World, key: GameKeyEvent) {
                             name: scenario.name,
                             difficulty: scenario.difficulty,
                         };
+                    // The adventurer origin pick rides into the world here;
+                    // the origin spawn director reads it on the first tick.
+                    // `None` = "Surprise me": a random 2–3-origin roster.
+                    world.insert_resource(OriginChoice {
+                        chosen: selected_origin,
+                    });
                     crate::setup::apply_selected_start_scenario(world);
                     *world.resource_mut::<GameState>() = GameState::Running;
                     let mut stack = world.resource_mut::<InputContextStack>();

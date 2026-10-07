@@ -28,6 +28,9 @@
 //!   `interact`       - Act at the possessed pop's tile
 //!   `release`        - Return the possessed pop to AI control
 //!   `possessed`      - Show who is currently possessed
+//!   `origin <name>`  - Choose this run's adventurer origin (before first tick;
+//!                      also `--origin=<name>` on the command line)
+//!   `origins`        - List adventurer origins and this run's roster
 //!   `help`           - Show this help
 //!   `quit`           - Exit
 
@@ -45,6 +48,9 @@ use scale::layer1::construction::{ConstructionProgress, GreatWork, OperationalGr
 use scale::layer1::dreams::Dream;
 #[cfg(feature = "nova")]
 use scale::layer1::oral_tradition::{OralTradition, StoryGenre};
+use scale::layer1::culture::origins::{
+    origin_roster_summary, OriginChoice, OriginKind, OriginSchedule,
+};
 use scale::layer1::culture::sovereign::{
     abdicate, commission_artwork, crown_within_reach, describe_edicts, issue_decree,
     sovereign_stats, try_crown_pop, DecreeKind, Sovereign,
@@ -185,6 +191,31 @@ fn main() {
         ..Default::default()
     });
     *world.resource_mut::<GameState>() = GameState::Running;
+
+    // --origin=<name>: choose this run's adventurer origin up front.
+    // Without it (and without the `origin` console command before the
+    // first tick) the run gets a random 2–3-origin roster.
+    if let Some(flag) = std::env::args()
+        .find_map(|a| a.strip_prefix("--origin=").map(str::to_string))
+    {
+        match OriginKind::parse(&flag) {
+            Some(kind) => {
+                world.insert_resource(OriginChoice {
+                    chosen: Some(kind),
+                });
+                println!(
+                    "{}",
+                    format!("Origin chosen: {} ({})", kind.name(), kind.id()).cyan()
+                );
+            }
+            None => {
+                eprintln!("Unknown origin '{flag}'. Available origins:");
+                for kind in OriginKind::all() {
+                    eprintln!("  {:14} {}", kind.id(), kind.name());
+                }
+            }
+        }
+    }
 
     print_dashboard_panel(
         "SYSTEM",
@@ -427,6 +458,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "possess" => handle_possess_command(world, &parts),
         "release" => handle_release_command(world),
         "possessed" => handle_possessed_command(world),
+        "origin" => handle_origin_command(world, &parts),
+        "origins" => handle_origins_command(world),
         "move" => handle_move_command(world, &parts),
         "interact" => handle_interact_command(world),
         "decree" => handle_decree_command(world, &parts),
@@ -685,6 +718,112 @@ fn handle_release_command(world: &mut World) {
             Some(comfy_table::Attribute::Bold),
         ),
     }
+}
+
+/// `origin <name>`: choose this run's adventurer origin. Only works
+/// before the first tick — once the origin spawn director finalizes the
+/// roster, the choice is locked in.
+fn handle_origin_command(world: &mut World, parts: &[&str]) {
+    let decided = world
+        .get_resource::<OriginSchedule>()
+        .is_some_and(|s| s.finalized);
+    if parts.len() < 2 {
+        let current = world
+            .get_resource::<OriginChoice>()
+            .and_then(|c| c.chosen)
+            .map(|k| format!("{} ({})", k.name(), k.id()))
+            .unwrap_or_else(|| "surprise me (random roster)".to_string());
+        print_dashboard_panel(
+            "ORIGIN",
+            &format!(
+                "Current choice: {current}\nUsage: origin <name>  (before the first tick)\n{}",
+                if decided {
+                    format!(
+                        "Roster already decided: {}",
+                        origin_roster_summary(world)
+                    )
+                } else {
+                    "Roster not decided yet — the choice will apply.".to_string()
+                }
+            ),
+            Some(comfy_table::Color::Cyan),
+            None,
+        );
+        return;
+    }
+    match OriginKind::parse(parts[1]) {
+        None => {
+            let mut msg = format!("Unknown origin '{}'. Available:\n", parts[1]);
+            for kind in OriginKind::all() {
+                msg.push_str(&format!("  {:14} {}\n", kind.id(), kind.name()));
+            }
+            print_dashboard_panel(
+                "ERROR",
+                msg.trim_end(),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some(kind) => {
+            if decided {
+                print_dashboard_panel(
+                    "ORIGIN",
+                    &format!(
+                        "Too late — the roster is already decided: {}",
+                        origin_roster_summary(world)
+                    ),
+                    Some(comfy_table::Color::Yellow),
+                    None,
+                );
+                return;
+            }
+            world.insert_resource(OriginChoice {
+                chosen: Some(kind),
+            });
+            print_dashboard_panel(
+                "ORIGIN",
+                &format!(
+                    "Origin chosen: {} ({}). It will spawn at tick 0.",
+                    kind.name(),
+                    kind.id()
+                ),
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// `origins`: list all adventurer origins and this run's roster status.
+fn handle_origins_command(world: &mut World) {
+    let mut lines = Vec::new();
+    for kind in OriginKind::all() {
+        let marker = world
+            .get_resource::<OriginSchedule>()
+            .map(|s| {
+                if s.spawned.contains(&kind) {
+                    "spawned"
+                } else if s.pending.iter().any(|p| p.kind == kind) {
+                    "pending"
+                } else if s.finalized {
+                    "not this run"
+                } else {
+                    "undecided"
+                }
+            })
+            .unwrap_or("undecided");
+        lines.push(format!("  {:14} {}  [{marker}]", kind.id(), kind.name()));
+    }
+    print_dashboard_panel(
+        "ORIGINS",
+        &format!(
+            "Adventurer origins (3 per run):\n{}\nRoster: {}",
+            lines.join("\n"),
+            origin_roster_summary(world)
+        ),
+        Some(comfy_table::Color::Cyan),
+        None,
+    );
 }
 
 fn handle_possessed_command(world: &mut World) {
@@ -2491,7 +2630,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or_else(|| "none".to_string());
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={}",
         tick,
         pops,
         avg_health,
@@ -2521,6 +2660,7 @@ fn print_stats(world: &mut World) {
         lawbound,
         chronodebt,
         bloom,
+        origin_roster_summary(world),
     );
 }
 
@@ -4590,6 +4730,16 @@ fn print_help() {
                     "possess <pop_id>",
                     "",
                     "Take direct control of a pop (ids from `pops`); AI skips them while possessed",
+                ),
+                (
+                    "origin <name>",
+                    "",
+                    "Choose this run's adventurer origin (before the first tick)",
+                ),
+                (
+                    "origins",
+                    "",
+                    "List adventurer origins and this run's roster",
                 ),
                 (
                     "move <north|south|east|west>",

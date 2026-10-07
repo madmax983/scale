@@ -928,11 +928,24 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         crate::layer2::propaganda::constellation_hack_system
             .after(crate::layer2::propaganda::update_constellation),
     ));
-    // Fallen Sovereign systems (adventurer origin: the dented crown).
+    // Origin spawn director (adventurer origins).
     // Registered in their own block: the tuple above is at the
     // IntoSystemConfigs arity limit.
+    //
+    // Replaces the eight unconditional `spawn_*_once` entries
+    // (Mark, 2026-10-06): the director finalizes the run's 3-origin
+    // roster once (chosen origin at tick 0, two more trickling in), then
+    // fires due spawns. It carries the explicit before-edges the lawbound
+    // and chronostalker spawns used to hold: their sabotage/crisis
+    // bridges read origin state resources that only exist after a
+    // spawn/tick inserts them, and unordered systems panicked on the
+    // missing resource when the build order reshuffled.
     schedule.add_systems((
-        crate::layer1::culture::sovereign::spawn_dented_crown_once,
+        crate::layer1::culture::origins::origin_spawn_director
+            .before(crate::layer1::culture::lawbound::sabotage_lawbound_bridge)
+            .before(
+                crate::layer1::culture::chronostalker::crisis_chronostalker_bridge,
+            ),
         crate::layer1::culture::sovereign::sovereign_tick,
         crate::layer1::culture::sovereign::sabotage_melancholy_bridge.after(
             crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
@@ -943,16 +956,16 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     // The Corsair systems (adventurer origin: the raider skiff).
     // The tick holds the skiff's pressure envelope, so it must run before
     // the pressure damage system suffocates the tethered crew.
+    // (Origin spawning is handled by the origin spawn director above.)
     schedule.add_systems((
-        crate::layer1::culture::corsair::spawn_raider_skiff_once,
         crate::layer1::culture::corsair::corsair_tick.before(
             crate::layer1::physics::pressure::pressure_damage_system,
         ),
     ));
     // The Planetary Governor systems (adventurer origin: the appointment seal).
     // Own block: the tuple above sits near the IntoSystemConfigs arity limit.
+    // (Origin spawning is handled by the origin spawn director above.)
     schedule.add_systems((
-        crate::layer1::culture::governor::spawn_appointment_seal_once,
         crate::layer1::culture::governor::governor_tick,
         crate::layer1::culture::governor::apply_governor_morale
             .before(crate::layer1::social::morale::update_morale_cache_system),
@@ -961,8 +974,8 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     // The tick holds the hulk's pressure envelope (sealed cabin + patched
     // breaches) and drops open breaches to vacuum, so it must run before
     // the pressure damage system.
+    // (Origin spawning is handled by the origin spawn director above.)
     schedule.add_systems((
-        crate::layer1::culture::salvager::spawn_derelict_hulk_once,
         crate::layer1::culture::salvager::salvager_tick.before(
             crate::layer1::physics::pressure::pressure_damage_system,
         ),
@@ -970,8 +983,8 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     // The Improbable Pilot systems (adventurer origin: the Longshot Drive).
     // The tick holds a pressure envelope around the shuttle, so it must
     // run before the pressure damage system.
+    // (Origin spawning is handled by the origin spawn director above.)
     schedule.add_systems((
-        crate::layer1::culture::improbable::spawn_shuttle_once,
         crate::layer1::culture::improbable::pilot_tick.before(
             crate::layer1::physics::pressure::pressure_damage_system,
         ),
@@ -979,16 +992,9 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     // The Lawbound systems (adventurer origin: the Three Statutes).
     // The sabotage bridge reads SabotageEvent, so it runs after the
     // symbiont sabotage trigger (same pattern as the sovereign bridge).
-    // NOTE (bloom-touched, 2026-10-06): the spawn is explicitly ordered
-    // before the bridge. The bridge takes ResMut<LawboundState> directly
-    // while only the spawn/tick insert it via ensure — and schedule order
-    // for unordered systems is not guaranteed. Adding the bloom systems
-    // reshuffled the build order, the bridge ran first, and Bevy's param
-    // validation panicked on the missing resource.
+    // The spawn-before-bridge edge now lives on the origin spawn
+    // director (see the sovereign block above).
     schedule.add_systems((
-        crate::layer1::culture::lawbound::spawn_lawbound_cradle_once.before(
-            crate::layer1::culture::lawbound::sabotage_lawbound_bridge,
-        ),
         crate::layer1::culture::lawbound::lawbound_tick,
         crate::layer1::culture::lawbound::sabotage_lawbound_bridge.after(
             crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
@@ -998,12 +1004,9 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     // The crisis bridge reads SabotageEvent, PirateRaidEvent, and
     // DepressurizationEvent, so it runs after the symbiont sabotage
     // trigger (same pattern as the lawbound bridge). Same explicit
-    // spawn-before-bridge edge as above: the bridge needs
-    // ChronostalkerState, which only the spawn/tick insert.
+    // spawn-before-bridge edge as above, now carried by the origin
+    // spawn director.
     schedule.add_systems((
-        crate::layer1::culture::chronostalker::spawn_moment_wound_once.before(
-            crate::layer1::culture::chronostalker::crisis_chronostalker_bridge,
-        ),
         crate::layer1::culture::chronostalker::chronostalker_tick,
         crate::layer1::culture::chronostalker::crisis_chronostalker_bridge.after(
             crate::layer1::biology::symbiotic_insurgency::trigger_symbiont_sabotage_system,
@@ -1012,10 +1015,8 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     // The Bloom-Touched systems (adventurer origin: the bloom scar).
     // The tick holds the scar's expansion + entry-mutation passes; it has
     // no ordering constraints beyond the other origin ticks.
-    schedule.add_systems((
-        crate::layer1::culture::bloomtouched::spawn_bloom_scar_once,
-        crate::layer1::culture::bloomtouched::bloomtouched_tick,
-    ));
+    // (Origin spawning is handled by the origin spawn director above.)
+    schedule.add_systems((crate::layer1::culture::bloomtouched::bloomtouched_tick,));
     schedule.add_systems((
         crate::layer2::orbit::debris_cult::evaluate_debris_cult_formation_system,
         crate::layer2::orbit::debris_cult::apply_debris_cult_morale_system

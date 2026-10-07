@@ -74,4 +74,9 @@ pub use chronostalker::*;
 /// The Bloom-Touched: anomalous-zone expedition adventurer origin.
 pub mod bloomtouched;
 pub use bloomtouched::*;
+/// Adventurer origin selection + randomized spawn scheduling
+/// (Mark, 2026-10-06): new-game origin choice + 2–3 origins per
+/// playthrough instead of all 8 on one deterministic ring.
+pub mod origins;
+pub use origins::*;
 pub use invasive_xeno_aesthetics::*;
