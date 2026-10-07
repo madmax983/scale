@@ -122,6 +122,11 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 1372 Gravity-Fed Logistics: downhill chute flow is free,
+    // level/uphill flow requires an active PowerConsumer (the pump).
+    schedule.add_systems(
+        crate::layer1::logistics::gravity::process_gravity_logistics_system,
+    );
 
     schedule
 }
