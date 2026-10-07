@@ -11,6 +11,7 @@ use crate::layer1::eureka::{check_for_eureka, EurekaConfig};
 use crate::layer1::factions::{FactionMember, FactionState, Factions};
 use crate::layer1::fauna::{Fauna, FaunaType};
 use crate::layer1::fertility::FertilityGrid;
+use crate::layer1::agriculture::compost::CompostSoil;
 use crate::layer1::husbandry::Tame;
 use crate::layer1::items::ItemType;
 use crate::layer1::morale::{MoodModifier, Morale};
@@ -106,6 +107,7 @@ pub fn produce_food_system(
     // We need mut access to TechState for Corruption Check
     tech_state_mut: Option<ResMut<crate::layer1::tech::TechState>>,
     fertility_grid: Option<Res<FertilityGrid>>,
+    compost_soil: Option<Res<CompostSoil>>,
     eureka_config: Option<Res<EurekaConfig>>,
     mut eureka_events: EventWriter<crate::layer1::eureka::EurekaEvent>,
     // Fallen Sovereign: cumulative farm-production ledger for the labor decree.
@@ -166,6 +168,7 @@ pub fn produce_food_system(
                 &mut resources,
                 tech_state_mut.as_deref(),
                 fertility_grid.as_deref(),
+                compost_soil.as_deref(),
                 eureka_config.as_deref(),
                 &mut eureka_events,
                 modifier,
@@ -189,6 +192,7 @@ fn process_single_farmer(
     resources: &mut ColonyResources,
     tech_state_mut: Option<&crate::layer1::tech::TechState>,
     fertility_grid: Option<&FertilityGrid>,
+    compost_soil: Option<&CompostSoil>,
     eureka_config: Option<&EurekaConfig>,
     eureka_events: &mut EventWriter<crate::layer1::eureka::EurekaEvent>,
     modifier: f32,
@@ -243,7 +247,7 @@ fn process_single_farmer(
     };
 
     // Integrate Fertility
-    let fertility_modifier = if *building_type == BuildingType::HydroponicsBay {
+    let mut fertility_modifier = if *building_type == BuildingType::HydroponicsBay {
         1.0
     } else if let Some(grid) = fertility_grid {
         if pos.x >= 0 && pos.y >= 0 {
@@ -254,6 +258,13 @@ fn process_single_farmer(
     } else {
         1.0
     };
+    // Spec 1370 Civilizational Compost: corpse-enriched soil boosts yields
+    // beyond the grid baseline (hydroponics excluded — soilless).
+    if *building_type != BuildingType::HydroponicsBay {
+        if let Some(compost) = compost_soil {
+            fertility_modifier += compost.enrichment_at(pos.x, pos.y);
+        }
+    }
 
     // Check water availability
     if water_cost > 0.0 && resources.water < water_cost {

@@ -101,6 +101,16 @@ pub fn build_simulation_schedule() -> Schedule {
         crate::layer1::biology::symbiotic_gear::symbiotic_hunger_modifier_system,
         crate::layer1::biology::symbiotic_gear::starving_symbiote_damage_system,
     ));
+    // Spec 1370 Civilizational Compost: corpse decay -> soil enrichment.
+    schedule.add_systems(
+        (
+            crate::layer1::agriculture::compost::tick_corpse_decay_system,
+            crate::layer1::agriculture::compost::compost_decomposition_system,
+            crate::layer1::agriculture::compost::apply_haunted_mood_system,
+            crate::layer1::agriculture::compost::salvage_scrap_heap_system,
+        )
+            .chain(),
+    );
 
     schedule
 }
@@ -108,6 +118,7 @@ pub fn build_simulation_schedule() -> Schedule {
 /// Run one simulation tick: all game systems via schedule, then increment tick counter.
 #[allow(clippy::too_many_lines)]
 fn init_simulation_resources(world: &mut World) {
+    world.init_resource::<crate::layer1::agriculture::compost::CompostSoil>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::tech::temporal_smuggling::OpenRiftEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::tech::temporal_smuggling::PayTemporalDebtEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::tech::temporal_smuggling::ParadoxEvent>>();

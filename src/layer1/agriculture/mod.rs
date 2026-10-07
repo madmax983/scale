@@ -3,6 +3,7 @@
 //! Handles food production, farming, husbandry, and gastronomy.
 
 pub mod farm;
+pub mod compost;
 pub mod gastronomy;
 pub mod husbandry;
 pub mod zero_g_flora;

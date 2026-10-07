@@ -118,6 +118,16 @@ pub fn fire_damage_structure_system(world: &mut World) {
                     pos, // GridPosition
                 ));
 
+                // Spec 1370 Civilizational Compost: destroyed buildings leave
+                // a salvageable scrap heap alongside the ruin.
+                world.spawn((
+                    crate::layer1::agriculture::compost::ScrapHeap {
+                        metal: 8.0,
+                        wood: 8.0,
+                    },
+                    pos,
+                ));
+
                 // DO NOT remove from OccupiedTiles if Ruin spawns (it blocks construction)
             } else {
                 // Clean up OccupiedTiles if it wasn't a building (or failed to spawn ruin)
