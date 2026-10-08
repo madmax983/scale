@@ -427,6 +427,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "recall" => handle_recall_command(world, &parts),
         "recalls" => print_recalls(world),
         "fools" => handle_fools_command(world, &parts),
+        "artifacts" => print_artifacts(world),
+        "sell" => handle_sell_command(world, &parts),
+        "museum" => handle_museum_command(world, &parts),
         "return_stock" => handle_return_stock_command(world, &parts),
         "map" | "m" => handle_map_command(world, &parts),
         "tick" | "t" => handle_tick_command(world, &parts),
@@ -2652,9 +2655,13 @@ fn print_stats(world: &mut World) {
         let mut q = world.query::<(&ResonanceCrystal, &PowerSource)>();
         q.iter(world).map(|(_, s)| s.output).sum::<f32>()
     };
+    let artifacts = {
+        use scale::layer1::economy::artifact_market::artifact_count;
+        artifact_count(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={}",
         tick,
         pops,
         avg_health,
@@ -2688,6 +2695,7 @@ fn print_stats(world: &mut World) {
         panicking,
         howling,
         crystal_power,
+        artifacts,
     );
 }
 
@@ -5162,6 +5170,21 @@ fn print_help() {
                 ("calm", "", "Debug: end the wind surge (Spec 1374)"),
                 ("crystal [x] [y]", "", "Debug: place a resonance crystal (Spec 1374)"),
                 ("crystals", "", "List resonance crystals + power (Spec 1374)"),
+                (
+                    "artifacts",
+                    "",
+                    "List historical artifacts + appraised values (Spec 1376)",
+                ),
+                (
+                    "sell <id>",
+                    "",
+                    "Sell an artifact to core-world collectors (Spec 1376)",
+                ),
+                (
+                    "museum [x] [y]",
+                    "",
+                    "Designate a building as a museum (Spec 1376)",
+                ),
                 ("launch_sat", "", "Launch a slogan satellite (Propaganda Constellation)"),
                 ("constellation", "", "Show Propaganda Constellation status"),
                 ("godmind", "", "Debug: upload a dying leader as the Eternal Ruler (Spec 1381)"),
@@ -5539,8 +5562,246 @@ fn handle_fools_command(world: &mut World, parts: &[&str]) {
 }
 
 
+/// List historical artifacts and their appraised values (Spec 1376).
+fn print_artifacts(world: &mut World) {
+    use scale::layer1::core::map::GridPosition;
+    use scale::layer1::economy::artifact_market::{
+        artifact_sale_value, ArtifactMarketConfig, HistoricalArtifact, ItemAge,
+    };
+    use scale::layer1::economy::items::Item;
+
+    let config = world
+        .get_resource::<ArtifactMarketConfig>()
+        .cloned()
+        .unwrap_or_default();
+    let mut query = world.query::<(
+        Entity,
+        &Item,
+        &ItemAge,
+        &HistoricalArtifact,
+        Option<&GridPosition>,
+    )>();
+    let mut rows: Vec<String> = Vec::new();
+    for (entity, item, age, artifact, pos) in query.iter(world) {
+        let value = artifact_sale_value(age.age_ticks, &config);
+        let at = pos
+            .map(|p| format!("{},{}", p.x, p.y))
+            .unwrap_or_else(|| "carried".to_string());
+        rows.push(format!(
+            "#{} {} ({:?}, {} ticks, ~{:.0} cr) at {}",
+            entity.index(),
+            artifact.name,
+            item.item_type,
+            age.age_ticks,
+            value,
+            at
+        ));
+    }
+    if rows.is_empty() {
+        print_dashboard_panel(
+            "HISTORICAL ARTIFACTS",
+            "No artifacts yet. Items that survive 800 ticks become history — check back later.",
+            Some(comfy_table::Color::Yellow),
+            None,
+        );
+        return;
+    }
+    rows.sort();
+    print_dashboard_panel(
+        "HISTORICAL ARTIFACTS",
+        &format!(
+            "{}\n\n'sell <id>' sells to core-world collectors (morale will suffer). 'museum [x] [y]' designates a museum for a morale aura.",
+            rows.join("\n")
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Sell a historical artifact to core-world collectors (Spec 1376).
+fn handle_sell_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use bevy_ecs::system::RunSystemOnce;
+    use scale::layer1::economy::artifact_market::{
+        artifact_sale_value, process_artifact_sale_system, ArtifactMarketConfig, HistoricalArtifact,
+        ItemAge, SellArtifactEvent,
+    };
+
+    let id: u32 = match parts.get(1).and_then(|s| s.parse().ok()) {
+        Some(i) => i,
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: sell <artifact-id> (see 'artifacts')",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    let target: Option<(Entity, String, f32)> = {
+        let config = world
+            .get_resource::<ArtifactMarketConfig>()
+            .cloned()
+            .unwrap_or_default();
+        let mut query = world.query::<(Entity, &HistoricalArtifact, &ItemAge)>();
+        query
+            .iter(world)
+            .find(|(e, _, _)| e.index() == id)
+            .map(|(e, a, age)| (e, a.name.clone(), artifact_sale_value(age.age_ticks, &config)))
+    };
+    let Some((entity, name, value)) = target else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("No historical artifact with id #{id}. See 'artifacts'."),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    world.init_resource::<Events<SellArtifactEvent>>();
+    world
+        .resource_mut::<Events<SellArtifactEvent>>()
+        .send(SellArtifactEvent { artifact: entity });
+    // Process immediately so the sale (and its consequences) are visible now.
+    // The system skips already-despawned entities, so the scheduled run is harmless.
+    let _ = world.run_system_once(process_artifact_sale_system);
+    let sold = world.get_entity(entity).is_err();
+    if sold {
+        print_dashboard_panel(
+            "ARTIFACT SOLD",
+            &format!(
+                "{name} sold to core-world collectors for {value:.0} credits.\nThe colony eats tonight — but every pop now grieves the loss (-0.25 morale, 2000 ticks). The chronicle remembers."
+            ),
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        print_dashboard_panel(
+            "SALE FAILED",
+            &format!("{name} could not be sold (it may already be gone)."),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+}
+
+/// Designate a building as a museum (Spec 1376).
+fn handle_museum_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use bevy_ecs::system::RunSystemOnce;
+    use scale::layer1::architecture::building::Building;
+    use scale::layer1::core::map::GridPosition;
+    use scale::layer1::economy::artifact_market::{
+        process_museum_designation_system, DesignateMuseumEvent, Museum,
+    };
+
+    let coords: Option<(i32, i32)> = match (parts.get(1), parts.get(2)) {
+        (Some(x), Some(y)) => match (x.parse(), y.parse()) {
+            (Ok(x), Ok(y)) => Some((x, y)),
+            _ => {
+                print_dashboard_panel(
+                    "ERROR",
+                    "Usage: museum [x] [y]",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return;
+            }
+        },
+        _ => None,
+    };
+    // Nearest building to the point (or the first building at all).
+    let target: Option<(Entity, GridPosition)> = {
+        let mut query = world.query::<(Entity, &Building, &GridPosition)>();
+        let mut best: Option<(Entity, GridPosition, i32)> = None;
+        for (entity, _, pos) in query.iter(world) {
+            let dist = match coords {
+                Some((x, y)) => (pos.x - x).abs().max((pos.y - y).abs()),
+                None => 0,
+            };
+            if best.is_none_or(|(_, _, d)| dist < d) {
+                best = Some((entity, *pos, dist));
+            }
+        }
+        best.map(|(e, p, _)| (e, p))
+    };
+    let Some((building, pos)) = target else {
+        print_dashboard_panel(
+            "ERROR",
+            "No buildings exist yet — build something first, then designate a museum.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    if world.get::<Museum>(building).is_some() {
+        print_dashboard_panel(
+            "MUSEUM",
+            &format!("That building at {},{} is already a museum.", pos.x, pos.y),
+            Some(comfy_table::Color::Yellow),
+            None,
+        );
+        return;
+    }
+    world.init_resource::<Events<DesignateMuseumEvent>>();
+    world
+        .resource_mut::<Events<DesignateMuseumEvent>>()
+        .send(DesignateMuseumEvent { building });
+    let _ = world.run_system_once(process_museum_designation_system);
+    print_dashboard_panel(
+        "MUSEUM DESIGNATED",
+        &format!(
+            "The building at {},{} is now a museum. Housed artifacts (within 6 tiles) grant nearby pops a morale aura — keeping history has its rewards.",
+            pos.x, pos.y
+        ),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 #[cfg(test)]
 mod reproduction_tests {
+    // Spec 1376: the sell console command sells the artifact by entity id
+    // through the real sale system (credits up, artifact despawned).
+    #[test]
+    fn test_sell_command_sells_artifact_by_id() {
+        use scale::layer1::core::chronicle::AddChronicleEvent;
+        use scale::layer1::economy::artifact_market::{
+            ArtifactMarketConfig, ArtifactRegistry, HistoricalArtifact, ItemAge, SellArtifactEvent,
+        };
+        use scale::layer1::economy::inflation::EmpireResources;
+        use scale::layer1::economy::items::{Item, ItemType};
+
+        let mut world = setup_minimal_world();
+        world.init_resource::<ArtifactMarketConfig>();
+        world.init_resource::<ArtifactRegistry>();
+        world.init_resource::<bevy_ecs::event::Events<SellArtifactEvent>>();
+        world.init_resource::<bevy_ecs::event::Events<AddChronicleEvent>>();
+        let artifact = world
+            .spawn((
+                Item {
+                    item_type: ItemType::Tool,
+                },
+                ItemAge { age_ticks: 800 },
+                HistoricalArtifact {
+                    name: "the Founder's Pickaxe".to_string(),
+                    promoted_tick: 0,
+                },
+            ))
+            .id();
+        let id_str = artifact.index().to_string();
+        handle_sell_command(&mut world, &["sell", id_str.as_str()]);
+
+        assert!(
+            world.get_entity(artifact).is_err(),
+            "sell command should despawn the sold artifact"
+        );
+        let mut query = world.query::<&EmpireResources>();
+        let credits: f32 = query.iter(&world).map(|e| e.credits).sum();
+        assert!(credits > 0.0, "sell command should pay credits");
+    }
+
     use super::*;
     use scale::layer1::terrain::{TerrainGrid, TerrainType};
 

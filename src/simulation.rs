@@ -148,6 +148,18 @@ pub fn build_simulation_schedule() -> Schedule {
         crate::layer1::social::ship_of_fools::process_ship_of_fools_arrival_system,
         crate::layer1::social::ship_of_fools::entitled_grumbling_system,
     ));
+    // Spec 1376 Artifact Market: aging items are promoted to historical
+    // artifacts, museums grant morale auras per housed artifact, and sales
+    // pay credits at a colony-wide morale cost.
+    schedule.add_systems(
+        (
+            crate::layer1::economy::artifact_market::item_aging_system,
+            crate::layer1::economy::artifact_market::museum_aura_system,
+            crate::layer1::economy::artifact_market::process_artifact_sale_system,
+            crate::layer1::economy::artifact_market::process_museum_designation_system,
+        )
+            .chain(),
+    );
 
     schedule
 }
@@ -159,6 +171,14 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 1373 Recalled Product: manufacturer recalls, failure chance, returns.
     world.init_resource::<crate::layer1::economy::recall::RecallManager>();
     world.init_resource::<crate::layer1::economy::recall::RecallConfig>();
+    // Spec 1375 Ship of Fools: its arrival-event resource was never initialized;
+    // without this the first tick panics on a fresh world (pre-existing bug).
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::ship_of_fools::ShipOfFoolsArrivalEvent>>();
+    // Spec 1376 Artifact Market: market config, provenance registry, events.
+    world.init_resource::<crate::layer1::economy::artifact_market::ArtifactMarketConfig>();
+    world.init_resource::<crate::layer1::economy::artifact_market::ArtifactRegistry>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::artifact_market::SellArtifactEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::artifact_market::DesignateMuseumEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::recall::IssueRecallEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::recall::UseItemEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::recall::ReturnRecalledItemEvent>>();
