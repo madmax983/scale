@@ -233,6 +233,14 @@ pub fn register(schedule: &mut Schedule) {
             .after(crate::layer3::market::quantum_famine::process_market_panic_hoarding)
             .in_set(Layer1SystemSet::Economy),
     );
+    // Spec 1374: resonance crystals harvest tile noise into PowerSource output.
+    // Separate add_systems: the main Economy tuple is at Bevy's 20-system
+    // limit, and .after() on power_grid_system alone would not schedule this.
+    schedule.add_systems(
+        crate::layer1::physics::resonance::process_resonance_power_system
+            .before(crate::layer1::energy::power_grid_system)
+            .in_set(Layer1SystemSet::Economy),
+    );
     schedule.add_systems(
         (
             crate::layer1::economy::existential_audit::existential_audit_system,

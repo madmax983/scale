@@ -317,6 +317,16 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(crate::layer1::wind::WindGrid::new(80, 50));
     world.insert_resource(crate::layer1::wind::GlobalWind::default());
     world.insert_resource(crate::layer1::atmosphere::BaseGlobalWind::default());
+    // Spec 1374: atmospheric resonance — canyon map precomputed from terrain,
+    // howling threshold + live howling state.
+    world.insert_resource(crate::layer1::physics::resonance::HowlingThreshold::default());
+    world.init_resource::<crate::layer1::physics::resonance::HowlingState>();
+    {
+        let terrain = world.resource::<crate::layer1::TerrainGrid>();
+        let canyon_map =
+            crate::layer1::physics::resonance::CanyonMap::from_terrain(terrain);
+        world.insert_resource(canyon_map);
+    }
     world.insert_resource(crate::layer1::atmosphere::AtmosphericTide::default());
     world.insert_resource(crate::layer1::atmosphere::DiffusionConfig::default());
     world.init_resource::<crate::layer1::atmosphere::CorrosiveAtmosphere>();

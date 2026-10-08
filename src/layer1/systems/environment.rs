@@ -221,6 +221,9 @@ pub fn register(schedule: &mut Schedule) {
                 .after(crate::layer1::atmosphere::update_atmospheric_tide_system),
             crate::layer1::wind::update_wind_system
                 .after(crate::layer1::atmosphere::sync_global_wind_system),
+            // Spec 1374: canyon map refreshes sparingly from terrain heights.
+            crate::layer1::physics::resonance::recompute_canyon_map_system
+                .after(crate::layer1::wind::update_wind_system),
             #[cfg(feature = "nova")]
             crate::layer1::constellations::update_sky_system,
             malfunction_system.after(entropy_system),
@@ -263,7 +266,14 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::physics::pressure::lifesupport_self_repair_system
                 .after(update_pressure_system),
             update_noise_system.after(update_pressure_system),
-            apply_noise_effects_system.after(update_noise_system),
+            // Spec 1374: canyon howling adds noise after the reset/propagation,
+            // before the leisure/morale drain sees it.
+            crate::layer1::physics::resonance::calculate_howling_system
+                .after(update_noise_system),
+            crate::layer1::physics::resonance::howling_chronicle_system
+                .after(crate::layer1::physics::resonance::calculate_howling_system),
+            apply_noise_effects_system
+                .after(crate::layer1::physics::resonance::calculate_howling_system),
             crate::layer1::temperature::update_temperature_system.after(update_pressure_system),
             crate::layer1::radioactive::radiation_system
                 .after(crate::layer1::temperature::update_temperature_system),

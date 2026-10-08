@@ -420,6 +420,10 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "ghosts" => print_ghost_audit(world),
         "scare" => handle_scare_command(world, &parts),
         "panics" => print_panics(world),
+        "howl" => handle_howl_command(world, &parts),
+        "calm" => handle_calm_command(world),
+        "crystal" => handle_crystal_command(world, &parts),
+        "crystals" => print_crystals(world),
         "recall" => handle_recall_command(world, &parts),
         "recalls" => print_recalls(world),
         "return_stock" => handle_return_stock_command(world, &parts),
@@ -2637,9 +2641,19 @@ fn print_stats(world: &mut World) {
         use scale::layer1::psychology::panic_spirals::panicking_count;
         panicking_count(world)
     };
+    let howling = {
+        use scale::layer1::physics::resonance::HowlingState;
+        world.resource::<HowlingState>().tiles.len()
+    };
+    let crystal_power = {
+        use scale::layer1::energy::PowerSource;
+        use scale::layer1::physics::resonance::ResonanceCrystal;
+        let mut q = world.query::<(&ResonanceCrystal, &PowerSource)>();
+        q.iter(world).map(|(_, s)| s.output).sum::<f32>()
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1}",
         tick,
         pops,
         avg_health,
@@ -2671,6 +2685,8 @@ fn print_stats(world: &mut World) {
         bloom,
         origin_roster_summary(world),
         panicking,
+        howling,
+        crystal_power,
     );
 }
 
@@ -3183,6 +3199,145 @@ fn print_panics(world: &mut World) {
             &format!("{} panicking:\n{}", rows.len(), rows.join("\n")),
             Some(comfy_table::Color::Red),
             Some(comfy_table::Attribute::Bold),
+        );
+    }
+}
+
+/// Debug: trigger a wind surge so canyon tiles howl (Spec 1374).
+///
+/// `howl [speed]` — sets the base global wind speed (default 6.0); the surge
+/// persists until `calm`. Takes effect on the next tick.
+fn handle_howl_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::atmosphere::BaseGlobalWind;
+    use scale::layer1::physics::resonance::HowlingState;
+
+    let speed = parts
+        .get(1)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(6.0);
+    world.resource_mut::<BaseGlobalWind>().speed = speed;
+    // HowlingState reflects the last completed tick — useful once the surge lands.
+    let howling = world.resource::<HowlingState>();
+    let sample: Vec<String> = howling
+        .tiles
+        .iter()
+        .take(5)
+        .map(|(x, y)| format!("({x}, {y})"))
+        .collect();
+    let where_howling = if howling.tiles.is_empty() {
+        "none yet — run `tick` and ask again".to_string()
+    } else {
+        format!(
+            "{} tile(s), e.g. {}",
+            howling.tiles.len(),
+            sample.join(", ")
+        )
+    };
+    print_dashboard_panel(
+        "WIND SURGE",
+        &format!(
+            "Base wind speed set to {speed:.1} (takes effect next tick).\nCanyon tiles above the howl threshold will sing — the noise stresses pops, but resonance crystals harvest it for power.\nHowling now: {where_howling}.\n`calm` ends the surge."
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: end the wind surge (Spec 1374).
+fn handle_calm_command(world: &mut World) {
+    use scale::layer1::atmosphere::BaseGlobalWind;
+
+    world.resource_mut::<BaseGlobalWind>().speed = 1.0;
+    print_dashboard_panel(
+        "THE AIR SETTLES",
+        "Base wind speed back to 1.0. The canyons will fall silent within a tick or two.",
+        Some(comfy_table::Color::Green),
+        None,
+    );
+}
+
+/// Debug: place a resonance crystal at a tile (Spec 1374).
+///
+/// `crystal [x] [y]` — with no coordinates, attunes at the loudest currently
+/// howling tile (falls back to the first living pop's tile when silent), so
+/// the harvest mechanic is one command away from a `howl` surge.
+fn handle_crystal_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::physics::resonance::{spawn_resonance_crystal, HowlingState};
+
+    let (mut x, mut y) = (40, 25);
+    if let (Some(px), Some(py)) = (parts.get(1), parts.get(2)) {
+        if let (Ok(px), Ok(py)) = (px.parse::<i32>(), py.parse::<i32>()) {
+            x = px;
+            y = py;
+        }
+    } else if let Some((hx, hy)) = world.resource::<HowlingState>().tiles.first() {
+        // Default: a currently howling tile, so the harvest is audible.
+        x = *hx;
+        y = *hy;
+    } else {
+        // Fallback: at the first pop with a position.
+        let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+        if let Some(pos) = q.iter(world).next() {
+            x = pos.x;
+            y = pos.y;
+        }
+    }
+    let entity = spawn_resonance_crystal(world, x, y);
+    print_dashboard_panel(
+        "RESONANCE CRYSTAL PLACED",
+        &format!(
+            "Crystal #{} attuned at ({x}, {y}).\nIt harvests tile noise into the power grid — place it where the canyon howls.",
+            entity.index()
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// List resonance crystals with their tile noise and power output (Spec 1374).
+fn print_crystals(world: &mut World) {
+    use scale::layer1::acoustic::NoiseMap;
+    use scale::layer1::energy::PowerSource;
+    use scale::layer1::physics::resonance::ResonanceCrystal;
+
+    // Collect crystal rows first (the query borrows world mutably), then do
+    // the noise lookups with a separate shared borrow — the two can't overlap.
+    let crystals: Vec<(usize, i32, i32, f32, bool)> = {
+        let mut q = world.query::<(Entity, &GridPosition, &ResonanceCrystal, &PowerSource)>();
+        q.iter(world)
+            .map(|(entity, pos, _crystal, source)| {
+                (
+                    entity.index() as usize,
+                    pos.x,
+                    pos.y,
+                    source.output,
+                    source.active,
+                )
+            })
+            .collect()
+    };
+    let noise = world.resource::<NoiseMap>();
+    let mut rows: Vec<String> = Vec::new();
+    for (index, x, y, output, active) in crystals {
+        let level = noise.get(x, y);
+        rows.push(format!(
+            "#{index} at ({x}, {y}) — noise {level:.2}, output {output:.1}/tick ({})",
+            if active { "harvesting" } else { "quiet" }
+        ));
+    }
+    if rows.is_empty() {
+        print_dashboard_panel(
+            "RESONANCE CRYSTALS",
+            "No crystals placed. Use `crystal [x] [y]` to attune one.",
+            Some(comfy_table::Color::Cyan),
+            None,
+        );
+    } else {
+        print_dashboard_panel(
+            "RESONANCE CRYSTALS",
+            &format!("{} crystal(s):\n{}", rows.len(), rows.join("\n")),
+            Some(comfy_table::Color::Cyan),
+            None,
         );
     }
 }
@@ -5002,6 +5157,10 @@ fn print_help() {
                 ("dust", "", "Show Desire Dust and RoadMind status"),
                 ("scare [x] [y]", "", "Debug: spawn a terrifying sighting (Spec 1371)"),
                 ("panics", "", "List panicking pops (Spec 1371)"),
+                ("howl [speed]", "", "Debug: wind surge so canyons howl (Spec 1374)"),
+                ("calm", "", "Debug: end the wind surge (Spec 1374)"),
+                ("crystal [x] [y]", "", "Debug: place a resonance crystal (Spec 1374)"),
+                ("crystals", "", "List resonance crystals + power (Spec 1374)"),
                 ("launch_sat", "", "Launch a slogan satellite (Propaganda Constellation)"),
                 ("constellation", "", "Show Propaganda Constellation status"),
                 ("godmind", "", "Debug: upload a dying leader as the Eternal Ruler (Spec 1381)"),
