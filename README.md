@@ -234,7 +234,7 @@ scale/
 │   ├── layer1/           # Colony simulation (pops, buildings, needs, AI)
 │   ├── shared/           # Input routing, selection, time, narrative
 │   └── ui/               # Terminal UI rendering (backend-agnostic)
-├── web/                  # Trunk HTML entry point for WASM
+├── index.html            # Trunk HTML entry point for WASM
 ├── e2e/                  # Playwright E2E browser tests
 ├── specs/                # Feature specifications
 ├── lore/                 # Procedural lore system

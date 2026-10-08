@@ -14,7 +14,7 @@ impl TechPlugin {
 }
 
 impl HypertilePlugin for TechPlugin {
-    fn render(&self, area: Rect, buf: &mut Buffer, _is_focused: bool) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, _is_focused: bool) {
         let world = self.world.borrow();
         render_with_frame(area, buf, |frame| {
             crate::ui::tech::render_tech_tree(frame, frame.area(), &world);

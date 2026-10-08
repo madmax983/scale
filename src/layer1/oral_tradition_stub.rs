@@ -41,7 +41,10 @@ pub struct OralTradition {
 
 impl Default for OralTradition {
     fn default() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
         use crossterm::style::Stylize;
+        #[cfg(target_arch = "wasm32")]
+        use crate::wasm_style::Stylize;
         eprintln!(
             "\n{}",
             "╭── Optional Feature Disabled ────────────────────────────────╮".yellow()

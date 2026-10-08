@@ -54,7 +54,10 @@ pub struct SignalNetwork {
 impl std::fmt::Display for SignalNetwork {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use comfy_table::{presets::UTF8_FULL, Cell, Color as TableColor, Table};
+        #[cfg(not(target_arch = "wasm32"))]
         use crossterm::style::{Color, Stylize};
+        #[cfg(target_arch = "wasm32")]
+        use crate::wasm_style::{Color, Stylize};
 
         writeln!(
             f,

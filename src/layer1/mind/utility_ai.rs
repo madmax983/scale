@@ -879,7 +879,10 @@ fn run_evaluations(
     // Results slice is already provided and resized
     let mut rest = results;
 
-    pool.scope(|scope: &bevy_tasks::Scope<()>| {
+    // NB: the closure parameter is deliberately unannotated: the native
+    // multi-threaded pool passes `&Scope`, the wasm32 single-threaded pool
+    // passes `&mut Scope`. Inference picks the right one per target.
+    pool.scope(|scope| {
         for chunk in buffer.pop_data.chunks(chunk_size) {
             // Split the results slice to get a mutable chunk for this thread
             let (result_chunk, remaining) = rest.split_at_mut(chunk.len());

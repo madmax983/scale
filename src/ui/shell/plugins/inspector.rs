@@ -13,7 +13,7 @@ impl InspectorPlugin {
 }
 
 impl HypertilePlugin for InspectorPlugin {
-    fn render(&self, area: Rect, buf: &mut Buffer, _is_focused: bool) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, _is_focused: bool) {
         let world = self.world.borrow();
         render_with_frame(area, buf, |frame| {
             // Preserve the current inspector + log composition until the shell owns

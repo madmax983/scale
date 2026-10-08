@@ -228,7 +228,7 @@ mod tests {
         let mut registry = Registry::default();
         register_default_plugins(&mut registry, world);
 
-        let plugin = registry
+        let mut plugin = registry
             .instantiate_plugin(STATUS_PLUGIN_TYPE)
             .expect("status plugin should be registered");
         let area = Rect::new(0, 0, 48, 3);
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn status_plugin_renders_inside_small_rect() {
         let world = test_world();
-        let plugin = StatusPlugin::new(Rc::clone(&world));
+        let mut plugin = StatusPlugin::new(Rc::clone(&world));
         let area = Rect::new(0, 0, 48, 3);
         let mut buffer = Buffer::empty(area);
 
@@ -263,7 +263,7 @@ mod tests {
     fn chronicle_plugin_renders_even_when_overlay_state_is_closed() {
         let world = test_world();
 
-        let plugin = ChroniclePlugin::new(Rc::clone(&world));
+        let mut plugin = ChroniclePlugin::new(Rc::clone(&world));
         let area = Rect::new(0, 0, 80, 24);
         let mut buffer = Buffer::empty(area);
 
@@ -280,7 +280,7 @@ mod tests {
     fn reign_sky_plugin_renders_all_three_panels() {
         let world = test_world();
 
-        let plugin = ReignSkyPlugin::new(Rc::clone(&world));
+        let mut plugin = ReignSkyPlugin::new(Rc::clone(&world));
         let area = Rect::new(0, 0, 80, 30);
         let mut buffer = Buffer::empty(area);
 
@@ -305,7 +305,7 @@ mod tests {
     fn tech_plugin_renders_even_when_overlay_state_is_closed() {
         let world = test_world();
 
-        let plugin = TechPlugin::new(Rc::clone(&world));
+        let mut plugin = TechPlugin::new(Rc::clone(&world));
         let area = Rect::new(0, 0, 100, 30);
         let mut buffer = Buffer::empty(area);
 

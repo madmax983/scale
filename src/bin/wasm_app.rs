@@ -47,7 +47,7 @@ fn main() -> std::io::Result<()> {
     let shell = Rc::new(RefCell::new(build_default_shell(Rc::clone(&world), config)));
 
     let backend = DomBackend::new()?;
-    let terminal = Terminal::new(backend)?;
+    let mut terminal = Terminal::new(backend)?;
 
     terminal.on_key_event({
         let world = world.clone();
@@ -57,7 +57,7 @@ fn main() -> std::io::Result<()> {
                 route_root_input(&world, &mut shell.borrow_mut(), game_key);
             }
         }
-    });
+    })?;
 
     terminal.on_mouse_event({
         let world = world.clone();
@@ -67,7 +67,7 @@ fn main() -> std::io::Result<()> {
                 route_root_mouse_input(&world, &shell.borrow(), game_mouse);
             }
         }
-    });
+    })?;
 
     let frame_count = Rc::new(RefCell::new(0u32));
 

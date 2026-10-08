@@ -243,8 +243,16 @@ pub const fn format_event_prefix(importance: EventImportance) -> &'static str {
 
 impl std::fmt::Display for Chronicle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use comfy_table::{presets::UTF8_FULL, Cell, Color as TableColor, Table};
+        #[cfg(not(target_arch = "wasm32"))]
+use comfy_table::{presets::UTF8_FULL, Attribute as TableAttribute, Cell, Color as TableColor, Table};
+#[cfg(target_arch = "wasm32")]
+use comfy_table::{presets::UTF8_FULL, Cell, Table};
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_style::{CellStyle, TableAttribute, TableColor};
+        #[cfg(not(target_arch = "wasm32"))]
         use crossterm::style::{Color, Stylize};
+        #[cfg(target_arch = "wasm32")]
+        use crate::wasm_style::{Color, Stylize};
 
         writeln!(
             f,
@@ -277,10 +285,10 @@ impl std::fmt::Display for Chronicle {
             .apply_modifier(comfy_table::modifiers::UTF8_ROUND_CORNERS)
             .set_content_arrangement(comfy_table::ContentArrangement::Dynamic)
             .set_header(vec![
-                Cell::new("Tick").add_attribute(comfy_table::Attribute::Bold),
-                Cell::new("Year").add_attribute(comfy_table::Attribute::Bold),
-                Cell::new("Importance").add_attribute(comfy_table::Attribute::Bold),
-                Cell::new("Event Description").add_attribute(comfy_table::Attribute::Bold),
+                Cell::new("Tick").add_attribute(TableAttribute::Bold),
+                Cell::new("Year").add_attribute(TableAttribute::Bold),
+                Cell::new("Importance").add_attribute(TableAttribute::Bold),
+                Cell::new("Event Description").add_attribute(TableAttribute::Bold),
             ]);
 
         for event in &self.events {

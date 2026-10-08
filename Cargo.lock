@@ -2024,9 +2024,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi",
  "wasip2",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3502,9 +3504,9 @@ dependencies = [
 
 [[package]]
 name = "ratatui-hypertile"
-version = "0.1.0"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8912fc2c15335a919af0c80f59ddc3e58fcb5c7f14a69bc031b1585b6b51458"
+checksum = "cfeb8626eb91cd297d3bd8c8b9bc2486cd43110024a1669e34f3a52649637c08"
 dependencies = [
  "ratatui",
  "serde",
@@ -3512,11 +3514,10 @@ dependencies = [
 
 [[package]]
 name = "ratatui-hypertile-extras"
-version = "0.1.0"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c06e9353ba864f23d9cf077a01dd3e472731e205ea7b3178db103640a4a00af"
+checksum = "6f95626aec3bbdd25ae006e669b7082649fed8561248bdca2ff613e4b5c5472d"
 dependencies = [
- "crossterm",
  "ratatui",
  "ratatui-hypertile",
  "serde",
@@ -3752,6 +3753,7 @@ dependencies = [
  "criterion",
  "crossterm",
  "env_logger",
+ "getrandom 0.3.4",
  "image",
  "lazy_static",
  "log",

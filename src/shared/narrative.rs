@@ -93,7 +93,12 @@ impl std::fmt::Display for NarrativeError {
     /// assert!(output.contains("YEAR"));
     /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use comfy_table::{presets::UTF8_FULL, Cell, Color as TableColor, Table};
+        #[cfg(not(target_arch = "wasm32"))]
+use comfy_table::{presets::UTF8_FULL, Attribute as TableAttribute, Cell, Color as TableColor, Table};
+#[cfg(target_arch = "wasm32")]
+use comfy_table::{presets::UTF8_FULL, Cell, Table};
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_style::{CellStyle, TableAttribute, TableColor};
 
         let (err_type, message, action) = match self {
             Self::MissingContext(k) => (
@@ -138,7 +143,10 @@ impl std::fmt::Display for NarrativeError {
             ),
         };
 
+        #[cfg(not(target_arch = "wasm32"))]
         use crossterm::style::{Color, Stylize};
+        #[cfg(target_arch = "wasm32")]
+        use crate::wasm_style::{Color, Stylize};
 
         writeln!(
             f,
@@ -163,13 +171,13 @@ impl std::fmt::Display for NarrativeError {
         table.add_row(vec![
             Cell::new("Message")
                 .fg(TableColor::Cyan)
-                .add_attribute(comfy_table::Attribute::Bold),
+                .add_attribute(TableAttribute::Bold),
             Cell::new(message).fg(TableColor::White),
         ]);
         table.add_row(vec![
             Cell::new("Fix")
                 .fg(TableColor::Green)
-                .add_attribute(comfy_table::Attribute::Bold),
+                .add_attribute(TableAttribute::Bold),
             Cell::new(action).fg(TableColor::White),
         ]);
 

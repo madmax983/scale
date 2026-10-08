@@ -50,7 +50,9 @@
 //! println!("Current Tick: {}", time.tick);
 //! ```
 
-/// GPU compute for utility AI evaluation.
+/// GPU compute for utility AI evaluation (native only; the WASM build
+/// schedules the CPU fallback instead).
+#[cfg(not(target_arch = "wasm32"))]
 pub mod gpu;
 /// Layer 1: Colony Simulation (Pops, Buildings, Terrain).
 pub mod layer1;
@@ -60,6 +62,9 @@ pub mod layer2;
 pub mod layer3;
 /// Platform abstraction for native/WASM backends.
 pub mod platform;
+/// No-op text-styling shims for wasm32 (stand-in for crossterm::style).
+#[cfg(target_arch = "wasm32")]
+mod wasm_style;
 /// Shared world setup.
 pub mod setup;
 /// Shared utilities (Time, Input, Narrative).

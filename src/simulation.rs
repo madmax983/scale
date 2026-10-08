@@ -8,7 +8,12 @@
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{IntoSystemConfigs, Schedule, ScheduleLabel};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::gpu::evaluate::gpu_evaluate_actions;
+// On wasm32 the GPU backend is unavailable; alias the CPU fallback so the
+// schedule below compiles unchanged.
+#[cfg(target_arch = "wasm32")]
+use crate::layer1::mind::utility_ai::evaluate_actions_system as gpu_evaluate_actions;
 use crate::layer1::building::{update_building_map_system, BuildingMap};
 use crate::layer1::systems::{register_layer1_systems, update_event_buffer, Layer1SystemSet};
 use crate::layer1::update_action_timer_system;

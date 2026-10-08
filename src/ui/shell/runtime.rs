@@ -604,6 +604,7 @@ pub fn build_default_shell(world: SharedWorld, config: ShellConfig) -> UiShell {
             .with_split_policy(SplitPolicy::Golden)
             .with_split_behavior(SplitBehavior::PromptPalette)
             .with_default_split_plugin(COLONY_MAP_PLUGIN_TYPE)
+            .build()
     });
 
     initialize_curated_workspace(&mut workspaces, &world, COLONY_OPS_WORKSPACE);
@@ -741,12 +742,12 @@ fn apply_workspace_layout(
         .set_root(workspace.root.clone())
         .map_err(|error| error.to_string())?;
 
-    let pane_ids = runtime.core().state().pane_ids();
-    for pane_id in &pane_ids {
+    let pane_ids: Vec<_> = runtime.core().state().pane_ids().collect();
+    for pane_id in pane_ids {
         let Some(binding) = workspace
             .panes
             .iter()
-            .find(|binding| binding.pane_id == *pane_id)
+            .find(|binding| binding.pane_id == pane_id)
         else {
             return Err(format!(
                 "workspace {} is missing a plugin binding for pane {}",
@@ -765,7 +766,7 @@ fn apply_workspace_layout(
             ));
         }
         runtime
-            .replace_pane_plugin(*pane_id, &binding.plugin_type)
+            .replace_pane_plugin(pane_id, &binding.plugin_type)
             .map_err(|error| error.to_string())?;
     }
 

@@ -16,7 +16,7 @@ impl LogPlugin {
 }
 
 impl HypertilePlugin for LogPlugin {
-    fn render(&self, area: Rect, buf: &mut Buffer, _is_focused: bool) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, _is_focused: bool) {
         let world = self.world.borrow();
         render_with_frame(area, buf, |frame| {
             let block = Block::default()
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn test_log_plugin_empty() {
         let world = setup_world();
-        let plugin = LogPlugin::new(Rc::clone(&world));
+        let mut plugin = LogPlugin::new(Rc::clone(&world));
         let area = Rect::new(0, 0, 40, 10);
         let mut buffer = Buffer::empty(area);
 
@@ -148,7 +148,7 @@ mod tests {
             log.add_colored("Normal Message", Color::White);
         }
 
-        let plugin = LogPlugin::new(Rc::clone(&world));
+        let mut plugin = LogPlugin::new(Rc::clone(&world));
         let area = Rect::new(0, 0, 40, 10);
         let mut buffer = Buffer::empty(area);
 
@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn test_log_plugin_uninitialized() {
         let world = Rc::new(RefCell::new(World::new()));
-        let plugin = LogPlugin::new(Rc::clone(&world));
+        let mut plugin = LogPlugin::new(Rc::clone(&world));
         let area = Rect::new(0, 0, 40, 10);
         let mut buffer = Buffer::empty(area);
 

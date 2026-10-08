@@ -1,0 +1,47 @@
+#!/bin/bash
+# wasm-opt wrapper for Scale's `trunk build`.
+#
+# Problem: trunk (0.21.x) pins wasm-opt version_123, whose validator rejects
+# the post-MVP wasm features rustc emits for wasm32-unknown-unknown
+# (bulk-memory, nontrapping-fptoint, sign-ext, mutable-globals) unless they
+# are spelled out as CLI flags -- and trunk offers no way to pass extra
+# flags to wasm-opt. trunk DOES prefer a `wasm-opt` found on PATH (see
+# trunk src/tools.rs `find_system`), so point it at this script:
+#
+#     export PATH="$PWD/tools:$PATH"
+#     trunk build --release
+#
+# The script self-bootstraps: on first run it downloads binaryen
+# (pinned version below) into ~/.cache/scale-wasm-opt/.
+set -e
+BINARYEN_VERSION="version_133"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/scale-wasm-opt"
+WASM_OPT="$CACHE_DIR/binaryen-$BINARYEN_VERSION/bin/wasm-opt"
+
+if [ ! -x "$WASM_OPT" ]; then
+    echo "wasm-opt wrapper: bootstrapping binaryen $BINARYEN_VERSION into $CACHE_DIR..." >&2
+    mkdir -p "$CACHE_DIR"
+    OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    ARCH="$(uname -m)"
+    case "$ARCH" in
+        x86_64) ARCH="x86_64" ;;
+        aarch64|arm64) ARCH="arm64" ;;
+        *) echo "wasm-opt wrapper: unsupported arch $ARCH" >&2; exit 1 ;;
+    esac
+    case "$OS" in
+        linux) TARGET="$ARCH-linux" ;;
+        darwin) TARGET="$ARCH-macos" ;;
+        *) echo "wasm-opt wrapper: unsupported OS $OS" >&2; exit 1 ;;
+    esac
+    curl -sL --http1.1 -o "$CACHE_DIR/binaryen.tar.gz" \
+        "https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/binaryen-$BINARYEN_VERSION-$TARGET.tar.gz"
+    tar xzf "$CACHE_DIR/binaryen.tar.gz" -C "$CACHE_DIR"
+    rm "$CACHE_DIR/binaryen.tar.gz"
+fi
+
+exec "$WASM_OPT" \
+    --enable-bulk-memory \
+    --enable-nontrapping-float-to-int \
+    --enable-sign-ext \
+    --enable-mutable-globals \
+    "$@"

@@ -16,7 +16,7 @@ impl ReignSkyPlugin {
 }
 
 impl HypertilePlugin for ReignSkyPlugin {
-    fn render(&self, area: Rect, buf: &mut Buffer, _is_focused: bool) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, _is_focused: bool) {
         let world = self.world.borrow();
         render_with_frame(area, buf, |frame| {
             crate::ui::reign_sky::render_reign_sky(frame, frame.area(), &world);
