@@ -127,6 +127,16 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 1373 Recalled Product: recall notices, 5% use-failure, stock returns.
+    schedule.add_systems(
+        (
+            crate::layer1::economy::recall::process_recall_issuance_system,
+            crate::layer1::economy::recall::process_item_usage_system,
+            crate::layer1::economy::recall::process_item_return_system,
+            crate::layer1::economy::recall::auto_recall_system,
+        )
+            .chain(),
+    );
     // Spec 1372 Gravity-Fed Logistics: downhill chute flow is free,
     // level/uphill flow requires an active PowerConsumer (the pump).
     schedule.add_systems(
@@ -140,6 +150,12 @@ pub fn build_simulation_schedule() -> Schedule {
 #[allow(clippy::too_many_lines)]
 fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::agriculture::compost::CompostSoil>();
+    // Spec 1373 Recalled Product: manufacturer recalls, failure chance, returns.
+    world.init_resource::<crate::layer1::economy::recall::RecallManager>();
+    world.init_resource::<crate::layer1::economy::recall::RecallConfig>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::recall::IssueRecallEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::recall::UseItemEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::recall::ReturnRecalledItemEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::tech::temporal_smuggling::OpenRiftEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::tech::temporal_smuggling::PayTemporalDebtEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::tech::temporal_smuggling::ParadoxEvent>>();

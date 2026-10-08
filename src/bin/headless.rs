@@ -420,6 +420,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "ghosts" => print_ghost_audit(world),
         "scare" => handle_scare_command(world, &parts),
         "panics" => print_panics(world),
+        "recall" => handle_recall_command(world, &parts),
+        "recalls" => print_recalls(world),
+        "return_stock" => handle_return_stock_command(world, &parts),
         "map" | "m" => handle_map_command(world, &parts),
         "tick" | "t" => handle_tick_command(world, &parts),
         "build" | "b" => handle_build_command(world, &parts),
@@ -3182,6 +3185,221 @@ fn print_panics(world: &mut World) {
             Some(comfy_table::Attribute::Bold),
         );
     }
+}
+
+/// Issue a manufacturer recall notice (Spec 1373).
+fn handle_recall_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
+    use scale::layer1::economy::recall::{
+        item_display_name, parse_recallable_item, RecallManager,
+    };
+
+    let item_name = match parts.get(1) {
+        Some(n) => n.to_string(),
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: recall <item> [manufacturer] [reason...]",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    let item_type = match parse_recallable_item(&item_name) {
+        Some(t) => t,
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                &format!(
+                    "Unknown item: '{item_name}'. Try: rations, potato, wheat, stim, tools, ..."
+                ),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    let manufacturer = parts
+        .get(2)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "OmniNutri Corp".to_string());
+    let reason = {
+        let rest = parts.get(3..).map(|s| s.join(" ")).unwrap_or_default();
+        if rest.is_empty() {
+            "defective batch".to_string()
+        } else {
+            rest
+        }
+    };
+    // Direct world manipulation (headless pattern): takes effect immediately.
+    world.init_resource::<RecallManager>();
+    let is_new = world.resource_mut::<RecallManager>().issue(item_type);
+    world.init_resource::<bevy_ecs::event::Events<AddChronicleEvent>>();
+    if is_new {
+        world
+            .resource_mut::<bevy_ecs::event::Events<AddChronicleEvent>>()
+            .send(AddChronicleEvent {
+                text: format!(
+                    "RECALL NOTICE: {manufacturer} has recalled all {} — {reason}. Use at your own risk; return stock for credits.",
+                    item_display_name(&item_type),
+                ),
+                importance: EventImportance::Major,
+            });
+    }
+    print_dashboard_panel(
+        "RECALL ISSUED",
+        &format!(
+            "{manufacturer} has recalled all {} — {reason}.\nUsing it risks critical failure; 'return_stock {} <qty>' returns it for credits.",
+            item_display_name(&item_type),
+            item_name.to_lowercase()
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// List active manufacturer recalls (Spec 1373).
+fn print_recalls(world: &mut World) {
+    use scale::layer1::economy::recall::{item_display_name, RecallManager};
+
+    let Some(manager) = world.get_resource::<RecallManager>() else {
+        print_dashboard_panel(
+            "ACTIVE RECALLS",
+            "Recall system not initialized yet (tick once).",
+            Some(comfy_table::Color::Yellow),
+            None,
+        );
+        return;
+    };
+    if manager.recalled.is_empty() {
+        print_dashboard_panel(
+            "ACTIVE RECALLS",
+            "No active recalls. Your products are (allegedly) safe.",
+            Some(comfy_table::Color::Green),
+            None,
+        );
+        return;
+    }
+    let mut rows: Vec<String> = manager
+        .recalled
+        .iter()
+        .map(|t| format!("- {}", item_display_name(t)))
+        .collect();
+    rows.sort();
+    print_dashboard_panel(
+        "ACTIVE RECALLS",
+        &format!(
+            "{}\n\nUsing these risks critical failure. 'return_stock <item> <qty>' returns stock for credits.",
+            rows.join("\n")
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Return recalled stock for credits (Spec 1373).
+fn handle_return_stock_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
+    use scale::layer1::economy::inflation::EmpireResources;
+    use scale::layer1::economy::recall::{
+        item_display_name, parse_recallable_item, remove_stock, RecallConfig, RecallManager,
+    };
+    use scale::layer1::economy::resources::ColonyResources;
+
+    let (item_name, qty) = match (parts.get(1), parts.get(2)) {
+        (Some(n), Some(q)) => (n.to_string(), q.parse::<u32>().unwrap_or(0)),
+        _ => {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: return_stock <item> <qty>",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    let item_type = match parse_recallable_item(&item_name) {
+        Some(t) => t,
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                &format!("Unknown item: '{item_name}'."),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    if qty == 0 {
+        print_dashboard_panel(
+            "ERROR",
+            "Quantity must be positive.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    // Direct world manipulation (headless pattern): takes effect immediately.
+    let is_recalled = world
+        .get_resource::<RecallManager>()
+        .is_some_and(|m| m.is_recalled(&item_type));
+    if !is_recalled {
+        print_dashboard_panel(
+            "RETURN REJECTED",
+            &format!(
+                "{} is not under recall — the manufacturer will not buy it back.",
+                item_display_name(&item_type)
+            ),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let credits_per_item = world
+        .get_resource::<RecallConfig>()
+        .map(|c| c.credits_per_item)
+        .unwrap_or(5.0);
+    let returned = world
+        .get_resource_mut::<ColonyResources>()
+        .map(|mut r| remove_stock(&mut r, &item_type, qty))
+        .unwrap_or(0);
+    if returned == 0 {
+        print_dashboard_panel(
+            "RETURN REJECTED",
+            &format!(
+                "No {} in stock to return.",
+                item_display_name(&item_type)
+            ),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let payout = returned as f32 * credits_per_item;
+    let mut empire_q = world.query::<&mut EmpireResources>();
+    for mut empire in empire_q.iter_mut(world) {
+        empire.credits += payout;
+    }
+    world.init_resource::<bevy_ecs::event::Events<AddChronicleEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<AddChronicleEvent>>()
+        .send(AddChronicleEvent {
+            text: format!(
+                "Returned {returned} recalled {} for {payout:.0} credits.",
+                item_display_name(&item_type),
+            ),
+            importance: EventImportance::Minor,
+        });
+    print_dashboard_panel(
+        "STOCK RETURNED",
+        &format!(
+            "Returned {returned}× {} for {payout:.0} credits.",
+            item_display_name(&item_type),
+        ),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
 }
 
 /// Diagnostic: dump raw entity/component counts for pop-related entities.

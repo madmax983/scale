@@ -282,6 +282,7 @@ pub use beacon::*;
 pub mod smugglers_cove;
 pub use smugglers_cove::*;
 pub mod inflation;
+pub mod recall;
 pub use inflation::*;
 pub mod ideological_contraband;
 pub use ideological_contraband::*;

@@ -12,6 +12,7 @@ use crate::layer1::factions::{FactionMember, FactionState, Factions};
 use crate::layer1::fauna::{Fauna, FaunaType};
 use crate::layer1::fertility::FertilityGrid;
 use crate::layer1::agriculture::compost::CompostSoil;
+use crate::layer1::economy::recall::UseItemEvent;
 use crate::layer1::husbandry::Tame;
 use crate::layer1::items::ItemType;
 use crate::layer1::morale::{MoodModifier, Morale};
@@ -312,6 +313,7 @@ fn process_single_farmer(
 }
 
 /// Pops eat food when hungry.
+#[allow(clippy::too_many_arguments)] // Spec 1373 adds the recall event writer (8th param).
 pub fn consume_food_system(
     mut commands: Commands,
     mut pop_query: Query<
@@ -332,6 +334,9 @@ pub fn consume_food_system(
     prices: Option<Res<ColonyPrices>>,
     // Planetary Governor: active rationing schedules shrink meals (None = no rationing).
     ration: Option<Res<crate::layer1::culture::governor::RationOrder>>,
+    // Spec 1373: report food consumption so recalled items can fail.
+    // Optional: farm unit tests run this system without event resources.
+    mut item_use_events: Option<ResMut<bevy_ecs::event::Events<UseItemEvent>>>,
 ) {
     // Use total_food() logic for check
     let total_food = resources.total_food();
@@ -415,6 +420,13 @@ pub fn consume_food_system(
         }
 
         if ate {
+            // Spec 1373: eating a recalled product risks critical failure.
+            if let Some(events) = item_use_events.as_mut() {
+                events.send(UseItemEvent {
+                    user: entity,
+                    item_type: eaten_item,
+                });
+            }
             if let Ok((
                 _,
                 mut needs,
