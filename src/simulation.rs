@@ -142,6 +142,12 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems(
         crate::layer1::logistics::gravity::process_gravity_logistics_system,
     );
+    // Spec 1375 Ship of Fools: pleasure-cruiser arrivals spawn zero-skill
+    // Entitled passengers; the entitled grumble when food isn't abundant.
+    schedule.add_systems((
+        crate::layer1::social::ship_of_fools::process_ship_of_fools_arrival_system,
+        crate::layer1::social::ship_of_fools::entitled_grumbling_system,
+    ));
 
     schedule
 }

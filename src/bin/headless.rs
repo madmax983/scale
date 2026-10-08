@@ -426,6 +426,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "crystals" => print_crystals(world),
         "recall" => handle_recall_command(world, &parts),
         "recalls" => print_recalls(world),
+        "fools" => handle_fools_command(world, &parts),
         "return_stock" => handle_return_stock_command(world, &parts),
         "map" | "m" => handle_map_command(world, &parts),
         "tick" | "t" => handle_tick_command(world, &parts),
@@ -5512,6 +5513,28 @@ fn handle_unplug_command(world: &mut World) {
         ),
         Some(Color::Red),
         Some(Attribute::Bold),
+    );
+}
+
+fn handle_fools_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::ship_of_fools::ShipOfFoolsArrivalEvent;
+
+    let count: u32 = parts
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5);
+
+    world.init_resource::<bevy_ecs::event::Events<ShipOfFoolsArrivalEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<ShipOfFoolsArrivalEvent>>()
+        .send(ShipOfFoolsArrivalEvent { count });
+    print_dashboard_panel(
+        "SHIP OF FOOLS",
+        &format!(
+            "A crippled pleasure-cruiser is inbound with {count} passengers.\nThey have no skills, but they have opinions about the catering."
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
     );
 }
 

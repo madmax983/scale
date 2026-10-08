@@ -144,6 +144,8 @@ pub enum Trait {
     Traumatized,
     /// Braver than most: resists panic cascades (Spec 1371).
     Courage,
+    /// Arrived on the Ship of Fools (Spec 1375): demands luxury, produces nothing.
+    Entitled,
 }
 
 impl Trait {
@@ -224,6 +226,7 @@ impl Trait {
             Self::Trauma => "Trauma",
             Self::Hacker => "Hacker",
             Self::Courage => "Courageous",
+            Self::Entitled => "Entitled",
         }
     }
 }

@@ -700,3 +700,7 @@ pub use pets::*;
 pub mod bureaucratic_strike;
 
 pub mod scapegoat;
+
+/// The Ship of Fools (Spec 1375): useless luxury-demanding passengers.
+pub mod ship_of_fools;
+pub use ship_of_fools::*;
