@@ -80,6 +80,20 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Consumption),
     );
 
+    // Spec 276 The Flesh Famine: diet degrades crops -> meat -> cannibalism.
+    // Separate add_systems: the tuple above is at Bevy's IntoSystemConfigs arity limit.
+    schedule.add_systems(
+        (
+            crate::layer1::social::flesh_famine::trigger_blight_system,
+            crate::layer1::social::flesh_famine::hunt_fauna_during_famine_system
+                .after(consume_food_system),
+            crate::layer1::social::flesh_famine::cannibalism_during_famine_system
+                .after(crate::layer1::social::flesh_famine::hunt_fauna_during_famine_system)
+                .before(crate::layer1::health::despawn_dead_entities_system),
+        )
+            .in_set(Layer1SystemSet::Consumption),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::somnambulism::trigger_somnambulism_system.after(decay_needs_system),

@@ -24,6 +24,7 @@ use crate::layer1::resources::ColonyResources;
 use crate::layer1::seasons::{Season, SeasonState};
 use crate::layer1::skills::{get_skill_efficiency, SkillType, Skills};
 use crate::layer1::social_mimicry::JustConsumed;
+use crate::layer1::social::flesh_famine::Blighted;
 use crate::layer1::tech::Tech;
 use crate::layer1::traits::Trait;
 use crate::layer1::utility_ai::{ActionType, PopAction};
@@ -88,7 +89,13 @@ const fn get_crop_stats(crop: &ItemType) -> CropStats {
 /// Produces food from all farms with active workers.
 #[allow(clippy::too_many_arguments)]
 pub fn produce_food_system(
-    farm_query: Query<(&Building, &GridPosition, Option<&PowerConsumer>, &Farm)>,
+    farm_query: Query<(
+        &Building,
+        &GridPosition,
+        Option<&PowerConsumer>,
+        &Farm,
+        Option<&Blighted>,
+    )>,
     mut pop_query: Query<
         (
             Entity,
@@ -124,7 +131,9 @@ pub fn produce_food_system(
 
     let farm_map: bevy::utils::HashMap<GridPosition, (BuildingType, bool, ItemType)> = farm_query
         .iter()
-        .map(|(b, p, pc, farm)| {
+        // Spec 276: blighted farms produce nothing.
+        .filter(|(_, _, _, _, blighted)| blighted.is_none())
+        .map(|(b, p, pc, farm, _)| {
             (
                 *p,
                 (

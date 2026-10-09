@@ -56,6 +56,10 @@ pub enum MemoryType {
     MascotDeath,
     /// Lost a limb in an accident.
     LostLimb,
+    /// Ate the flesh of another pop (Spec 276: taboo violation).
+    CannibalismTaboo,
+    /// Psychological trauma from consuming sapient flesh (Spec 276).
+    CannibalismTrauma,
 }
 
 impl MemoryType {
@@ -65,6 +69,8 @@ impl MemoryType {
         match self {
             Self::WitnessedDeath => -0.2,
             Self::MascotDeath | Self::LostLimb | Self::FleshTaxTrauma => -0.3, // High impact grief/trauma
+            Self::CannibalismTaboo => -0.25,
+            Self::CannibalismTrauma => -0.35, // Eating the dead scars deeply
             Self::StarvationTrauma => -0.15,
             Self::DisgustedByVermin | Self::InspectorDisappointed => -0.1,
             Self::InspectorImpressed => 0.15,
@@ -90,6 +96,7 @@ impl MemoryType {
         // Ticks to fade completely
         match self {
             Self::WitnessedDeath | Self::LostLimb | Self::MascotDeath => 0.0005, // Slow fade (2000 ticks)
+            Self::CannibalismTaboo | Self::CannibalismTrauma => 0.0005, // Slow fade (2000 ticks): the colony does not forget
             Self::StarvationTrauma | Self::AttendedFuneral | Self::FleshTaxTrauma => 0.001, // Medium
             Self::AteFineMeal | Self::WonFight => 0.002, // Fast (500 ticks)
             Self::SawCorpse | Self::AdmiredArt | Self::DisgustedByVermin => 0.01, // Very fast fade (100 ticks)

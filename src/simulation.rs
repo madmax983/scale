@@ -368,6 +368,9 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<BuildingMap>();
 
     world.init_resource::<crate::layer1::stress::TraumaTracker>();
+    // Spec 276 The Flesh Famine.
+    world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
+    world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
     world.init_resource::<crate::layer1::economy::deep_sleep_syndicates::ProductionModifier>();
     world
         .init_resource::<Events<crate::layer1::economy::deep_sleep_syndicates::ThawSyndicateEvent>>(
@@ -1852,6 +1855,9 @@ mod tests {
         world.init_resource::<crate::layer3::council::GalacticCouncil>();
         world.init_resource::<crate::layer3::market::GalacticMarket>();
         world.init_resource::<crate::layer1::stress::TraumaTracker>();
+        // Spec 276 The Flesh Famine.
+        world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
+        world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
         world.init_resource::<crate::layer1::economy::deep_sleep_syndicates::ProductionModifier>();
         world.init_resource::<Events<crate::layer1::economy::deep_sleep_syndicates::ThawSyndicateEvent>>();
         world.init_resource::<Events<crate::layer2::skyhooks::LaunchIntent>>();
