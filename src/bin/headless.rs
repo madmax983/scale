@@ -427,6 +427,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "recall" => handle_recall_command(world, &parts),
         "recalls" => print_recalls(world),
         "fools" => handle_fools_command(world, &parts),
+        "scion" => handle_scion_command(world, &parts),
         "artifacts" => print_artifacts(world),
         "sell" => handle_sell_command(world, &parts),
         "museum" => handle_museum_command(world, &parts),
@@ -2659,9 +2660,13 @@ fn print_stats(world: &mut World) {
         use scale::layer1::economy::artifact_market::artifact_count;
         artifact_count(world)
     };
+    let scions = {
+        use scale::layer1::social::cadet::scion_count;
+        scion_count(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={}",
         tick,
         pops,
         avg_health,
@@ -2696,6 +2701,7 @@ fn print_stats(world: &mut World) {
         howling,
         crystal_power,
         artifacts,
+        scions,
     );
 }
 
@@ -5166,6 +5172,11 @@ fn print_help() {
                 ("dust", "", "Show Desire Dust and RoadMind status"),
                 ("scare [x] [y]", "", "Debug: spawn a terrifying sighting (Spec 1371)"),
                 ("panics", "", "List panicking pops (Spec 1371)"),
+                (
+                    "scion [n]",
+                    "",
+                    "Debug: Homeworld courier delivers n noble scions (Spec 1208)",
+                ),
                 ("howl [speed]", "", "Debug: wind surge so canyons howl (Spec 1374)"),
                 ("calm", "", "Debug: end the wind surge (Spec 1374)"),
                 ("crystal [x] [y]", "", "Debug: place a resonance crystal (Spec 1374)"),
@@ -5555,6 +5566,29 @@ fn handle_fools_command(world: &mut World, parts: &[&str]) {
         "SHIP OF FOOLS",
         &format!(
             "A crippled pleasure-cruiser is inbound with {count} passengers.\nThey have no skills, but they have opinions about the catering."
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: a Homeworld courier delivers noble scions (Spec 1208).
+fn handle_scion_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::cadet::ScionArrivalEvent;
+
+    let count: u32 = parts
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3);
+
+    world.init_resource::<bevy_ecs::event::Events<ScionArrivalEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<ScionArrivalEvent>>()
+        .send(ScionArrivalEvent { count });
+    print_dashboard_panel(
+        "THE CADET BRANCH",
+        &format!(
+            "A courier from the Homeworld is inbound with {count} noble scions.\nUseless, exquisite, enormously well-funded — keep them alive."
         ),
         Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
