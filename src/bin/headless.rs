@@ -427,6 +427,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "recall" => handle_recall_command(world, &parts),
         "recalls" => print_recalls(world),
         "fools" => handle_fools_command(world, &parts),
+        "lease" => handle_lease_command(world, &parts),
+        "leases" => print_leases(world),
         "scion" => handle_scion_command(world, &parts),
         "extractor" => handle_extractor_command(world, &parts),
         "corpse" => handle_corpse_command(world, &parts),
@@ -5581,6 +5583,86 @@ fn handle_unplug_command(world: &mut World) {
         Some(Color::Red),
         Some(Attribute::Bold),
     );
+}
+
+/// Debug: lease a mining zone to a megacorp (Spec 271).
+fn handle_lease_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::factions::subcontractor_factions::{
+        DesignatedZone, LawSet, LeaseZoneEvent, Megacorp, SecurityLevel, ZoneType,
+    };
+
+    let rent: f32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(5.0);
+    let duration: u32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(100);
+
+    let corp = world
+        .spawn((Megacorp {
+            name: "Helion Combine".to_string(),
+        },))
+        .id();
+    let zone = world
+        .spawn((
+            DesignatedZone {
+                zone_type: ZoneType::Mining,
+                tiles: vec![
+                    bevy::math::Vec2::new(10.0, 10.0),
+                    bevy::math::Vec2::new(10.0, 11.0),
+                    bevy::math::Vec2::new(11.0, 10.0),
+                ],
+            },
+            LawSet {
+                security: SecurityLevel::Normal,
+                hazards_allowed: false,
+            },
+        ))
+        .id();
+
+    world.init_resource::<bevy_ecs::event::Events<LeaseZoneEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<LeaseZoneEvent>>()
+        .send(LeaseZoneEvent {
+            zone,
+            lessee: corp,
+            rent_per_tick: rent,
+            duration,
+        });
+    print_dashboard_panel(
+        "LEASE SIGNED",
+        &format!(
+            "Mining zone leased to Helion Combine: {rent:.1} credits/tick for {duration} ticks. Their laws apply now."
+        ),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: list active corporate leases (Spec 271).
+fn print_leases(world: &mut World) {
+    use scale::layer1::social::factions::subcontractor_factions::{CorporateRig, Leased};
+
+    let mut rows = Vec::new();
+    let lease_data: Vec<(bevy_ecs::prelude::Entity, f32, u32, f32)> = {
+        let mut q = world.query::<&Leased>();
+        q.iter(world)
+            .map(|l| (l.lessee, l.rent_per_tick, l.ticks_remaining, l.accrued))
+            .collect()
+    };
+    for (lessee, rent_per_tick, ticks_remaining, accrued) in lease_data {
+        let rigs = world
+            .query::<&CorporateRig>()
+            .iter(world)
+            .filter(|r| r.lessee == lessee)
+            .count();
+        rows.push(format!(
+            "lessee={:?} rent={:.1}/tick ticks_left={} accrued={:.1} rigs={}",
+            lessee, rent_per_tick, ticks_remaining, accrued, rigs,
+        ));
+    }
+    let body = if rows.is_empty() {
+        "No active corporate leases.".to_string()
+    } else {
+        rows.join("\n")
+    };
+    print_dashboard_panel("CORPORATE LEASES", &body, None, None);
 }
 
 fn handle_fools_command(world: &mut World, parts: &[&str]) {

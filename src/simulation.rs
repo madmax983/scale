@@ -148,6 +148,17 @@ pub fn build_simulation_schedule() -> Schedule {
         crate::layer1::social::ship_of_fools::process_ship_of_fools_arrival_system,
         crate::layer1::social::ship_of_fools::entitled_grumbling_system,
     ));
+    // Spec 271 Subcontractor Factions: lease zones to megacorps (brutal law
+    // override, rent in chunks, corporate rigs, security sweeps).
+    schedule.add_systems(
+        (
+            crate::layer1::social::factions::subcontractor_factions::handle_leased_zones_system,
+            crate::layer1::social::factions::subcontractor_factions::rent_collection_system,
+            crate::layer1::social::factions::subcontractor_factions::megacorp_security_sweep_system,
+            crate::layer1::social::factions::subcontractor_factions::auto_sweep_system,
+        )
+            .chain(),
+    );
     // Spec 1208 The Cadet Branch: Homeworld courier arrivals spawn Noble
     // Scion pops (zero skills, Noble trait, monthly family allowance).
     schedule.add_systems(
@@ -193,6 +204,9 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 1375 Ship of Fools: its arrival-event resource was never initialized;
     // without this the first tick panics on a fresh world (pre-existing bug).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::ship_of_fools::ShipOfFoolsArrivalEvent>>();
+    // Spec 271 Subcontractor Factions: lease + sweep events.
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::factions::subcontractor_factions::LeaseZoneEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::factions::subcontractor_factions::MegacorpSecuritySweepEvent>>();
     // Spec 1208 The Cadet Branch: scion arrival events.
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::cadet::ScionArrivalEvent>>();
     // Spec 1376 Artifact Market: market config, provenance registry, events.

@@ -606,17 +606,49 @@ mod tests {
 }
 
 pub mod subcontractor_factions {
+    //! # 271: Subcontractor Factions
+    //!
+    //! Selling off pieces of sovereignty. The colony can lease designated
+    //! zones to external megacorporations. The megacorp instantly builds
+    //! extraction infrastructure ([`CorporateRig`]) for free and begins
+    //! extracting resources; the colony receives rent in weekly chunks.
+    //! Their laws apply in the zone: brutal security, no safety regulations.
+    //! Striking workers (low morale) in a leased zone face corporate
+    //! security sweeps. When the lease expires, original laws are restored
+    //! and the rigs are dismantled.
     use bevy::math::Vec2;
     use bevy_ecs::prelude::*;
 
-    #[derive(Component)]
+    use crate::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
+    use crate::layer1::economy::resources::ColonyResources;
+
+    /// Ticks between rent payouts (weekly chunks, not per-tick micro-transactions).
+    pub const RENT_PAYOUT_PERIOD_TICKS: u64 = 50;
+    /// Ticks between automatic corporate security sweeps of a leased zone.
+    pub const SWEEP_PERIOD_TICKS: u64 = 50;
+    /// Morale below this marks a pop as "striking" for sweep purposes.
+    pub const STRIKE_MORALE_THRESHOLD: f32 = 0.2;
+    /// Damage dealt by a corporate security sweep to striking pops.
+    pub const SWEEP_DAMAGE: f32 = 25.0;
+
+    /// A zone leased to a megacorporation.
+    #[derive(Component, Debug)]
     pub struct Leased {
+        /// The megacorp entity holding the lease.
         pub lessee: Entity,
-        pub rent: f32,
+        /// Rent accrued per tick (paid out in chunks).
+        pub rent_per_tick: f32,
+        /// Ticks until the lease expires and laws are restored.
         pub ticks_remaining: u32,
+        /// Original security level, restored on expiry.
+        pub prior_security: SecurityLevel,
+        /// Original hazard policy, restored on expiry.
+        pub prior_hazards: bool,
+        /// Rent accrued but not yet paid out.
+        pub accrued: f32,
     }
 
-    #[derive(Event)]
+    #[derive(Event, Debug, Clone)]
     pub struct LeaseZoneEvent {
         pub zone: Entity,
         pub lessee: Entity,
@@ -624,7 +656,7 @@ pub mod subcontractor_factions {
         pub duration: u32,
     }
 
-    #[derive(Event)]
+    #[derive(Event, Debug, Clone)]
     pub struct MegacorpSecuritySweepEvent {
         pub zone: Entity,
     }
@@ -635,7 +667,7 @@ pub mod subcontractor_factions {
         Other,
     }
 
-    #[derive(Component)]
+    #[derive(Component, Debug)]
     pub struct DesignatedZone {
         pub zone_type: ZoneType,
         pub tiles: Vec<Vec2>,
@@ -647,36 +679,125 @@ pub mod subcontractor_factions {
         Brutal,
     }
 
-    #[derive(Component)]
+    #[derive(Component, Debug)]
     pub struct LawSet {
         pub security: SecurityLevel,
         pub hazards_allowed: bool,
     }
 
-    #[derive(Component)]
+    #[derive(Component, Debug)]
     pub struct Megacorp {
         pub name: String,
     }
 
+    /// Megacorp extraction infrastructure, built instantly on lease.
+    /// Dismantled when the lease expires.
+    #[derive(Component, Debug)]
+    pub struct CorporateRig {
+        /// The leased zone this rig extracts from.
+        pub zone: Entity,
+        /// The megacorp that owns it.
+        pub lessee: Entity,
+    }
+
+    /// Handles new leases: overrides zone law, records prior law, spawns
+    /// the corporate rig, and announces the deal in the chronicle.
     pub fn handle_leased_zones_system(
         mut commands: Commands,
         mut lease_events: EventReader<LeaseZoneEvent>,
-        mut zones: Query<&mut LawSet, With<DesignatedZone>>,
+        mut zones: Query<(Entity, &DesignatedZone, &mut LawSet)>,
+        megacorps: Query<&Megacorp>,
+        mut chronicle: EventWriter<AddChronicleEvent>,
     ) {
         for event in lease_events.read() {
-            if let Ok(mut law) = zones.get_mut(event.zone) {
+            if let Ok((zone_entity, zone, mut law)) = zones.get_mut(event.zone) {
+                let prior_security = law.security;
+                let prior_hazards = law.hazards_allowed;
                 law.security = SecurityLevel::Brutal;
                 law.hazards_allowed = true;
 
-                commands.entity(event.zone).insert(Leased {
+                commands.entity(zone_entity).insert(Leased {
                     lessee: event.lessee,
-                    rent: event.rent_per_tick,
+                    rent_per_tick: event.rent_per_tick,
                     ticks_remaining: event.duration,
+                    prior_security,
+                    prior_hazards,
+                    accrued: 0.0,
+                });
+
+                // Instant infrastructure: the rig goes on the first zone tile.
+                if let Some(first) = zone.tiles.first() {
+                    commands.spawn((
+                        CorporateRig {
+                            zone: zone_entity,
+                            lessee: event.lessee,
+                        },
+                        crate::layer1::map::GridPosition {
+                            x: first.x as i32,
+                            y: first.y as i32,
+                        },
+                    ));
+                }
+
+                let corp_name = megacorps
+                    .get(event.lessee)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_else(|_| "an unknown combine".to_string());
+                chronicle.send(AddChronicleEvent {
+                    text: format!(
+                        "The {corp_name} has leased a {:?} zone for {} ticks at {:.1} credits/tick. Their laws apply now.",
+                        zone.zone_type, event.duration, event.rent_per_tick,
+                    ),
+                    importance: EventImportance::Major,
                 });
             }
         }
     }
 
+    /// Accrues rent, pays it out in chunks, and handles lease expiry
+    /// (restores prior law, dismantles rigs, pays remaining balance).
+    pub fn rent_collection_system(
+        mut commands: Commands,
+        mut tick: Local<u64>,
+        mut leases: Query<(Entity, &mut Leased, &mut LawSet)>,
+        rigs: Query<(Entity, &CorporateRig)>,
+        mut treasury: Option<ResMut<ColonyResources>>,
+        mut chronicle: EventWriter<AddChronicleEvent>,
+    ) {
+        *tick += 1;
+        for (zone_entity, mut lease, mut law) in leases.iter_mut() {
+            lease.accrued += lease.rent_per_tick;
+            lease.ticks_remaining = lease.ticks_remaining.saturating_sub(1);
+
+            let payout_due = tick.is_multiple_of(RENT_PAYOUT_PERIOD_TICKS);
+            let expired = lease.ticks_remaining == 0;
+
+            if (payout_due || expired) && lease.accrued > 0.0 {
+                if let Some(ref mut res) = treasury {
+                    res.credits += lease.accrued;
+                }
+                lease.accrued = 0.0;
+            }
+
+            if expired {
+                law.security = lease.prior_security;
+                law.hazards_allowed = lease.prior_hazards;
+                for (rig_entity, rig) in rigs.iter() {
+                    if rig.zone == zone_entity {
+                        commands.entity(rig_entity).despawn();
+                    }
+                }
+                commands.entity(zone_entity).remove::<Leased>();
+                chronicle.send(AddChronicleEvent {
+                    text: "A corporate lease has expired. Colonial law is restored and the rigs go quiet.".to_string(),
+                    importance: EventImportance::Standard,
+                });
+            }
+        }
+    }
+
+    /// Corporate security fires on striking (low-morale) pops inside a
+    /// brutal-law leased zone.
     pub fn megacorp_security_sweep_system(
         mut events: EventReader<MegacorpSecuritySweepEvent>,
         zones: Query<(&DesignatedZone, &LawSet), With<Leased>>,
@@ -694,11 +815,45 @@ pub mod subcontractor_factions {
                 if law.security == SecurityLevel::Brutal {
                     for (pos, mut health, morale) in pops.iter_mut() {
                         let vec_pos = Vec2::new(pos.x as f32, pos.y as f32);
-                        if zone.tiles.contains(&vec_pos) && morale.value < 0.2 {
-                            health.current -= 25.0;
+                        if zone.tiles.contains(&vec_pos)
+                            && morale.value < STRIKE_MORALE_THRESHOLD
+                        {
+                            health.current -= SWEEP_DAMAGE;
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// The megacorp watches its territory: if striking workers are detected
+    /// in a leased zone, corporate security is dispatched automatically.
+    pub fn auto_sweep_system(
+        mut tick: Local<u64>,
+        leases: Query<(Entity, &DesignatedZone, &LawSet), With<Leased>>,
+        pops: Query<
+            (
+                &crate::layer1::map::GridPosition,
+                &crate::layer1::social::morale::Morale,
+            ),
+            With<crate::layer1::pop::Pop>,
+        >,
+        mut sweep_events: EventWriter<MegacorpSecuritySweepEvent>,
+    ) {
+        *tick += 1;
+        if !tick.is_multiple_of(SWEEP_PERIOD_TICKS) {
+            return;
+        }
+        for (zone_entity, zone, law) in leases.iter() {
+            if law.security != SecurityLevel::Brutal {
+                continue;
+            }
+            let unrest_detected = pops.iter().any(|(pos, morale)| {
+                let vec_pos = Vec2::new(pos.x as f32, pos.y as f32);
+                zone.tiles.contains(&vec_pos) && morale.value < STRIKE_MORALE_THRESHOLD
+            });
+            if unrest_detected {
+                sweep_events.send(MegacorpSecuritySweepEvent { zone: zone_entity });
             }
         }
     }
@@ -709,16 +864,27 @@ pub mod subcontractor_factions {
         use crate::layer1::biology::health::Health;
         use crate::layer1::map::GridPosition;
         use crate::layer1::pop::Pop;
+        use crate::layer1::core::chronicle::AddChronicleEvent;
+        use crate::layer1::economy::resources::ColonyResources;
         use crate::layer1::social::morale::Morale;
         use bevy_app::{App, Update};
 
         fn setup_app() -> App {
             let mut app = App::new();
-            app.add_systems(Update, handle_leased_zones_system);
-            app.add_systems(Update, megacorp_security_sweep_system);
+            app.add_systems(
+                Update,
+                (
+                    handle_leased_zones_system,
+                    rent_collection_system,
+                    megacorp_security_sweep_system,
+                    auto_sweep_system,
+                )
+                    .chain(),
+            );
 
             app.add_event::<LeaseZoneEvent>();
             app.add_event::<MegacorpSecuritySweepEvent>();
+            app.add_event::<AddChronicleEvent>();
 
             app
         }
@@ -777,8 +943,11 @@ pub mod subcontractor_factions {
                     },
                     Leased {
                         lessee: Entity::PLACEHOLDER,
-                        rent: 5.0,
+                        rent_per_tick: 5.0,
                         ticks_remaining: 100,
+                        prior_security: SecurityLevel::Normal,
+                        prior_hazards: false,
+                        accrued: 0.0,
                     },
                     LawSet {
                         security: SecurityLevel::Brutal,
@@ -810,6 +979,209 @@ pub mod subcontractor_factions {
             app.update();
 
             // Pop should take damage because they are striking in a Brutal security zone
+            let health = app.world().get::<Health>(pop_id).unwrap();
+            assert!(health.current < 100.0);
+        }
+
+        #[test]
+        fn test_corporate_rig_spawned_on_lease() {
+            let mut app = setup_app();
+            app.add_event::<AddChronicleEvent>();
+
+            let faction_id = app
+                .world_mut()
+                .spawn((Megacorp {
+                    name: "Helion Combine".to_string(),
+                },))
+                .id();
+
+            let zone_id = app
+                .world_mut()
+                .spawn((
+                    DesignatedZone {
+                        zone_type: ZoneType::Mining,
+                        tiles: vec![Vec2::new(3.0, 4.0), Vec2::new(3.0, 5.0)],
+                    },
+                    LawSet {
+                        security: SecurityLevel::Normal,
+                        hazards_allowed: false,
+                    },
+                ))
+                .id();
+
+            app.world_mut().send_event(LeaseZoneEvent {
+                zone: zone_id,
+                lessee: faction_id,
+                rent_per_tick: 5.0,
+                duration: 100,
+            });
+            app.update();
+
+            // The megacorp instantly builds extraction infrastructure.
+            let mut rigs = app
+                .world_mut()
+                .query::<(&CorporateRig, &GridPosition)>();
+            let rigs: Vec<_> = rigs.iter(app.world()).collect();
+            assert_eq!(rigs.len(), 1);
+            assert_eq!(rigs[0].0.zone, zone_id);
+            assert_eq!(rigs[0].0.lessee, faction_id);
+            assert_eq!(rigs[0].1, &GridPosition { x: 3, y: 4 });
+        }
+
+        #[test]
+        fn test_rent_accrues_and_pays_out_in_chunks() {
+            let mut app = setup_app();
+            app.add_event::<AddChronicleEvent>();
+            app.world_mut().insert_resource(ColonyResources {
+                credits: 0.0,
+                ..Default::default()
+            });
+
+            let faction_id = app
+                .world_mut()
+                .spawn((Megacorp {
+                    name: "Helion Combine".to_string(),
+                },))
+                .id();
+
+            let zone_id = app
+                .world_mut()
+                .spawn((
+                    DesignatedZone {
+                        zone_type: ZoneType::Mining,
+                        tiles: vec![Vec2::new(0.0, 0.0)],
+                    },
+                    LawSet {
+                        security: SecurityLevel::Normal,
+                        hazards_allowed: false,
+                    },
+                ))
+                .id();
+
+            app.world_mut().send_event(LeaseZoneEvent {
+                zone: zone_id,
+                lessee: faction_id,
+                rent_per_tick: 5.0,
+                duration: 200,
+            });
+            app.update();
+
+            // Run 60 ticks: payout happens every 50 ticks, so 250 credits paid.
+            for _ in 0..60 {
+                app.update();
+            }
+            let credits = app.world().resource::<ColonyResources>().credits;
+            assert_eq!(credits, 250.0);
+        }
+
+        #[test]
+        fn test_lease_expiry_restores_law_and_removes_rig() {
+            let mut app = setup_app();
+            app.add_event::<AddChronicleEvent>();
+            app.world_mut().insert_resource(ColonyResources {
+                credits: 0.0,
+                ..Default::default()
+            });
+
+            let faction_id = app
+                .world_mut()
+                .spawn((Megacorp {
+                    name: "Helion Combine".to_string(),
+                },))
+                .id();
+
+            let zone_id = app
+                .world_mut()
+                .spawn((
+                    DesignatedZone {
+                        zone_type: ZoneType::Mining,
+                        tiles: vec![Vec2::new(0.0, 0.0)],
+                    },
+                    LawSet {
+                        security: SecurityLevel::Normal,
+                        hazards_allowed: false,
+                    },
+                ))
+                .id();
+
+            app.world_mut().send_event(LeaseZoneEvent {
+                zone: zone_id,
+                lessee: faction_id,
+                rent_per_tick: 5.0,
+                duration: 5,
+            });
+            for _ in 0..10 {
+                app.update();
+            }
+
+            // Lease expired: component removed, original laws restored.
+            assert!(app.world().get::<Leased>(zone_id).is_none());
+            let law = app.world().get::<LawSet>(zone_id).unwrap();
+            assert_eq!(law.security, SecurityLevel::Normal);
+            assert!(!law.hazards_allowed);
+            // Rig dismantled.
+            let mut rigs = app.world_mut().query::<&CorporateRig>();
+            assert_eq!(rigs.iter(app.world()).count(), 0);
+            // Remaining accrued rent (5 ticks * 5.0) paid out on expiry.
+            let credits = app.world().resource::<ColonyResources>().credits;
+            assert_eq!(credits, 25.0);
+        }
+
+        #[test]
+        fn test_auto_sweep_triggers_on_striking_workers() {
+            let mut app = setup_app();
+            app.add_event::<AddChronicleEvent>();
+
+            let faction_id = app
+                .world_mut()
+                .spawn((Megacorp {
+                    name: "Helion Combine".to_string(),
+                },))
+                .id();
+
+            let zone_id = app
+                .world_mut()
+                .spawn((
+                    DesignatedZone {
+                        zone_type: ZoneType::Mining,
+                        tiles: vec![Vec2::new(0.0, 0.0)],
+                    },
+                    LawSet {
+                        security: SecurityLevel::Normal,
+                        hazards_allowed: false,
+                    },
+                ))
+                .id();
+
+            app.world_mut().send_event(LeaseZoneEvent {
+                zone: zone_id,
+                lessee: faction_id,
+                rent_per_tick: 5.0,
+                duration: 500,
+            });
+            app.update();
+
+            let pop_id = app
+                .world_mut()
+                .spawn((
+                    GridPosition { x: 0, y: 0 },
+                    Pop,
+                    Morale {
+                        value: 0.1,
+                        modifiers: vec![],
+                    },
+                    Health {
+                        current: 100.0,
+                        max: 100.0,
+                        has_rust_lung: false,
+                    },
+                ))
+                .id();
+
+            // Auto-sweep fires periodically without a manual event.
+            for _ in 0..60 {
+                app.update();
+            }
             let health = app.world().get::<Health>(pop_id).unwrap();
             assert!(health.current < 100.0);
         }

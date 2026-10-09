@@ -309,8 +309,6 @@ pub fn register(schedule: &mut Schedule) {
                 .after(crate::layer1::factions::update_faction_satisfaction_system),
             crate::layer1::factions::update_faction_strikes_system
                 .after(crate::layer1::factions::update_faction_demands_system),
-            crate::layer1::social::factions::subcontractor_factions::handle_leased_zones_system,
-            crate::layer1::social::factions::subcontractor_factions::megacorp_security_sweep_system,
             crate::layer1::core::integration::faction_strike_mob_bridge_system
                 .after(crate::layer1::factions::update_faction_strikes_system),
             crate::layer1::social::sub_lithic::process_deep_mining_exposure,
