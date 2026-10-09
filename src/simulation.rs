@@ -244,6 +244,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::culture::sovereign::SporeSuppression>();
     // The Corsair (adventurer origin)
     world.init_resource::<crate::layer1::culture::corsair::CorsairState>();
+    // Spec 272 The Martyrdom Effect: fervor state, enemy-strike ledger, casus belli.
+    world.init_resource::<crate::layer1::social::martyrdom::Martyrdom>();
+    world.init_resource::<crate::layer1::social::martyrdom::LastEnemyStrike>();
+    world.init_resource::<crate::layer1::social::martyrdom::IdeologicalCasusBelli>();
     // The Planetary Governor (adventurer origin)
     world.init_resource::<crate::layer1::culture::governor::GovernorState>();
     world.init_resource::<crate::layer1::culture::governor::Treasury>();

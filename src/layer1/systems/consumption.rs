@@ -186,6 +186,13 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::loci::record_death_loci_system
                 .after(crate::layer1::entities::pop::handle_pop_death_system)
                 .before(crate::layer1::health::despawn_dead_entities_system),
+            // Spec 272 The Martyrdom Effect: must read the corpse's components,
+            // so it runs after PopDied is emitted and before the despawn.
+            crate::layer1::social::martyrdom::record_enemy_strike_system,
+            crate::layer1::social::martyrdom::handle_martyrdom_system
+                .after(crate::layer1::entities::pop::handle_pop_death_system)
+                .before(crate::layer1::health::despawn_dead_entities_system),
+            crate::layer1::social::martyrdom::tick_martyrdom_system,
             crate::layer1::health::despawn_dead_entities_system
                 .after(crate::layer1::entities::pop::handle_pop_death_system)
                 .after(crate::layer1::fauna::handle_fauna_death_system)

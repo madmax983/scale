@@ -704,3 +704,8 @@ pub mod scapegoat;
 /// The Ship of Fools (Spec 1375): useless luxury-demanding passengers.
 pub mod ship_of_fools;
 pub use ship_of_fools::*;
+
+/// The Martyrdom Effect (Spec 272): enemy-slain leaders ignite colony-wide
+/// fervor — unrest silenced, work redoubled, ideological casus belli.
+pub mod martyrdom;
+pub use martyrdom::*;

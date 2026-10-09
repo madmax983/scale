@@ -430,6 +430,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "lease" => handle_lease_command(world, &parts),
         "leases" => print_leases(world),
         "scion" => handle_scion_command(world, &parts),
+        "martyr" => handle_martyr_command(world, &parts),
         "extractor" => handle_extractor_command(world, &parts),
         "corpse" => handle_corpse_command(world, &parts),
         "harvest" => handle_harvest_command(world, &parts),
@@ -2672,9 +2673,13 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::cadet::scion_count;
         scion_count(world)
     };
+    let martyrdom = {
+        use scale::layer1::social::martyrdom::martyrdom_ticks_remaining;
+        martyrdom_ticks_remaining(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={}",
         tick,
         pops,
         avg_health,
@@ -2711,6 +2716,7 @@ fn print_stats(world: &mut World) {
         artifacts,
         scions,
         resources.organs,
+        martyrdom,
     );
 }
 
@@ -5187,6 +5193,11 @@ fn print_help() {
                     "Debug: Homeworld courier delivers n noble scions (Spec 1208)",
                 ),
                 (
+                    "martyr [pop_id|name] [faction_id]",
+                    "",
+                    "Debug: martyr a pop — enemy-slain leader test (Spec 272)",
+                ),
+                (
                     "extractor [x] [y]",
                     "",
                     "Debug: build a Biomass Extractor (Spec 270)",
@@ -5710,6 +5721,60 @@ fn handle_scion_command(world: &mut World, parts: &[&str]) {
     );
 }
 
+
+/// Debug: martyr a pop — mark a leader figure as slain by an enemy faction (Spec 272).
+fn handle_martyr_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::biology::health::Dead;
+    use scale::layer1::social::martyrdom::{ensure_leader_figure, SlainByFaction, PIRATE_FACTION_ID};
+    // No arg: martyr the first pop. Otherwise accept an entity id or a
+    // pop name (ids shift between runs; names are random per run).
+    let found: Option<(Entity, String)> = match parts.get(1) {
+        None => world
+            .query::<(Entity, &Pop, &PopName)>()
+            .iter(world)
+            .next()
+            .map(|(e, _, n)| (e, n.0.clone())),
+        Some(id_str) => match id_str.parse::<u32>() {
+            Ok(id) => find_pop_by_id(world, id),
+            Err(_) => world
+                .query::<(Entity, &Pop, &PopName)>()
+                .iter(world)
+                .find(|(_, _, n)| n.0.eq_ignore_ascii_case(id_str))
+                .map(|(e, _, n)| (e, n.0.clone())),
+        },
+    };
+    let Some((entity, name)) = found else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("No such pop. List candidates with `pops`."),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let id = entity.index();
+    let faction_id: u32 = parts
+        .get(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(PIRATE_FACTION_ID);
+    let already_leader = ensure_leader_figure(world, entity);
+    let leader_note = if already_leader {
+        "already a leader figure"
+    } else {
+        "marked as a leader figure (AscensionCandidate) for this test"
+    };
+    world.entity_mut(entity).insert(SlainByFaction { faction_id });
+    world.entity_mut(entity).insert(Dead);
+    print_dashboard_panel(
+        "MARTYRDOM TEST",
+        &format!(
+            "{name} (id {id}), {leader_note}, has been struck down by faction {faction_id}.
+The death will be processed next tick — check STATS martyrdom= and the chronicle."
+        ),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
 
 /// Debug: build a Biomass Extractor (Spec 270).
 fn handle_extractor_command(world: &mut World, parts: &[&str]) {
