@@ -431,6 +431,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "leases" => print_leases(world),
         "scion" => handle_scion_command(world, &parts),
         "martyr" => handle_martyr_command(world, &parts),
+        "feral" => handle_feral_command(world, &parts),
+        "relocate" => handle_relocate_command(world, &parts),
         "extractor" => handle_extractor_command(world, &parts),
         "corpse" => handle_corpse_command(world, &parts),
         "harvest" => handle_harvest_command(world, &parts),
@@ -2677,9 +2679,17 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::martyrdom::martyrdom_ticks_remaining;
         martyrdom_ticks_remaining(world)
     };
+    let feral = {
+        use scale::layer1::social::feral_outpost::feral_outpost_count;
+        feral_outpost_count(world)
+    };
+    let fringe = {
+        use scale::layer1::social::feral_outpost::fringe_pop_count;
+        fringe_pop_count(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={}",
         tick,
         pops,
         avg_health,
@@ -2717,6 +2727,8 @@ fn print_stats(world: &mut World) {
         scions,
         resources.organs,
         martyrdom,
+        feral,
+        fringe,
     );
 }
 
@@ -5198,6 +5210,16 @@ fn print_help() {
                     "Debug: martyr a pop — enemy-slain leader test (Spec 272)",
                 ),
                 (
+                    "feral [n]",
+                    "",
+                    "Debug: spawn n fringe-dwellers far from the core (Spec 273)",
+                ),
+                (
+                    "relocate <pop_id|name> <x> <y>",
+                    "",
+                    "Order a pop to relocate — feral pops may refuse (Spec 273)",
+                ),
+                (
                     "extractor [x] [y]",
                     "",
                     "Debug: build a Biomass Extractor (Spec 270)",
@@ -5774,6 +5796,104 @@ The death will be processed next tick — check STATS martyrdom= and the chronic
         Some(comfy_table::Color::Red),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Debug: spawn n fringe-dwellers far from the core (Spec 273).
+///
+/// The spawned pops carry saturated fringe exposure, so the next few ticks
+/// will cluster them into a feral outpost via `form_feral_outposts_system`.
+fn handle_feral_command(world: &mut World, parts: &[&str]) {
+    use rand::SeedableRng;
+    use scale::layer1::entities::pop::PopBundle;
+    use scale::layer1::social::feral_outpost::CulturalDrift;
+    let n: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(4);
+    let tick = world.resource::<SimulationTime>().tick;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(tick.wrapping_add(273));
+    // Drop them in the wastes, well beyond FRINGE_DISTANCE of any core.
+    let base_x = 80;
+    let base_y = 80;
+    for i in 0..n {
+        let x = base_x + (i as i32 % 4);
+        let y = base_y + (i as i32 / 4);
+        let entity = world.spawn(PopBundle::random(x, y, &mut rng)).id();
+        world.entity_mut(entity).insert(CulturalDrift::fully_fringe());
+    }
+    print_dashboard_panel(
+        "THE FERAL OUTPOST",
+        &format!(
+            "{n} fringe-dwellers have wandered in from the wastes near ({base_x}, {base_y}).\nTick forward — if they cluster, they will found an outpost and answer to no one."
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: order a pop to relocate — feral pops may refuse (Spec 273).
+fn handle_relocate_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::core::map::GridPosition;
+    use scale::layer1::social::feral_outpost::assign_home_zone;
+    let (Some(id_str), Some(x_str), Some(y_str)) = (parts.get(1), parts.get(2), parts.get(3))
+    else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: relocate <pop_id|name> <x> <y>  (list candidates with `pops`)",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    // Accept an entity id or a pop name (ids shift between runs; names are
+    // random per run — same pattern as the martyr command).
+    let entity = match id_str.parse::<u32>() {
+        Ok(id) => find_pop_by_id(world, id).map(|(e, _)| e),
+        Err(_) => world
+            .query::<(Entity, &Pop, &PopName)>()
+            .iter(world)
+            .find(|(_, _, n)| n.0.eq_ignore_ascii_case(id_str))
+            .map(|(e, _, _)| e),
+    };
+    let (Some(entity), Some(x), Some(y)) =
+        (entity, x_str.parse::<i32>().ok(), y_str.parse::<i32>().ok())
+    else {
+        print_dashboard_panel(
+            "ERROR",
+            "No such pop or bad coordinates. List candidates with `pops`.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let target = GridPosition { x, y };
+    match assign_home_zone(world, entity, target) {
+        Ok(()) => {
+            if let Some(mut pos) = world.get_mut::<GridPosition>(entity) {
+                pos.x = x;
+                pos.y = y;
+            }
+            let name = world
+                .get::<PopName>(entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| format!("pop {}", entity.index()));
+            print_dashboard_panel(
+                "RELOCATION ORDER",
+                &format!("{name} packs up and moves to ({x}, {y})."),
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(reason) => {
+            let name = world
+                .get::<PopName>(entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| format!("pop {}", entity.index()));
+            print_dashboard_panel(
+                "ORDER REFUSED",
+                &format!("{name} stares at you from the treeline.\n{reason}"),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
 }
 
 /// Debug: build a Biomass Extractor (Spec 270).

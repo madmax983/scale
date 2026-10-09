@@ -159,6 +159,17 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 273 The Feral Outpost: frontier pops accumulate fringe exposure
+    // far from the Command Center, cluster into named wild outposts, refuse
+    // relocation outside their claimed territory, and go feral over time.
+    schedule.add_systems(
+        (
+            crate::layer1::social::feral_outpost::update_cultural_drift_system,
+            crate::layer1::social::feral_outpost::form_feral_outposts_system,
+            crate::layer1::social::feral_outpost::develop_feral_traits_system,
+        )
+            .chain(),
+    );
     // Spec 1208 The Cadet Branch: Homeworld courier arrivals spawn Noble
     // Scion pops (zero skills, Noble trait, monthly family allowance).
     schedule.add_systems(

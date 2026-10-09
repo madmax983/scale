@@ -709,3 +709,8 @@ pub use ship_of_fools::*;
 /// fervor — unrest silenced, work redoubled, ideological casus belli.
 pub mod martyrdom;
 pub use martyrdom::*;
+
+/// The Feral Outpost (Spec 273): frontier pops drift from the colony's
+/// culture, found wild outposts, and refuse orders to return.
+pub mod feral_outpost;
+pub use feral_outpost::*;
