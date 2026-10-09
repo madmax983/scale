@@ -431,6 +431,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "leases" => print_leases(world),
         "scion" => handle_scion_command(world, &parts),
         "martyr" => handle_martyr_command(world, &parts),
+        "sabotage" => handle_sabotage_command(world, &parts),
+        "vetting" => handle_vetting_command(world, &parts),
         "feral" => handle_feral_command(world, &parts),
         "relocate" => handle_relocate_command(world, &parts),
         "extractor" => handle_extractor_command(world, &parts),
@@ -2687,9 +2689,17 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::feral_outpost::fringe_pop_count;
         fringe_pop_count(world)
     };
+    let sabotaged = {
+        use scale::layer1::architecture::construction_sabotage::sabotaged_building_count;
+        sabotaged_building_count(world)
+    };
+    let vetting = {
+        use scale::layer1::architecture::construction_sabotage::vetting_mode_label;
+        vetting_mode_label(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={}",
         tick,
         pops,
         avg_health,
@@ -2729,6 +2739,8 @@ fn print_stats(world: &mut World) {
         martyrdom,
         feral,
         fringe,
+        sabotaged,
+        vetting,
     );
 }
 
@@ -5743,6 +5755,121 @@ fn handle_scion_command(world: &mut World, parts: &[&str]) {
     );
 }
 
+
+
+/// Debug: architectural sabotage (Spec 275). `sabotage` lists sabotaged
+/// buildings; `sabotage plant` rigs every building (30-tick fuse);
+/// `sabotage trigger` detonates them all immediately.
+fn handle_sabotage_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::architecture::construction_sabotage::{
+        sabotaged_building_count, trigger_all_sabotage, BuildingFailureEvent,
+    };
+    use scale::layer1::architecture::construction_sabotage::Sabotaged;
+    use scale::layer1::map::GridPosition;
+
+    if parts.get(1).is_some_and(|s| s.eq_ignore_ascii_case("plant")) {
+        // Debug: plant sabotage points on every building with a short fuse,
+        // so the catastrophic failure path can be playtested live.
+        use scale::layer1::architecture::construction_sabotage::Sabotaged;
+        use scale::layer1::architecture::building::{Building, BuildingType};
+        use scale::layer1::map::GridPosition;
+        let targets: Vec<(Entity, BuildingType)> = world
+            .query::<(Entity, &Building, &GridPosition)>()
+            .iter(world)
+            .map(|(e, b, _)| (e, b.building_type))
+            .collect();
+        for (entity, _) in &targets {
+            world.entity_mut(*entity).insert(Sabotaged {
+                ticks_until_failure: 30,
+                planted_by_faction: 0,
+            });
+        }
+        print_dashboard_panel(
+            "ARCHITECTURAL SABOTAGE",
+            &format!(
+                "Planted sabotage points on {} building(s). Thirty ticks to catastrophe.",
+                targets.len()
+            ),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+
+    if parts.get(1).is_some_and(|s| s.eq_ignore_ascii_case("trigger")) {
+        world.init_resource::<bevy_ecs::event::Events<BuildingFailureEvent>>();
+        let count = trigger_all_sabotage(world);
+        print_dashboard_panel(
+            "ARCHITECTURAL SABOTAGE",
+            &format!(
+                "Detonating {count} sabotaged building(s). The countdown was only ever a courtesy."
+            ),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+
+    let mut rows: Vec<String> = Vec::new();
+    let mut q = world.query::<(Entity, &Sabotaged, &GridPosition)>();
+    for (_, sab, pos) in q.iter(world) {
+        rows.push(format!(
+            "sabotaged building at ({}, {}): fails in {} ticks (faction {})",
+            pos.x, pos.y, sab.ticks_until_failure, sab.planted_by_faction
+        ));
+    }
+    let count = sabotaged_building_count(world);
+    let body = if rows.is_empty() {
+        "No sabotaged buildings. Either your crews are loyal, or your vetting is strict.".to_string()
+    } else {
+        rows.join("\n")
+    };
+    let _ = count;
+    print_dashboard_panel("ARCHITECTURAL SABOTAGE", &body, None, None);
+}
+
+/// Set or inspect the construction-crew vetting policy (Spec 275).
+/// `vetting` prints the current mode; `vetting strict|standard|lax` sets it.
+fn handle_vetting_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::architecture::construction_sabotage::{vetting_mode_label, VettingMode, VettingPolicy};
+
+    if let Some(arg) = parts.get(1) {
+        match VettingMode::parse(arg) {
+            Some(mode) => {
+                world.insert_resource(VettingPolicy { mode });
+                print_dashboard_panel(
+                    "CREW VETTING",
+                    &format!(
+                        "Vetting policy set to {}. {}",
+                        mode.label(),
+                        match mode {
+                            VettingMode::Strict => "No sabotage points can be planted.",
+                            VettingMode::Standard => "Normal sabotage insertion rate.",
+                            VettingMode::Lax => "Doubled sabotage insertion rate. Background checks are a rumor.",
+                        }
+                    ),
+                    None,
+                    None,
+                );
+            }
+            None => {
+                print_dashboard_panel(
+                    "ERROR",
+                    &format!("Unknown vetting mode '{arg}'. Use strict, standard, or lax."),
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+        }
+        return;
+    }
+    print_dashboard_panel(
+        "CREW VETTING",
+        &format!("Current vetting mode: {}", vetting_mode_label(world)),
+        None,
+        None,
+    );
+}
 
 /// Debug: martyr a pop — mark a leader figure as slain by an enemy faction (Spec 272).
 fn handle_martyr_command(world: &mut World, parts: &[&str]) {

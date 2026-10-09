@@ -259,6 +259,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::social::martyrdom::Martyrdom>();
     world.init_resource::<crate::layer1::social::martyrdom::LastEnemyStrike>();
     world.init_resource::<crate::layer1::social::martyrdom::IdeologicalCasusBelli>();
+    // Spec 275 Architectural Sabotage: vetting policy, director, failure event.
+    world.init_resource::<crate::layer1::architecture::construction_sabotage::VettingPolicy>();
+    world.init_resource::<crate::layer1::architecture::construction_sabotage::SabotageDirector>();
+    world.init_resource::<Events<crate::layer1::architecture::construction_sabotage::BuildingFailureEvent>>();
     // The Planetary Governor (adventurer origin)
     world.init_resource::<crate::layer1::culture::governor::GovernorState>();
     world.init_resource::<crate::layer1::culture::governor::Treasury>();

@@ -492,4 +492,17 @@ pub fn register(schedule: &mut Schedule) {
         crate::layer1::core::integration::long_night_chronicle_bridge
             .in_set(Layer1SystemSet::Execution),
     );
+
+    // Spec 275 Architectural Sabotage: rival-infiltrated construction crews
+    // plant sabotage points; armed countdown -> catastrophic failure.
+    schedule.add_systems(
+        (
+            crate::layer1::architecture::construction_sabotage::insert_sabotage_on_completion_system,
+            crate::layer1::architecture::construction_sabotage::tick_sabotage_system
+                .after(crate::layer1::architecture::construction_sabotage::insert_sabotage_on_completion_system),
+            crate::layer1::architecture::construction_sabotage::handle_building_failure_system
+                .after(crate::layer1::architecture::construction_sabotage::tick_sabotage_system),
+        )
+            .in_set(super::Layer1SystemSet::Execution),
+    );
 }
