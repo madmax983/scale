@@ -357,6 +357,8 @@ pub enum BuildingType {
     Spaceport,
     Mainframe,
     CommsRelay,
+    /// Harvests organs from corpses (Spec 270: The Organ Market).
+    BiomassExtractor,
 }
 
 impl BuildingType {
@@ -543,7 +545,7 @@ impl BuildingType {
             Self::Nanoforge => false,
             Self::School | Self::MediaStation => false,
             Self::Mainframe | Self::CommsRelay => false,
-            Self::Billboard => false,
+            Self::Billboard | Self::BiomassExtractor => false,
         }
     }
 
@@ -560,6 +562,7 @@ impl BuildingType {
             Self::Statue => crate::layer1::beauty::STATUE_BEAUTY,
             Self::Landfill => -10.0,
             Self::Recycler => -5.0, // Grim machinery
+            Self::BiomassExtractor => -5.0, // Grim machinery
             Self::Grave => -2.0,    // Graves are slightly spooky
             Self::FlowerBed => crate::layer1::beauty::FLOWER_BED_BEAUTY,
             Self::HoloProjector => 50.0, // Massive beauty boost
@@ -705,6 +708,7 @@ impl BuildingType {
             Self::Mainframe => "Mainframe",
             Self::CommsRelay => "Comms Relay",
             Self::Billboard => "Billboard",
+            Self::BiomassExtractor => "Biomass Extractor",
         }
     }
 
@@ -769,6 +773,7 @@ impl BuildingType {
             Self::Mainframe => 'M',
             Self::CommsRelay => 'C',
             Self::Billboard => 'B',
+            Self::BiomassExtractor => 'X',
         }
     }
 
@@ -1125,6 +1130,11 @@ impl BuildingType {
                 metal: 50.0,
                 ..ColonyResources::zeroed()
             },
+            Self::BiomassExtractor => ColonyResources {
+                metal: 25.0,
+                wood: 10.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1368,7 +1378,8 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
         | BuildingType::TradeDepot
         | BuildingType::Shower
         | BuildingType::Recycler
-        | BuildingType::BulletinBoard => configure_civic(entity, building_type),
+        | BuildingType::BulletinBoard
+        | BuildingType::BiomassExtractor => configure_civic(entity, building_type),
         BuildingType::Wall
         | BuildingType::Window
         | BuildingType::Gate
@@ -1863,6 +1874,17 @@ fn configure_civic_misc(entity: &mut EntityWorldMut, building_type: BuildingType
         }
         BuildingType::Shower => {
             // Placeholder for now
+        }
+        BuildingType::BiomassExtractor => {
+            entity.insert((
+                crate::layer1::economy::organ_market::BiomassExtractor,
+                LightSource {
+                    is_outdoor: true,
+                    radius: 4.0,
+                    intensity: 0.5,
+                    color: (139, 0, 0), // Dark red
+                },
+            ));
         }
         _ => {}
     }
@@ -2601,7 +2623,14 @@ mod tests {
         assert_eq!(BuildingType::MediaStation.next(), BuildingType::Spaceport);
         assert_eq!(BuildingType::Spaceport.next(), BuildingType::Mainframe);
         assert_eq!(BuildingType::Mainframe.next(), BuildingType::CommsRelay);
-        assert_eq!(BuildingType::CommsRelay.next(), BuildingType::Housing);
+        assert_eq!(
+            BuildingType::CommsRelay.next(),
+            BuildingType::BiomassExtractor
+        );
+        assert_eq!(
+            BuildingType::BiomassExtractor.next(),
+            BuildingType::Housing
+        );
     }
 
     #[test]
@@ -2849,6 +2878,8 @@ mod tests {
         assert_eq!(mode.selected, BuildingType::Mainframe);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::CommsRelay);
+        mode.selected = mode.selected.next();
+        assert_eq!(mode.selected, BuildingType::BiomassExtractor);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Housing);
     }

@@ -165,6 +165,20 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 270 The Organ Market: Biomass Extractor harvests organs from
+    // corpses; organs sell for credits or cure critical injuries; harvests
+    // spread colony-wide horror through the morale system.
+    schedule.add_systems(
+        (
+            crate::layer1::economy::organ_market::process_corpse_harvest_system,
+            crate::layer1::economy::organ_market::process_living_harvest_system,
+            crate::layer1::economy::organ_market::apply_harvest_horror_system,
+            crate::layer1::economy::organ_market::process_organ_sale_system,
+            crate::layer1::economy::organ_market::process_transplant_system,
+            crate::layer1::economy::organ_market::organ_spoilage_system,
+        )
+            .chain(),
+    );
 
     schedule
 }
@@ -189,6 +203,12 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::recall::IssueRecallEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::recall::UseItemEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::recall::ReturnRecalledItemEvent>>();
+    // Spec 270 The Organ Market: config + harvest/sale/transplant events.
+    world.init_resource::<crate::layer1::economy::organ_market::OrganMarketConfig>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::organ_market::OrganHarvestEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::organ_market::HarvestLivingEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::organ_market::SellOrgansEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::organ_market::TransplantOrganEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::tech::temporal_smuggling::OpenRiftEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::tech::temporal_smuggling::PayTemporalDebtEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::tech::temporal_smuggling::ParadoxEvent>>();

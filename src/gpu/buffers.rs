@@ -356,6 +356,7 @@ fn extract_resource_items(
             ResourceType::VoidAle => resources.void_ale < resources.max_void_ale,
             ResourceType::HyperValuable => true,
             ResourceType::BiologicalWaste | ResourceType::NutrientPaste => false,
+            ResourceType::Organs => resources.organs < resources.max_organs,
         };
 
         entities.push(entity);

@@ -428,6 +428,12 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "recalls" => print_recalls(world),
         "fools" => handle_fools_command(world, &parts),
         "scion" => handle_scion_command(world, &parts),
+        "extractor" => handle_extractor_command(world, &parts),
+        "corpse" => handle_corpse_command(world, &parts),
+        "harvest" => handle_harvest_command(world, &parts),
+        "sell_organs" => handle_sell_organs_command(world, &parts),
+        "transplant" => handle_transplant_command(world, &parts),
+        "organs" => print_organ_ledger(world),
         "artifacts" => print_artifacts(world),
         "sell" => handle_sell_command(world, &parts),
         "museum" => handle_museum_command(world, &parts),
@@ -2666,7 +2672,7 @@ fn print_stats(world: &mut World) {
     };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1}",
         tick,
         pops,
         avg_health,
@@ -2702,6 +2708,7 @@ fn print_stats(world: &mut World) {
         crystal_power,
         artifacts,
         scions,
+        resources.organs,
     );
 }
 
@@ -5177,6 +5184,32 @@ fn print_help() {
                     "",
                     "Debug: Homeworld courier delivers n noble scions (Spec 1208)",
                 ),
+                (
+                    "extractor [x] [y]",
+                    "",
+                    "Debug: build a Biomass Extractor (Spec 270)",
+                ),
+                (
+                    "corpse [name]",
+                    "",
+                    "Debug: spawn an unburied corpse for the extractor (Spec 270)",
+                ),
+                (
+                    "harvest <pop_id>",
+                    "",
+                    "Debug: detain + harvest a living pop in the extractor (Spec 270)",
+                ),
+                (
+                    "sell_organs [n]",
+                    "",
+                    "Sell n harvested organs for credits (Spec 270)",
+                ),
+                (
+                    "transplant <pop_id>",
+                    "",
+                    "Use one stored organ to cure a critical pop (Spec 270)",
+                ),
+                ("organs", "", "Show organ stock, price, and horror (Spec 270)"),
                 ("howl [speed]", "", "Debug: wind surge so canyons howl (Spec 1374)"),
                 ("calm", "", "Debug: end the wind surge (Spec 1374)"),
                 ("crystal [x] [y]", "", "Debug: place a resonance crystal (Spec 1374)"),
@@ -5595,6 +5628,173 @@ fn handle_scion_command(world: &mut World, parts: &[&str]) {
     );
 }
 
+
+/// Debug: build a Biomass Extractor (Spec 270).
+fn handle_extractor_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::architecture::building::BuildingType;
+    use scale::layer1::economy::resources::ColonyResources;
+    let x: i32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(30);
+    let y: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(30);
+    {
+        let mut resources = world.resource_mut::<ColonyResources>();
+        resources.wood = resources.wood.max(100.0);
+        resources.metal = resources.metal.max(100.0);
+    }
+    build_at(world, BuildingType::BiomassExtractor, x, y);
+}
+
+/// Debug: spawn an unburied corpse for the extractor to process (Spec 270).
+fn handle_corpse_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::core::map::GridPosition;
+    use scale::layer1::funeral::Corpse;
+    let name = parts.get(1).map(|s| s.to_string()).unwrap_or_else(|| {
+        format!("Test Colonist {}", world.query::<&Corpse>().iter(world).count() + 1)
+    });
+    world.spawn((
+        Corpse { name: name.clone(), decay: 0.0 },
+        GridPosition { x: 30, y: 30 },
+    ));
+    print_dashboard_panel(
+        "THE ORGAN MARKET",
+        &format!("An unburied corpse ({name}) lies cooling near the colony."),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: detain and harvest a living pop (Spec 270).
+fn handle_harvest_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use scale::layer1::economy::organ_market::HarvestLivingEvent;
+    use scale::layer1::law::justice::Inmate;
+    let Some(id_str) = parts.get(1) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: harvest <pop_id>  (list ids with `pops`)",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let Ok(id) = id_str.parse::<u32>() else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("Invalid pop id: '{id_str}'"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let Some((entity, name)) = find_pop_by_id(world, id) else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("No pop with id {id}. List candidates with `pops`."),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    // Debug path detains first, so the harvest system sees a genuine Inmate.
+    world.entity_mut(entity).insert(Inmate { sentence_ticks: 0 });
+    world.init_resource::<Events<HarvestLivingEvent>>();
+    world
+        .resource_mut::<Events<HarvestLivingEvent>>()
+        .send(HarvestLivingEvent { target: entity });
+    print_dashboard_panel(
+        "THE ORGAN MARKET",
+        &format!("{name} has been detained and fed to the Biomass Extractor. The colony will remember this."),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Sell harvested organs for credits (Spec 270).
+fn handle_sell_organs_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use scale::layer1::economy::organ_market::SellOrgansEvent;
+    let quantity: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+    world.init_resource::<Events<SellOrgansEvent>>();
+    world
+        .resource_mut::<Events<SellOrgansEvent>>()
+        .send(SellOrgansEvent { quantity });
+    print_dashboard_panel(
+        "THE ORGAN MARKET",
+        &format!("Offering {quantity} organ(s) to the galactic market..."),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Use one stored organ to cure a critically injured pop (Spec 270).
+fn handle_transplant_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use scale::layer1::economy::organ_market::TransplantOrganEvent;
+    let Some(id_str) = parts.get(1) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: transplant <pop_id>  (list ids with `pops`)",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let Ok(id) = id_str.parse::<u32>() else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("Invalid pop id: '{id_str}'"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let Some((entity, name)) = find_pop_by_id(world, id) else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("No pop with id {id}. List candidates with `pops`."),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    world.init_resource::<Events<TransplantOrganEvent>>();
+    world
+        .resource_mut::<Events<TransplantOrganEvent>>()
+        .send(TransplantOrganEvent { patient: entity });
+    print_dashboard_panel(
+        "THE ORGAN MARKET",
+        &format!("Prepping {name} for transplant surgery..."),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Show organ stock, market price, and active horror (Spec 270).
+fn print_organ_ledger(world: &mut World) {
+    use scale::layer1::economy::organ_market::{ORGAN_PRICE_CREDITS, OrganMarketConfig};
+    use scale::layer1::economy::resources::{ColonyResources, ResourceType};
+    use scale::layer1::social::morale::Morale;
+    let organs = world
+        .get_resource::<ColonyResources>()
+        .map(|r| r.get_amount(ResourceType::Organs))
+        .unwrap_or(0.0);
+    let price = world
+        .get_resource::<OrganMarketConfig>()
+        .map(|c| c.organ_price_credits)
+        .unwrap_or(ORGAN_PRICE_CREDITS);
+    let horrified = world
+        .query::<&Morale>()
+        .iter(world)
+        .filter(|m| m.modifiers.iter().any(|x| x.label.starts_with("Harvest Horror")))
+        .count();
+    print_dashboard_panel(
+        "THE ORGAN MARKET",
+        &format!(
+            "Organs banked: {organs:.1} (perishable)\nMarket price: {price:.0} credits/organ\nPops gripped by harvest horror: {horrified}"
+        ),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
 
 /// List historical artifacts and their appraised values (Spec 1376).
 fn print_artifacts(world: &mut World) {

@@ -103,6 +103,7 @@ pub fn fulfill_market_trade_system(
                     ResourceType::Stone => resources.stone >= req_amount,
                     ResourceType::Ore => resources.ore >= req_amount,
                     ResourceType::Metal => resources.metal >= req_amount,
+                    ResourceType::Organs => resources.organs >= req_amount,
                     ResourceType::Planks => resources.planks >= req_amount,
                     ResourceType::Blocks => resources.blocks >= req_amount,
                     ResourceType::Waste => resources.waste >= req_amount,
@@ -140,7 +141,8 @@ pub fn fulfill_market_trade_system(
                         ResourceType::VoidAle
                         | ResourceType::HyperValuable
                         | ResourceType::BiologicalWaste
-                        | ResourceType::NutrientPaste => {}
+                        | ResourceType::NutrientPaste
+                        | ResourceType::Organs => {}
                     }
 
                     // Add offered
@@ -150,6 +152,7 @@ pub fn fulfill_market_trade_system(
                         ResourceType::Stone => resources.stone += off_amount,
                         ResourceType::Ore => resources.ore += off_amount,
                         ResourceType::Metal => resources.metal += off_amount,
+                    ResourceType::Organs => resources.organs += off_amount,
                         ResourceType::Planks => resources.planks += off_amount,
                         ResourceType::Blocks => resources.blocks += off_amount,
                         ResourceType::Waste => resources.waste += off_amount,

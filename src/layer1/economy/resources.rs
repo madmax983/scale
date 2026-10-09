@@ -72,6 +72,8 @@ pub enum ResourceType {
     VoidAle,
     /// Hyper-valuable resource.
     HyperValuable,
+    /// Perishable harvested organs (Spec 270: The Organ Market).
+    Organs,
 }
 
 /// Event emitted when a resource is mined.
@@ -244,6 +246,10 @@ pub struct ColonyResources {
     pub hyper_valuable: f32,
     /// Maximum hyper_valuable capacity.
     pub max_hyper_valuable: f32,
+    /// Harvested organs available for transplant or sale (Spec 270).
+    pub organs: f32,
+    /// Maximum organ storage capacity.
+    pub max_organs: f32,
 }
 
 impl Default for ColonyResources {
@@ -304,6 +310,8 @@ impl Default for ColonyResources {
             max_luxury: 1000.0,
             hyper_valuable: 0.0,
             max_hyper_valuable: 50.0,
+            organs: 0.0,
+            max_organs: 50.0,
         }
     }
 }
@@ -368,7 +376,9 @@ impl Mul<f32> for ColonyResources {
             luxury: (self.luxury * rhs).ceil(),
             max_luxury: self.max_luxury,
             hyper_valuable: (self.hyper_valuable * rhs).ceil(),
+            organs: (self.organs * rhs).ceil(),
             max_hyper_valuable: self.max_hyper_valuable,
+            max_organs: self.max_organs,
         }
     }
 }
@@ -436,6 +446,8 @@ impl ColonyResources {
             max_luxury: 0.0,
             hyper_valuable: 0.0,
             max_hyper_valuable: 0.0,
+            organs: 0.0,
+            max_organs: 0.0,
         }
     }
 
@@ -792,6 +804,9 @@ impl ColonyResources {
             ResourceType::MemoryCore => {
                 self.memory_cores = (self.memory_cores - amount).max(0.0);
             }
+            ResourceType::Organs => {
+                self.organs = (self.organs - amount).max(0.0);
+            }
         }
     }
 
@@ -819,6 +834,7 @@ impl ColonyResources {
             ResourceType::MemoryCore => self.max_memory_cores,
             ResourceType::VoidAle => self.max_void_ale,
             ResourceType::HyperValuable => self.max_hyper_valuable,
+            ResourceType::Organs => self.max_organs,
         }
     }
 
@@ -844,6 +860,7 @@ impl ColonyResources {
             ResourceType::MemoryCore => self.memory_cores,
             ResourceType::VoidAle => self.void_ale,
             ResourceType::HyperValuable => self.hyper_valuable,
+            ResourceType::Organs => self.organs,
         }
     }
 
@@ -891,6 +908,7 @@ impl ColonyResources {
             ResourceType::MemoryCore => self.memory_cores < self.max_memory_cores,
             ResourceType::VoidAle => self.void_ale < self.max_void_ale,
             ResourceType::HyperValuable => self.hyper_valuable < self.max_hyper_valuable,
+            ResourceType::Organs => self.organs < self.max_organs,
         }
     }
 
@@ -922,6 +940,9 @@ impl ColonyResources {
             ResourceType::VoidAle => self.add_void_ale(amount),
             ResourceType::HyperValuable => {
                 self.hyper_valuable = (self.hyper_valuable - amount).max(0.0)
+            }
+            ResourceType::Organs => {
+                self.organs = (self.organs + amount).min(self.max_organs)
             }
         }
     }

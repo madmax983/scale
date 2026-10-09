@@ -284,6 +284,7 @@ pub use smugglers_cove::*;
 pub mod inflation;
 pub mod recall;
 pub mod artifact_market;
+pub mod organ_market;
 pub use inflation::*;
 pub mod ideological_contraband;
 pub use ideological_contraband::*;

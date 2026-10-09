@@ -794,6 +794,7 @@ pub const fn get_building_char(building: BuildingType) -> &'static str {
         BuildingType::Mainframe => "M",
         BuildingType::CommsRelay => "C",
         BuildingType::Billboard => "B",
+        BuildingType::BiomassExtractor => "X",
     }
 }
 
@@ -876,6 +877,7 @@ pub const fn get_building_color(building: BuildingType, material: MaterialType) 
             BuildingType::Mainframe => Color::LightMagenta,
             BuildingType::CommsRelay => Color::LightCyan,
             BuildingType::Billboard => Color::Magenta,
+            BuildingType::BiomassExtractor => Color::Rgb(139, 0, 0),
         }
     }
 }
@@ -941,6 +943,7 @@ pub const fn get_resource_char(resource: ResourceType) -> &'static str {
         ResourceType::HyperValuable => "$",
         ResourceType::BiologicalWaste => "B",
         ResourceType::NutrientPaste => "P",
+        ResourceType::Organs => "Q",
     }
 }
 
@@ -975,6 +978,7 @@ pub const fn get_resource_color(resource: ResourceType) -> Color {
         ResourceType::HyperValuable => Color::Rgb(255, 215, 0),
         ResourceType::BiologicalWaste => Color::Rgb(100, 100, 0),
         ResourceType::NutrientPaste => Color::Rgb(200, 200, 200), // Gold
+        ResourceType::Organs => Color::Rgb(220, 20, 60), // Crimson
     }
 }
 
