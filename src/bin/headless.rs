@@ -445,6 +445,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "sell_organs" => handle_sell_organs_command(world, &parts),
         "amnesty" => handle_amnesty_command(world),
         "pension" => handle_pension_command(world),
+        "informant" => handle_informant_command(world, &parts),
         "transplant" => handle_transplant_command(world, &parts),
         "organs" => print_organ_ledger(world),
         "artifacts" => print_artifacts(world),
@@ -2724,9 +2725,17 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::pirates::pension_cost_per_period;
         pension_cost_per_period(world)
     };
+    let informant = {
+        use scale::layer1::social::informants::informant_edict_label;
+        informant_edict_label(world)
+    };
+    let paranoia = {
+        use scale::layer1::social::informants::average_paranoia;
+        average_paranoia(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1}",
         tick,
         pops,
         avg_health,
@@ -2773,6 +2782,8 @@ fn print_stats(world: &mut World) {
         empathy,
         pirates,
         pension,
+        informant,
+        paranoia,
     );
 }
 
@@ -5836,6 +5847,39 @@ fn handle_pension_command(world: &mut World) {
     );
 }
 
+
+
+/// Spec 323 The Informant's Dilemma. `informant` shows edict status and
+/// colony paranoia; `informant enact` / `informant repeal` toggles the
+/// Citizen Informant edict.
+fn handle_informant_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::administration::edicts::{ColonyPolicies, Policy};
+    use scale::layer1::social::informants::average_paranoia;
+
+    if parts.len() > 1 {
+        let mut policies = world.resource_mut::<ColonyPolicies>();
+        let active = policies.is_active(Policy::CitizenInformant);
+        match parts[1].to_lowercase().as_str() {
+            "enact" | "on" if !active => policies.toggle(Policy::CitizenInformant),
+            "repeal" | "off" if active => policies.toggle(Policy::CitizenInformant),
+            _ => {}
+        }
+    }
+
+    let active = world
+        .resource::<ColonyPolicies>()
+        .is_active(Policy::CitizenInformant);
+    let paranoia = average_paranoia(world);
+    let status = if active { "ACTIVE" } else { "off" };
+    print_dashboard_panel(
+        "INFORMANT EDICT",
+        &format!(
+            "Citizen Informant edict: {status}\nAvg paranoia: {paranoia:.1}/100\nUsage: informant enact | informant repeal"
+        ),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
 
 
 /// Debug: architectural sabotage (Spec 275). `sabotage` lists sabotaged

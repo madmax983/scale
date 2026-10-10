@@ -149,6 +149,9 @@ pub enum Policy {
     MartialLaw,
     /// Processes dead pops into VitalOrgans.
     MandatoryOrganHarvesting,
+    /// Spec 323 The Informant's Dilemma: pays pops a credit bounty for
+    /// reporting dissent — crushes unrest, breeds colony-wide paranoia.
+    CitizenInformant,
 }
 
 #[derive(Event, Debug)]

@@ -208,15 +208,17 @@ pub fn proximity_social_system(
         &GridPosition,
         &Relationships,
         Option<&crate::layer1::social::grievances::Ostracized>,
+        Option<&crate::layer1::social::informants::SocialDesire>,
     )>,
     other_pops: Query<(
         Entity,
         &GridPosition,
         Option<&crate::layer1::social::grievances::Ostracized>,
+        Option<&crate::layer1::social::informants::SocialDesire>,
     )>,
 ) {
     // O(N^2) naive implementation for Green phase
-    for (entity, pos, rel, ostracized) in pops.iter() {
+    for (entity, pos, rel, ostracized, desire) in pops.iter() {
         let mut total_buff: f32 = 0.0;
 
         // Ostracized pops get no proximity buff
@@ -225,13 +227,25 @@ pub fn proximity_social_system(
             continue;
         }
 
-        for (other_entity, other_pos, other_ostracized) in other_pops.iter() {
+        // Spec 323: pops too paranoid to socialize (SocialDesire 0) neither
+        // mingle nor count as company — trust has fully broken down.
+        if desire.map_or(false, |d| d.score <= 0.0) {
+            commands.entity(entity).remove::<SocialBuff>();
+            continue;
+        }
+
+        for (other_entity, other_pos, other_ostracized, other_desire) in other_pops.iter() {
             if entity == other_entity {
                 continue;
             }
 
             // You don't get buffs from ostracized pops, you pretend they aren't there
             if other_ostracized.is_some() {
+                continue;
+            }
+
+            // Spec 323: withdrawn pops are socially invisible.
+            if other_desire.map_or(false, |d| d.score <= 0.0) {
                 continue;
             }
 
@@ -722,3 +736,9 @@ pub use feral_outpost::*;
 /// posts a DemandIntervention grievance.
 pub mod empathy_broadcast;
 pub use empathy_broadcast::*;
+
+/// The Informant's Dilemma (Spec 323): the Citizen Informant edict pays pops
+/// to report dissent — crushing unrest while breeding colony-wide paranoia,
+/// social withdrawal, and false treason accusations.
+pub mod informants;
+pub use informants::*;

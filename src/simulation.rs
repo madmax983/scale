@@ -195,6 +195,25 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems(
         crate::layer1::social::cadet::process_scion_arrival_system,
     );
+    // Spec 323 The Informant's Dilemma: the Citizen Informant edict pays
+    // pops to report dissent — unrest drops, paranoia spreads, paranoid pops
+    // stop socializing and level false treason accusations (justice consumes
+    // them as Wanted markers). Dissent breeds from low morale so the edict
+    // has something to act on in a live colony.
+    schedule.add_systems(
+        (
+            crate::layer1::social::informants::ensure_informant_components_system,
+            crate::layer1::social::informants::dissent_breeds_system,
+            crate::layer1::social::informants::process_informant_reports,
+            crate::layer1::social::informants::reward_informants,
+            crate::layer1::social::informants::evaluate_social_action,
+            crate::layer1::social::informants::generate_false_accusations,
+            crate::layer1::social::informants::process_accusations_system,
+            crate::layer1::social::informants::tick_accusation_cooldowns,
+            crate::layer1::social::informants::decay_paranoia_system,
+        )
+            .chain(),
+    );
     // Spec 1376 Artifact Market: aging items are promoted to historical
     // artifacts, museums grant morale auras per housed artifact, and sales
     // pay credits at a colony-wide morale cost.
@@ -243,6 +262,10 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 305 The Empathy Broadcast: without this the first tick panics on
     // a fresh world (same first-tick Events pattern as 1375/1208).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::empathy_broadcast::EmpathyBroadcastEvent>>();
+    // Spec 323 The Informant's Dilemma: accusation + report events (first-tick
+    // Events pattern — systems write before any reader exists on a fresh world).
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::informants::AccusationEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::informants::InformantReportEvent>>();
     // Spec 1376 Artifact Market: market config, provenance registry, events.
     world.init_resource::<crate::layer1::economy::artifact_market::ArtifactMarketConfig>();
     world.init_resource::<crate::layer1::economy::artifact_market::ArtifactRegistry>();
