@@ -214,6 +214,19 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 325 Orbital Strike Blackmail: the Tollkeeper's orbital platform
+    // demands tribute - pay and demands grow, defy and a kinetic strike hits
+    // the colony heart, tether arrays can intercept, broken resolve departs.
+    schedule.add_systems(
+        (
+            crate::layer1::diplomacy::blackmail::blackmailer_arrival_system,
+            crate::layer1::diplomacy::blackmail::blackmailer_redemand_system,
+            crate::layer1::diplomacy::blackmail::extortion_deadline_system,
+            crate::layer1::diplomacy::blackmail::blackmailer_departure_system,
+            crate::layer1::diplomacy::blackmail::blackmail_unrest_system,
+        )
+            .chain(),
+    );
     // Spec 1376 Artifact Market: aging items are promoted to historical
     // artifacts, museums grant morale auras per housed artifact, and sales
     // pay credits at a colony-wide morale cost.
@@ -248,6 +261,8 @@ pub fn build_simulation_schedule() -> Schedule {
 #[allow(clippy::too_many_lines)]
 fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::agriculture::compost::CompostSoil>();
+    // Spec 325 Orbital Strike Blackmail: colony stance toward the Tollkeeper.
+    world.init_resource::<crate::layer1::diplomacy::blackmail::BlackmailStance>();
     // Spec 1373 Recalled Product: manufacturer recalls, failure chance, returns.
     world.init_resource::<crate::layer1::economy::recall::RecallManager>();
     world.init_resource::<crate::layer1::economy::recall::RecallConfig>();

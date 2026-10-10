@@ -20,3 +20,5 @@ pub struct TributeDemandEvent {
     pub system: Entity,
     pub amount: u32,
 }
+pub mod blackmail;
+pub use blackmail::*;
