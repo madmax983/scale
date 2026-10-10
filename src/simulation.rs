@@ -607,6 +607,7 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer3::market::quantum_famine::ExportDumpEvent>>();
     world.init_resource::<Events<crate::layer2::exploration::void_whispers::FleetReturnedEvent>>();
     world.init_resource::<Events<crate::layer1::core::integration::PirateAmnestyEvent>>();
+    world.init_resource::<Events<crate::layer1::social::pirates::PensionDefaultEvent>>();
     world.init_resource::<Events<crate::layer1::economy::resources::ResourceMinedEvent>>();
     world.init_resource::<crate::layer3::pirates::PirateThreatLevel>();
     world.init_resource::<crate::layer3::pirates::ResourceCurseSettings>();
@@ -1435,6 +1436,11 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         crate::layer1::social::pirates::process_pirate_amnesty_system
             .after(crate::layer3::pirates::evaluate_pirate_amnesty_system),
         crate::layer1::social::pirates::pirate_crime_system,
+        crate::layer1::social::pirates::pirate_theft_system,
+        crate::layer1::social::pirates::pirate_brawl_system,
+        crate::layer1::social::pirates::process_pension_upkeep_system,
+        crate::layer1::social::pirates::process_pension_default_system
+            .after(crate::layer1::social::pirates::process_pension_upkeep_system),
     ));
 
     #[cfg(feature = "nova")]
@@ -1907,6 +1913,7 @@ mod tests {
             .init_resource::<Events<crate::layer2::exploration::void_whispers::FleetReturnedEvent>>(
             );
         world.init_resource::<Events<crate::layer1::core::integration::PirateAmnestyEvent>>();
+        world.init_resource::<Events<crate::layer1::social::pirates::PensionDefaultEvent>>();
         world.init_resource::<Events<crate::layer1::economy::resources::ResourceMinedEvent>>();
         world
             .init_resource::<Events<crate::layer1::economy::debt_of_the_dead::DebtInheritedEvent>>(

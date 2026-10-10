@@ -443,6 +443,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "corpse" => handle_corpse_command(world, &parts),
         "harvest" => handle_harvest_command(world, &parts),
         "sell_organs" => handle_sell_organs_command(world, &parts),
+        "amnesty" => handle_amnesty_command(world),
+        "pension" => handle_pension_command(world),
         "transplant" => handle_transplant_command(world, &parts),
         "organs" => print_organ_ledger(world),
         "artifacts" => print_artifacts(world),
@@ -2714,9 +2716,17 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
         empathy_broadcast_status_label(world)
     };
+    let pirates = {
+        use scale::layer1::social::pirates::pirate_pop_count;
+        pirate_pop_count(world)
+    };
+    let pension = {
+        use scale::layer1::social::pirates::pension_cost_per_period;
+        pension_cost_per_period(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0}",
         tick,
         pops,
         avg_health,
@@ -2761,6 +2771,8 @@ fn print_stats(world: &mut World) {
         deorbit,
         tethers,
         empathy,
+        pirates,
+        pension,
     );
 }
 
@@ -5775,6 +5787,49 @@ fn handle_scion_command(world: &mut World, parts: &[&str]) {
         "THE CADET BRANCH",
         &format!(
             "A courier from the Homeworld is inbound with {count} noble scions.\nUseless, exquisite, enormously well-funded — keep them alive."
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: pirate amnesty (Spec 322). A defeated fleet accepts the colony's
+/// amnesty offer and lands its veterans — elite fighters with sticky fingers.
+fn handle_amnesty_command(world: &mut World) {
+    use scale::layer1::core::integration::PirateAmnestyEvent;
+    use scale::layer1::social::pirates::PIRATES_PER_FLEET;
+
+    world.init_resource::<bevy_ecs::event::Events<PirateAmnestyEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<PirateAmnestyEvent>>()
+        .send(PirateAmnestyEvent {
+            fleet: bevy_ecs::entity::Entity::PLACEHOLDER,
+        });
+    print_dashboard_panel(
+        "THE PIRATE'S PENSION",
+        &format!(
+            "A defeated fleet takes the amnesty. {PIRATES_PER_FLEET} veterans land —\narmed, fast, well-paid, and already casing the stockpile.\nTheir pension comes due every 1000 ticks. Pay it."
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: pension ledger (Spec 322). Shows the veteran headcount, the
+/// per-period upkeep, and the treasury balance.
+fn handle_pension_command(world: &mut World) {
+    use scale::layer1::economy::resources::ColonyResources;
+    use scale::layer1::social::pirates::{
+        pension_cost_per_period, pirate_pop_count, PENSION_PER_PIRATE, PENSION_PERIOD_TICKS,
+    };
+
+    let pirates = pirate_pop_count(world);
+    let cost = pension_cost_per_period(world);
+    let credits = world.resource::<ColonyResources>().credits;
+    print_dashboard_panel(
+        "PENSION LEDGER",
+        &format!(
+            "Veteran pirates: {pirates}\nUpkeep: {PENSION_PER_PIRATE:.0}cr each every {PENSION_PERIOD_TICKS} ticks\nNext bill: {cost:.0}cr — treasury: {credits:.0}cr"
         ),
         Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
