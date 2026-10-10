@@ -180,6 +180,16 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 305 The Empathy Broadcast: a neighbouring empire's psychic
+    // distress wave saturates every colony pop (unavoidable stress/tick)
+    // and posts a DemandIntervention grievance.
+    schedule.add_systems(
+        (
+            crate::layer1::social::empathy_broadcast::process_empathy_broadcast_system,
+            crate::layer1::social::empathy_broadcast::update_broadcast_stress_system,
+        )
+            .chain(),
+    );
     // Spec 1208 The Cadet Branch: Homeworld courier arrivals spawn Noble
     // Scion pops (zero skills, Noble trait, monthly family allowance).
     schedule.add_systems(
@@ -230,6 +240,9 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::factions::subcontractor_factions::MegacorpSecuritySweepEvent>>();
     // Spec 1208 The Cadet Branch: scion arrival events.
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::cadet::ScionArrivalEvent>>();
+    // Spec 305 The Empathy Broadcast: without this the first tick panics on
+    // a fresh world (same first-tick Events pattern as 1375/1208).
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::empathy_broadcast::EmpathyBroadcastEvent>>();
     // Spec 1376 Artifact Market: market config, provenance registry, events.
     world.init_resource::<crate::layer1::economy::artifact_market::ArtifactMarketConfig>();
     world.init_resource::<crate::layer1::economy::artifact_market::ArtifactRegistry>();

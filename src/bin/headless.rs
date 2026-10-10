@@ -431,6 +431,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "leases" => print_leases(world),
         "scion" => handle_scion_command(world, &parts),
         "martyr" => handle_martyr_command(world, &parts),
+        "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
         "deorbit" => handle_deorbit_command(world, &parts),
@@ -2709,9 +2710,13 @@ fn print_stats(world: &mut World) {
         use scale::layer1::disasters::deorbit::tether_array_count;
         tether_array_count(world)
     };
+    let empathy = {
+        use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
+        empathy_broadcast_status_label(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={}",
         tick,
         pops,
         avg_health,
@@ -2755,6 +2760,7 @@ fn print_stats(world: &mut World) {
         vetting,
         deorbit,
         tethers,
+        empathy,
     );
 }
 
@@ -5237,6 +5243,11 @@ fn print_help() {
                     "Debug: martyr a pop — enemy-slain leader test (Spec 272)",
                 ),
                 (
+                    "broadcast [duration] [intensity] [faction]",
+                    "",
+                    "Debug: fire an empathy broadcast — psychic distress wave (Spec 305)",
+                ),
+                (
                     "feral [n]",
                     "",
                     "Debug: spawn n fringe-dwellers far from the core (Spec 273)",
@@ -5936,6 +5947,38 @@ fn handle_martyr_command(world: &mut World, parts: &[&str]) {
 The death will be processed next tick — check STATS martyrdom= and the chronicle."
         ),
         Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: fire an empathy broadcast (Spec 305).
+/// `broadcast [duration] [intensity] [faction]` — a psychic distress wave
+/// from the given faction saturates every colony pop with unavoidable
+/// stress for `duration` ticks and posts a DemandIntervention grievance.
+fn handle_broadcast_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::empathy_broadcast::{
+        empathy_broadcast_pop_count, EmpathyBroadcastEvent,
+    };
+
+    let duration: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(100);
+    let intensity: f32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(2.0);
+    let faction: u32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(42);
+
+    world.init_resource::<bevy_ecs::event::Events<EmpathyBroadcastEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<EmpathyBroadcastEvent>>()
+        .send(EmpathyBroadcastEvent {
+            duration_ticks: duration,
+            intensity,
+            target_faction_id: faction,
+        });
+    let affected = empathy_broadcast_pop_count(world);
+    print_dashboard_panel(
+        "EMPATHY BROADCAST",
+        &format!(
+            "A psychic distress wave from faction {faction} is inbound.\n{duration} ticks at {intensity}/tick stress; every pop will feel it.\nPops currently saturated: {affected}. The people will demand intervention."
+        ),
+        Some(comfy_table::Color::Magenta),
         Some(comfy_table::Attribute::Bold),
     );
 }
