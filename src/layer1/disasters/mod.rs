@@ -1,3 +1,4 @@
+pub mod deorbit;
 pub mod mega_event;
 
 use crate::layer1::core::map::GridPosition;

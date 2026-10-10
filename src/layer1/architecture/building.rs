@@ -359,6 +359,8 @@ pub enum BuildingType {
     CommsRelay,
     /// Harvests organs from corpses (Spec 270: The Organ Market).
     BiomassExtractor,
+    /// Orbital tether array: catches deorbiting megastructures (Spec 277).
+    TetherArray,
 }
 
 impl BuildingType {
@@ -538,7 +540,8 @@ impl BuildingType {
             | Self::Vent
             | Self::TrashCannon
             | Self::Heater
-            | Self::AuroralCollector => false,
+            | Self::AuroralCollector
+            | Self::TetherArray => false,
             Self::Recycler => true,
             Self::BulletinBoard => false,
             Self::HoloProjector => false,
@@ -619,6 +622,7 @@ impl BuildingType {
             Self::TrashCannon => Some(Tech::Militia),
             Self::CryoPod => Some(Tech::Medical),
             Self::AuroralCollector => Some(Tech::Electromagnetism),
+            Self::TetherArray => Some(Tech::Electromagnetism),
             Self::AtmosphericProcessor => Some(Tech::Terraforming),
             Self::GeneBank | Self::CloneVat | Self::HypnoPod => Some(Tech::Medical),
             Self::Shower => Some(Tech::SocialStructures),
@@ -709,6 +713,7 @@ impl BuildingType {
             Self::CommsRelay => "Comms Relay",
             Self::Billboard => "Billboard",
             Self::BiomassExtractor => "Biomass Extractor",
+            Self::TetherArray => "Tether Array",
         }
     }
 
@@ -774,6 +779,7 @@ impl BuildingType {
             Self::CommsRelay => 'C',
             Self::Billboard => 'B',
             Self::BiomassExtractor => 'X',
+            Self::TetherArray => '⌁',
         }
     }
 
@@ -1135,6 +1141,11 @@ impl BuildingType {
                 wood: 10.0,
                 ..ColonyResources::zeroed()
             },
+            Self::TetherArray => ColonyResources {
+                metal: 40.0,
+                stone: 10.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1388,7 +1399,8 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
         | BuildingType::ConveyorBelt
         | BuildingType::Hopper
         | BuildingType::Airlock
-        | BuildingType::Vent => configure_infrastructure(entity, building_type),
+        | BuildingType::Vent
+        | BuildingType::TetherArray => configure_infrastructure(entity, building_type),
         BuildingType::Generator
         | BuildingType::SolarPanel
         | BuildingType::PowerPole
@@ -1951,6 +1963,18 @@ fn configure_infrastructure(entity: &mut EntityWorldMut, building_type: Building
         }
         BuildingType::Airlock => {
             entity.insert((DoorControl::default(), AccessControl::default()));
+        }
+        BuildingType::TetherArray => {
+            // Spec 277: the marker component powers the deorbit catch.
+            entity.insert((
+                crate::layer1::disasters::deorbit::TetherArray::new(),
+                LightSource {
+                    is_outdoor: true,
+                    radius: 3.0,
+                    intensity: 0.5,
+                    color: (120, 180, 255), // Tether beacon blue
+                },
+            ));
         }
         _ => {}
     }
@@ -2629,8 +2653,9 @@ mod tests {
         );
         assert_eq!(
             BuildingType::BiomassExtractor.next(),
-            BuildingType::Housing
+            BuildingType::TetherArray
         );
+        assert_eq!(BuildingType::TetherArray.next(), BuildingType::Housing);
     }
 
     #[test]
@@ -2880,6 +2905,8 @@ mod tests {
         assert_eq!(mode.selected, BuildingType::CommsRelay);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::BiomassExtractor);
+        mode.selected = mode.selected.next();
+        assert_eq!(mode.selected, BuildingType::TetherArray);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Housing);
     }

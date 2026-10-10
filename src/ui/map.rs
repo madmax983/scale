@@ -795,6 +795,7 @@ pub const fn get_building_char(building: BuildingType) -> &'static str {
         BuildingType::CommsRelay => "C",
         BuildingType::Billboard => "B",
         BuildingType::BiomassExtractor => "X",
+        BuildingType::TetherArray => "\u{2301}",
     }
 }
 
@@ -878,6 +879,7 @@ pub const fn get_building_color(building: BuildingType, material: MaterialType) 
             BuildingType::CommsRelay => Color::LightCyan,
             BuildingType::Billboard => Color::Magenta,
             BuildingType::BiomassExtractor => Color::Rgb(139, 0, 0),
+            BuildingType::TetherArray => Color::Rgb(120, 180, 255),
         }
     }
 }

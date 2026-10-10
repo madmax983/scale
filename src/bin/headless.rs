@@ -433,6 +433,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "martyr" => handle_martyr_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
+        "deorbit" => handle_deorbit_command(world, &parts),
+        "tether" => handle_tether_command(world, &parts),
+        "tethers" => print_tethers(world),
         "feral" => handle_feral_command(world, &parts),
         "relocate" => handle_relocate_command(world, &parts),
         "extractor" => handle_extractor_command(world, &parts),
@@ -2698,8 +2701,17 @@ fn print_stats(world: &mut World) {
         vetting_mode_label(world)
     };
 
+    let deorbit = {
+        use scale::layer1::disasters::deorbit::deorbit_status_label;
+        deorbit_status_label(world)
+    };
+    let tethers = {
+        use scale::layer1::disasters::deorbit::tether_array_count;
+        tether_array_count(world)
+    };
+
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={}",
         tick,
         pops,
         avg_health,
@@ -2741,6 +2753,8 @@ fn print_stats(world: &mut World) {
         fringe,
         sabotaged,
         vetting,
+        deorbit,
+        tethers,
     );
 }
 
@@ -6384,6 +6398,113 @@ fn handle_museum_command(world: &mut World, parts: &[&str]) {
             pos.x, pos.y
         ),
         Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: orbital megastructure deorbiting (Spec 277).
+/// `deorbit [size] [x] [y]` — trigger a deorbit crisis.
+/// size: fragment | hulk | megastructure (default hulk).
+/// Target defaults to the colony heart once the trigger system runs.
+fn handle_deorbit_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use scale::layer1::core::map::GridPosition;
+    use scale::layer1::disasters::deorbit::{DeorbitEvent, MegastructureSize};
+
+    let size = parts
+        .get(1)
+        .and_then(|s| MegastructureSize::parse(s))
+        .unwrap_or_default();
+    let target = match (parts.get(2), parts.get(3)) {
+        (Some(xs), Some(ys)) => match (xs.parse::<i32>(), ys.parse::<i32>()) {
+            (Ok(x), Ok(y)) => Some(GridPosition { x, y }),
+            _ => None,
+        },
+        _ => None,
+    };
+
+    world.init_resource::<Events<DeorbitEvent>>();
+    world
+        .resource_mut::<Events<DeorbitEvent>>()
+        .send(DeorbitEvent {
+            size,
+            target,
+            warning_ticks: None,
+        });
+    print_dashboard_panel(
+        "DEORBIT INBOUND",
+        &format!(
+            "Orbital spotters report a {} falling toward the colony.\nIt will strike in ~600 ticks — build {} tether arrays (`tether`) to catch it.",
+            size.label(),
+            size.required_tethers(),
+        ),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: build tether arrays (Spec 277). `tether [n]` — construct n tether
+/// arrays on free tiles near the colony center (grants Electromagnetism and
+/// the metal to build them, like the other debug build commands).
+fn handle_tether_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::disasters::deorbit::total_tether_strength;
+    use scale::layer1::tech::{Tech, TechState};
+
+    let n: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(2);
+
+    {
+        // The debug command stands in for a colony with server infrastructure:
+        // a bare TechState has zero data capacity, and unlock() would
+        // immediately corrupt the tech again via update_corruption().
+        let mut tech = world.resource_mut::<TechState>();
+        tech.total_capacity = tech.total_capacity.max(200.0);
+        if !tech.is_unlocked(Tech::Electromagnetism) {
+            tech.unlock(Tech::Electromagnetism);
+        }
+    }
+    {
+        let mut resources = world.resource_mut::<ColonyResources>();
+        resources.metal = resources.metal.max(500.0);
+        resources.stone = resources.stone.max(200.0);
+    }
+
+    let mut placed = 0usize;
+    'scan: for y in 18..=30 {
+        for x in 28..=52 {
+            if placed >= n {
+                break 'scan;
+            }
+            if try_place_building(world, x, y, BuildingType::TetherArray) {
+                placed += 1;
+            }
+        }
+    }
+    let strength = total_tether_strength(world);
+    print_dashboard_panel(
+        "TETHER ARRAYS",
+        &format!(
+            "Built {placed}/{n} tether arrays near the colony center.\nColony tether strength is now {strength:.1}."
+        ),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: list tether arrays and the active deorbit countdown (Spec 277).
+fn print_tethers(world: &mut World) {
+    use scale::layer1::disasters::deorbit::{
+        deorbit_status_label, tether_array_count, total_tether_strength,
+    };
+
+    let count = tether_array_count(world);
+    let strength = total_tether_strength(world);
+    let status = deorbit_status_label(world);
+    print_dashboard_panel(
+        "TETHER NET",
+        &format!(
+            "{count} tether arrays standing, total strength {strength:.1}.\nDeorbit: {status}."
+        ),
+        Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
 }

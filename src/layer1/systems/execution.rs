@@ -505,4 +505,16 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(super::Layer1SystemSet::Execution),
     );
+
+    // Spec 277 Orbital Megastructure Deorbiting: warning countdown, tether
+    // catch, catastrophic impact. Separate add_systems call (not the shared
+    // tuple) to stay clear of the IntoSystemConfigs arity limit.
+    schedule.add_systems(
+        (
+            crate::layer1::disasters::deorbit::trigger_deorbit_system,
+            crate::layer1::disasters::deorbit::tick_deorbit_system
+                .after(crate::layer1::disasters::deorbit::trigger_deorbit_system),
+        )
+            .in_set(super::Layer1SystemSet::Execution),
+    );
 }

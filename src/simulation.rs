@@ -263,6 +263,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::architecture::construction_sabotage::VettingPolicy>();
     world.init_resource::<crate::layer1::architecture::construction_sabotage::SabotageDirector>();
     world.init_resource::<Events<crate::layer1::architecture::construction_sabotage::BuildingFailureEvent>>();
+    // Spec 277 Orbital Megastructure Deorbiting: event, countdown state, director.
+    world.init_resource::<Events<crate::layer1::disasters::deorbit::DeorbitEvent>>();
+    world.init_resource::<crate::layer1::disasters::deorbit::DeorbitState>();
+    world.init_resource::<crate::layer1::disasters::deorbit::DeorbitDirector>();
     // The Planetary Governor (adventurer origin)
     world.init_resource::<crate::layer1::culture::governor::GovernorState>();
     world.init_resource::<crate::layer1::culture::governor::Treasury>();
