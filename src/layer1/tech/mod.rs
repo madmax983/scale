@@ -831,3 +831,17 @@ pub use symbiotic_data_weavers::*;
 pub mod black_market_genemods;
 pub mod nostalgia_engine;
 pub use nostalgia_engine::*;
+
+/// Kinetic harpoon tether launchers (Spec 324).
+///
+/// The module stays private and re-exports explicitly: `physics::harpoon`
+/// already owns the `harpoon` module name at the `layer1` level, so a glob
+/// re-export here would trip `ambiguous_glob_reexports`.
+mod harpoon;
+pub use harpoon::{
+    active_winch_count, handle_harpoon_impact_system, harpoon_launch_system, harpoon_status_label,
+    harpoon_winch_system, launcher_count, orbiting_wanderer_count, spawn_passing_wanderer_system,
+    BodyStatus, HarpoonImpactEvent, HarpoonLaunchEvent, HarpoonLauncher, WandererBody, WandererDirector,
+    WandererKind, WinchSystem, harpoon_public_strings, CATCH_DAMAGE, CATCH_RADIUS, SNAP_DAMAGE, SNAP_DEBRIS_FEED,
+    SNAP_RADIUS, WINCH_DEFAULT_STRENGTH, WINCH_POWER_DRAW, WINCH_PROGRESS_PER_TICK,
+};

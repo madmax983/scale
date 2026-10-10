@@ -517,4 +517,20 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(super::Layer1SystemSet::Execution),
     );
+
+    // Spec 324 Kinetic Harpoons: tether launch, winch reel-in, impact
+    // resolution, passing-wanderer spawns. Separate add_systems call to stay
+    // clear of the IntoSystemConfigs arity limit.
+    schedule.add_systems(
+        (
+            crate::layer1::tech::spawn_passing_wanderer_system,
+            crate::layer1::tech::harpoon_launch_system
+                .after(crate::layer1::tech::spawn_passing_wanderer_system),
+            crate::layer1::tech::harpoon_winch_system
+                .after(crate::layer1::tech::harpoon_launch_system),
+            crate::layer1::tech::handle_harpoon_impact_system
+                .after(crate::layer1::tech::harpoon_winch_system),
+        )
+            .in_set(super::Layer1SystemSet::Execution),
+    );
 }

@@ -313,6 +313,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::disasters::deorbit::DeorbitEvent>>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitState>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitDirector>();
+    // Spec 324 Kinetic Harpoons: launch/impact events, wanderer spawn director.
+    world.init_resource::<Events<crate::layer1::tech::HarpoonLaunchEvent>>();
+    world.init_resource::<Events<crate::layer1::tech::HarpoonImpactEvent>>();
+    world.init_resource::<crate::layer1::tech::WandererDirector>();
     // The Planetary Governor (adventurer origin)
     world.init_resource::<crate::layer1::culture::governor::GovernorState>();
     world.init_resource::<crate::layer1::culture::governor::Treasury>();

@@ -437,6 +437,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "deorbit" => handle_deorbit_command(world, &parts),
         "tether" => handle_tether_command(world, &parts),
         "tethers" => print_tethers(world),
+        "harpoon" => handle_harpoon_command(world, &parts),
+        "launch" => handle_launch_command(world, &parts),
+        "winches" => print_winches(world),
         "feral" => handle_feral_command(world, &parts),
         "relocate" => handle_relocate_command(world, &parts),
         "extractor" => handle_extractor_command(world, &parts),
@@ -2733,9 +2736,13 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::informants::average_paranoia;
         average_paranoia(world)
     };
+    let harpoon = {
+        use scale::layer1::tech::harpoon_status_label;
+        harpoon_status_label(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={}",
         tick,
         pops,
         avg_health,
@@ -2784,6 +2791,7 @@ fn print_stats(world: &mut World) {
         pension,
         informant,
         paranoia,
+        harpoon,
     );
 }
 
@@ -6648,6 +6656,204 @@ fn print_tethers(world: &mut World) {
             "{count} tether arrays standing, total strength {strength:.1}.\nDeorbit: {status}."
         ),
         Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: build harpoon launchers (Spec 324). `harpoon [n]` — construct n
+/// kinetic harpoon tether launchers on free tiles near the colony center
+/// (grants Astronomy and the metal/stone to build them, like the other
+/// debug build commands).
+fn handle_harpoon_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::{Tech, TechState};
+
+    let n: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+
+    {
+        // The debug command stands in for a colony with server infrastructure:
+        // a bare TechState has zero data capacity, and unlock() would
+        // immediately corrupt the tech again via update_corruption().
+        let mut tech = world.resource_mut::<TechState>();
+        tech.total_capacity = tech.total_capacity.max(200.0);
+        if !tech.is_unlocked(Tech::Astronomy) {
+            tech.unlock(Tech::Astronomy);
+        }
+        // Solar panels (the debug wiring) need MetalWorking.
+        if !tech.is_unlocked(Tech::MetalWorking) {
+            tech.unlock(Tech::MetalWorking);
+        }
+    }
+    {
+        let mut resources = world.resource_mut::<ColonyResources>();
+        resources.metal = resources.metal.max(500.0);
+        resources.stone = resources.stone.max(200.0);
+    }
+
+    let mut placed = 0usize;
+    let mut powered = 0usize;
+    // Place each launcher as a 2x2 block: the launcher plus three solar
+    // panels (10 output each) covering the winch's 30/tick draw. The grid
+    // BFS connects 4-adjacent power entities, so the block is one powered
+    // grid and the reel-in runs on real grid power in the playtest.
+    'scan: for y in 10..=40 {
+        for x in 15..=65 {
+            if placed >= n {
+                break 'scan;
+            }
+            if try_place_building(world, x, y, BuildingType::HarpoonLauncher) {
+                placed += 1;
+                for (px, py) in [(x + 1, y), (x, y + 1), (x + 1, y + 1)] {
+                    if try_place_building(world, px, py, BuildingType::SolarPanel) {
+                        powered += 1;
+                    }
+                }
+            }
+        }
+    }
+    let label = {
+        use scale::layer1::tech::harpoon_status_label;
+        harpoon_status_label(world)
+    };
+    print_dashboard_panel(
+        "HARPOON LAUNCHERS",
+        &format!(
+            "Built {placed}/{n} harpoon launchers near the colony center ({powered} solar panels wired).\n{label}"
+        ),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: spawn a passing comet/asteroid and fire the first ready launcher
+/// at it (Spec 324). `launch [comet|asteroid] [mass] [yield]` — defaults:
+/// comet, 800 mass, 1200 yield.
+fn handle_launch_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::{
+        BodyStatus, HarpoonLaunchEvent, WandererBody, WandererKind, WinchSystem,
+    };
+
+    let kind = match parts.get(1).map(|s| s.to_lowercase()).as_deref() {
+        Some("asteroid") => WandererKind::Asteroid,
+        _ => WandererKind::Comet,
+    };
+    let mass: u32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(800);
+    let yield_amount: u32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(1200);
+
+    // Defensive: the event resource only exists after the first tick.
+    world.init_resource::<Events<HarpoonLaunchEvent>>();
+    let body = world
+        .spawn(WandererBody {
+            kind,
+            mass,
+            resource_yield: yield_amount,
+            status: BodyStatus::Orbiting,
+        })
+        .id();
+
+    // Auto-fire the first ready, unwinched launcher at the new body.
+    let launcher = {
+        use scale::layer1::tech::HarpoonLauncher;
+        let mut found = None;
+        for (e, l) in world
+            .query::<(Entity, &HarpoonLauncher)>()
+            .iter(world)
+        {
+            if l.ready && world.get::<WinchSystem>(e).is_none() {
+                found = Some(e);
+                break;
+            }
+        }
+        found
+    };
+
+    let fired = if let Some(launcher) = launcher {
+        world
+            .resource_mut::<Events<HarpoonLaunchEvent>>()
+            .send(HarpoonLaunchEvent {
+                launcher,
+                target: body,
+            });
+        true
+    } else {
+        false
+    };
+
+    print_dashboard_panel(
+        "HARPOON LAUNCH",
+        &format!(
+            "A {} ({} mass, {} yield) drifts into range.\n{}",
+            kind.label(),
+            mass,
+            yield_amount,
+            if fired {
+                "Tether away! The first ready launcher fired — watch the winch."
+            } else {
+                "No ready launcher — build one with `harpoon`."
+            }
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: list harpoon launchers, active winches, and orbiting bodies (Spec 324).
+fn print_winches(world: &mut World) {
+    use scale::layer1::tech::{
+        BodyStatus, HarpoonLauncher, WandererBody, WinchSystem,
+    };
+    use scale::layer1::architecture::building::Building;
+
+    let mut lines: Vec<String> = Vec::new();
+    for (e, pos, launcher, winch) in world
+        .query::<(Entity, &GridPosition, &HarpoonLauncher, Option<&WinchSystem>)>()
+        .iter(world)
+    {
+        let building = world
+            .get::<Building>(e)
+            .map(|b| format!("{:?}", b.building_type))
+            .unwrap_or_else(|| "launcher".to_string());
+        let state = match winch {
+            Some(w) => match w.target {
+                Some(t) => {
+                    let desc = world
+                        .get::<WandererBody>(t)
+                        .map(|b| format!("{} {} mass", b.kind.label(), b.mass))
+                        .unwrap_or_else(|| "lost body".to_string());
+                    format!("WINCHING {desc} @ {:.0}%", w.progress)
+                }
+                None => "spent winch".to_string(),
+            },
+            None => {
+                if launcher.ready {
+                    "ready".to_string()
+                } else {
+                    "SNAPPED — rebuild or re-arm".to_string()
+                }
+            }
+        };
+        lines.push(format!("  {building} at ({}, {}): {state}", pos.x, pos.y));
+    }
+    let mut orbiting = 0usize;
+    for body in world.query::<&WandererBody>().iter(world) {
+        if body.status == BodyStatus::Orbiting {
+            orbiting += 1;
+            lines.push(format!(
+                "  orbiting {}: {} mass, {} yield",
+                body.kind.label(),
+                body.mass,
+                body.resource_yield
+            ));
+        }
+    }
+    if lines.is_empty() {
+        lines.push("  No launchers. Build one with `harpoon`.".to_string());
+    } else if orbiting == 0 {
+        lines.push("  Sky is empty — the spotters will ring when a wanderer passes.".to_string());
+    }
+    print_dashboard_panel(
+        "HARPOON STATUS",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
     );
 }

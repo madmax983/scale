@@ -361,6 +361,8 @@ pub enum BuildingType {
     BiomassExtractor,
     /// Orbital tether array: catches deorbiting megastructures (Spec 277).
     TetherArray,
+    /// Kinetic harpoon tether launcher: snags passing comets/asteroids (Spec 324).
+    HarpoonLauncher,
 }
 
 impl BuildingType {
@@ -541,7 +543,8 @@ impl BuildingType {
             | Self::TrashCannon
             | Self::Heater
             | Self::AuroralCollector
-            | Self::TetherArray => false,
+            | Self::TetherArray
+            | Self::HarpoonLauncher => false,
             Self::Recycler => true,
             Self::BulletinBoard => false,
             Self::HoloProjector => false,
@@ -623,6 +626,7 @@ impl BuildingType {
             Self::CryoPod => Some(Tech::Medical),
             Self::AuroralCollector => Some(Tech::Electromagnetism),
             Self::TetherArray => Some(Tech::Electromagnetism),
+            Self::HarpoonLauncher => Some(Tech::Astronomy),
             Self::AtmosphericProcessor => Some(Tech::Terraforming),
             Self::GeneBank | Self::CloneVat | Self::HypnoPod => Some(Tech::Medical),
             Self::Shower => Some(Tech::SocialStructures),
@@ -714,6 +718,7 @@ impl BuildingType {
             Self::Billboard => "Billboard",
             Self::BiomassExtractor => "Biomass Extractor",
             Self::TetherArray => "Tether Array",
+            Self::HarpoonLauncher => "Harpoon Launcher",
         }
     }
 
@@ -780,6 +785,7 @@ impl BuildingType {
             Self::Billboard => 'B',
             Self::BiomassExtractor => 'X',
             Self::TetherArray => '⌁',
+            Self::HarpoonLauncher => '⚓',
         }
     }
 
@@ -1146,6 +1152,11 @@ impl BuildingType {
                 stone: 10.0,
                 ..ColonyResources::zeroed()
             },
+            Self::HarpoonLauncher => ColonyResources {
+                metal: 60.0,
+                stone: 20.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1400,7 +1411,8 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
         | BuildingType::Hopper
         | BuildingType::Airlock
         | BuildingType::Vent
-        | BuildingType::TetherArray => configure_infrastructure(entity, building_type),
+        | BuildingType::TetherArray
+        | BuildingType::HarpoonLauncher => configure_infrastructure(entity, building_type),
         BuildingType::Generator
         | BuildingType::SolarPanel
         | BuildingType::PowerPole
@@ -1973,6 +1985,23 @@ fn configure_infrastructure(entity: &mut EntityWorldMut, building_type: Building
                     radius: 3.0,
                     intensity: 0.5,
                     color: (120, 180, 255), // Tether beacon blue
+                },
+            ));
+        }
+        BuildingType::HarpoonLauncher => {
+            // Spec 324: the marker component powers the harpoon tether; the
+            // PowerConsumer ties reel-in progress to the live energy grid.
+            entity.insert((
+                crate::layer1::tech::HarpoonLauncher::new(),
+                PowerConsumer {
+                    demand: crate::layer1::tech::WINCH_POWER_DRAW,
+                    active: false,
+                },
+                LightSource {
+                    is_outdoor: true,
+                    radius: 3.0,
+                    intensity: 0.5,
+                    color: (255, 180, 120), // Harpoon beacon amber
                 },
             ));
         }
@@ -2655,7 +2684,11 @@ mod tests {
             BuildingType::BiomassExtractor.next(),
             BuildingType::TetherArray
         );
-        assert_eq!(BuildingType::TetherArray.next(), BuildingType::Housing);
+        assert_eq!(
+            BuildingType::TetherArray.next(),
+            BuildingType::HarpoonLauncher
+        );
+        assert_eq!(BuildingType::HarpoonLauncher.next(), BuildingType::Housing);
     }
 
     #[test]
@@ -2907,6 +2940,8 @@ mod tests {
         assert_eq!(mode.selected, BuildingType::BiomassExtractor);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::TetherArray);
+        mode.selected = mode.selected.next();
+        assert_eq!(mode.selected, BuildingType::HarpoonLauncher);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Housing);
     }
