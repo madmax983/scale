@@ -58,6 +58,7 @@ use crate::layer1::resources::{Carrying, ColonyResources, ResourceType};
 use crate::layer1::stress::{Breakdown, StressTracker, BREAKDOWN_TICKS_REQUIRED};
 use crate::layer1::taboo::TabooState;
 use crate::layer1::traits::Traits;
+use crate::layer1::social::feral_outpost::CulturalDrift;
 use crate::layer1::unrest::MentalState;
 use crate::layer1::utility_types::{
     calculate_context_score, ActionType, HobbyType, PopAction, UtilityWeights,
@@ -110,6 +111,7 @@ pub struct PopEvaluationQuery {
     pub existential_crisis:
         Option<&'static crate::layer1::economy::existential_audit::ExistentialCrisis>,
     pub temporal_fugue: Option<&'static crate::layer1::mind::temporal_fugue::TemporalFugue>,
+    pub cultural_drift: Option<&'static CulturalDrift>,
 }
 
 impl PopEvalData {
@@ -145,6 +147,7 @@ impl PopEvalData {
             is_nostalgic: item.nostalgia.is_some(),
             existential_crisis: item.existential_crisis.copied(),
             has_temporal_fugue: item.temporal_fugue.is_some(),
+            is_fringe: item.cultural_drift.is_some_and(|d| d.is_fringe()),
         }
     }
 }
@@ -228,6 +231,8 @@ pub struct PopEvalData {
     /// Existential crisis state, if any.
     pub existential_crisis: Option<crate::layer1::economy::existential_audit::ExistentialCrisis>,
     pub has_temporal_fugue: bool,
+    /// Whether the pop carries the Fringe cultural tag (Spec 290).
+    pub is_fringe: bool,
 }
 
 #[cfg(test)]
@@ -263,6 +268,7 @@ impl PopEvalData {
             is_nostalgic: false,
             existential_crisis: None,
             has_temporal_fugue: false,
+            is_fringe: false,
         }
     }
 }

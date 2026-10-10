@@ -170,6 +170,16 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 290 The Phantom Shift: Fringe pops work a secret night shift
+    // repairing damaged structures off the books, growing a shadow economy
+    // when the colony backlog is critical.
+    schedule.add_systems(
+        (
+            crate::layer1::phantom_shift::update_inefficiency_tracker_system,
+            crate::layer1::phantom_shift::phantom_work_execution_system,
+        )
+            .chain(),
+    );
     // Spec 1208 The Cadet Branch: Homeworld courier arrivals spawn Noble
     // Scion pops (zero skills, Noble trait, monthly family allowance).
     schedule.add_systems(

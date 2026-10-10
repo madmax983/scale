@@ -127,6 +127,7 @@ mod shift_integration_tests;
 pub mod sonic_suppression;
 pub use sonic_suppression::*;
 
+pub mod phantom_shift;
 pub mod social;
 /// Spoilage and decay mechanics.
 pub mod spoilage;

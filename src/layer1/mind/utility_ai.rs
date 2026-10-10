@@ -631,6 +631,29 @@ impl<'a> PopDecider<'a> {
 
         self.evaluate_production();
         self.evaluate_policing();
+        self.evaluate_phantom_shift();
+    }
+
+    /// **Spec 290: The Phantom Shift**
+    ///
+    /// Fringe pops work a secret night shift repairing damaged structures
+    /// when the colony backlog is critical. Outbids ordinary rest but loses
+    /// to critical exhaustion.
+    fn evaluate_phantom_shift(&mut self) {
+        // Striking, noble, and penal pops never work the phantom shift.
+        if self.is_striking || self.is_noble || self.is_penal {
+            return;
+        }
+        self.evaluator.evaluate_and_consider(
+            crate::layer1::phantom_shift::evaluate_phantom_shift(
+                self.data,
+                self.buffer,
+                self.context,
+            ),
+            ActionType::PhantomWork,
+            self.context,
+            0.0,
+        );
     }
 
     /// **Priority 4: Logistics & Maintenance**
