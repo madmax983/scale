@@ -1,7 +1,7 @@
 //! Shared world setup used by all entry points (native, headless, WASM).
 
 use bevy_ecs::{prelude::*, system::RunSystemOnce};
-use rand::RngCore;
+use rand::{RngCore, SeedableRng};
 
 // Fix: Unconditional import of AddChronicleEvent because init_resource usage is unconditional below
 use crate::layer1::chronicle::AddChronicleEvent;
@@ -264,6 +264,7 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(OccupiedTiles::default());
     world.insert_resource(crate::layer1::crowding::CrowdingGrid::new(80, 50));
     world.insert_resource(ColonyResources::default());
+    world.insert_resource(crate::shared::random::GlobalRng(rand::rngs::StdRng::from_entropy()));
     world.insert_resource(crate::layer1::social::golden_age::ColonySafety {
         days_without_incident: 0,
     });

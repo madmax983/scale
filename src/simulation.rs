@@ -858,6 +858,7 @@ fn register_simulation_core_systems(schedule: &mut Schedule) {
         crate::layer2::station::process_megastructure_upkeep,
         crate::layer2::station::decommission_megastructure_system,
         crate::layer2::station::log_generous_gift_system,
+        crate::layer2::station::process_deep_forges,
     ));
 
     // Whispering Ore
@@ -1226,7 +1227,7 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     schedule.add_systems((
         crate::layer2::mycelial_network::evaluate_ecological_damage_system,
         crate::layer2::integration::mycelial_network_immune_response_chronicle_bridge,
-        crate::layer2::integration::observe_forge_crush_event,
+        crate::layer2::integration::observe_forge_crush_event.after(crate::layer2::station::process_deep_forges),
         crate::layer2::integration::celestial_library_chronicle_bridge,
         crate::layer2::cascade::evaluate_system_logistics,
         crate::layer2::cascade::update_sector_defenses
