@@ -469,6 +469,8 @@ fn init_simulation_resources(world: &mut World) {
 
     // Spec 326 Invasive Biology: spore hitchhiker tuning.
     world.init_resource::<crate::layer1::biology::invasive::InvasiveConfig>();
+    // Spec 327 The Stowaway: hidden-pop agenda tuning.
+    world.init_resource::<crate::layer1::social::ship_stowaway::StowawayConfig>();
     if !world.contains_resource::<crate::layer3::bureaucracy_of_vanity::ImperialStanding>() {
         world.insert_resource(crate::layer3::bureaucracy_of_vanity::ImperialStanding { value: 50 });
     }
@@ -783,6 +785,15 @@ fn init_simulation_resources(world: &mut World) {
                     crate::layer1::biology::invasive::spore_hitchhiker_system,
                     crate::layer1::biology::invasive::spore_spread_system,
                     crate::layer1::biology::invasive::quarantine_burn_system,
+                )
+                    .chain(),
+            );
+            // Spec 327 The Stowaway: unregistered pops slip off trade ships
+            // with hidden agendas; muster sweeps expose them.
+            schedule.add_systems(
+                (
+                    crate::layer1::social::ship_stowaway::stowaway_arrival_system,
+                    crate::layer1::social::ship_stowaway::stowaway_agenda_system,
                 )
                     .chain(),
             );

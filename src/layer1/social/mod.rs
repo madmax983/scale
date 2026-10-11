@@ -742,3 +742,15 @@ pub use empathy_broadcast::*;
 /// social withdrawal, and false treason accusations.
 pub mod informants;
 pub use informants::*;
+
+/// The Stowaway (Spec 327): an unregistered pop slips off arriving trade
+/// ships with a hidden agenda (saboteur / spy / sympathizer) — invisible
+/// to the census, detectable via muster sweeps, resolved by pardon/expel.
+///
+/// NOTE: no `pub use` glob here on purpose. The legacy
+/// `crate::layer1::stowaway` module owns the `stowaway` module name at the
+/// `layer1` level (reached through `pub use social::*`), so this module is
+/// named `ship_stowaway`, and its `Stowaway` type stays reachable only via
+/// its full path to avoid an ambiguous-glob collision with the legacy
+/// `crate::layer1::Stowaway` (the physics::harpoon precedent).
+pub mod ship_stowaway;

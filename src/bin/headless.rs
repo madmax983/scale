@@ -418,6 +418,10 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "stats" => print_stats(world),
         "pops" | "p" => print_pops(world),
         "ghosts" => print_ghost_audit(world),
+        "stowaway" => handle_stowaway_command(world, &parts),
+        "muster" => handle_muster_command(world),
+        "pardon" => handle_pardon_command(world, &parts),
+        "expel" => handle_expel_command(world, &parts),
         "scare" => handle_scare_command(world, &parts),
         "panics" => print_panics(world),
         "howl" => handle_howl_command(world, &parts),
@@ -2602,7 +2606,11 @@ fn print_stats(world: &mut World) {
     let pop_tiles: Vec<(i32, i32)> = {
         let mut query = world.query_filtered::<
             (&GridPosition, &scale::layer1::health::Health),
-            With<Pop>,
+            (
+                With<Pop>,
+                // Spec 327: the census never counts stowaways.
+                Without<scale::layer1::social::ship_stowaway::Stowaway>,
+            ),
         >();
         query
             .iter(world)
@@ -2740,9 +2748,13 @@ fn print_stats(world: &mut World) {
         use scale::layer1::tech::harpoon_status_label;
         harpoon_status_label(world)
     };
+    let stowaway = {
+        use scale::layer1::social::ship_stowaway::stowaway_status_label;
+        stowaway_status_label(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={}",
         tick,
         pops,
         avg_health,
@@ -2792,13 +2804,17 @@ fn print_stats(world: &mut World) {
         informant,
         paranoia,
         harpoon,
+        stowaway,
     );
 }
 
 fn calculate_avg_morale(world: &mut World) -> f32 {
     let mut total_morale = 0.0;
     let mut morale_count = 0;
-    for morale in world.query::<&Morale>().iter(world) {
+    for morale in world
+        .query_filtered::<&Morale, Without<scale::layer1::social::ship_stowaway::Stowaway>>()
+        .iter(world)
+    {
         total_morale += morale.value;
         morale_count += 1;
     }
@@ -3061,7 +3077,14 @@ fn print_pops(world: &mut World) {
 
     let max_pops = 15;
     let pops_iter: Vec<_> = world
-        .query::<(Entity, &PopName, &GridPosition, &Needs, &PopAction)>()
+        .query_filtered::<
+            (Entity, &PopName, &GridPosition, &Needs, &PopAction),
+            (
+                With<Pop>,
+                // Spec 327: the roster never lists stowaways.
+                Without<scale::layer1::social::ship_stowaway::Stowaway>,
+            ),
+        >()
         .iter(world)
         .collect();
     let total_pops = pops_iter.len();
@@ -5223,6 +5246,11 @@ fn print_help() {
                 ("stats", "", "One-line parseable playtest snapshot"),
                 ("pops", "p", "Show detailed pop states"),
                 ("ghosts", "", "Ghost-pop audit: Pop entities missing bundle components"),
+                ("stowaway", "", "Stowaway investigation: signs + exposed unregistered pops"),
+                ("stowaway spawn [agenda]", "", "Debug: slip a stowaway ashore (saboteur|spy|sympathizer)"),
+                ("muster", "", "Census sweep: expose hidden stowaways"),
+                ("pardon [<id>]", "", "Pardon an exposed stowaway (they join the colony)"),
+                ("expel [<id>]", "", "Expel an exposed stowaway (faction relations hit)"),
                 ("bio <id>", "", "Show biography and dreams of a pop"),
                 ("map [x] [y]", "m", "Show visual terrain around position"),
                 ("scan [x] [y] [r]", "", "Semantic terrain scan (parseable)"),
@@ -5813,6 +5841,198 @@ fn handle_scion_command(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Spec 327 The Stowaway. `stowaway` — investigation panel (see
+/// `print_stowaway_report`); `stowaway spawn [saboteur|spy|sympathizer]` —
+/// debug: slip a stowaway ashore directly, bypassing the trade-ship roll.
+fn handle_stowaway_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::ship_stowaway::{debug_spawn_stowaway, StowawayAgenda};
+
+    if parts.get(1).map(|s| *s == "spawn").unwrap_or(false) {
+        let agenda = parts.get(2).and_then(|s| StowawayAgenda::parse(s));
+        match debug_spawn_stowaway(world, agenda) {
+            Some(entity) => print_dashboard_panel(
+                "STOWAWAY",
+                &format!(
+                    "A stowaway slips ashore (id #{}). The census will never know.\nRun `muster` for a colony-wide census sweep.",
+                    entity.index()
+                ),
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            ),
+            None => print_dashboard_panel(
+                "ERROR",
+                "No living pops to blend with — the colony is empty.",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        }
+        return;
+    }
+    print_stowaway_report(world);
+}
+/// Investigation panel: the signs assessment (census vs. audit
+/// discrepancy), plus every EXPOSED stowaway in full (entity id, agenda,
+/// ticks hidden, home faction). Hidden stowaways are never named here —
+/// run `muster` to expose them.
+fn print_stowaway_report(world: &mut World) {
+    use scale::layer1::social::ship_stowaway::{stowaway_status_label, Stowaway};
+
+    let status = stowaway_status_label(world);
+    let census = world
+        .query_filtered::<Entity, (With<Pop>, Without<Stowaway>)>()
+        .iter(world)
+        .count();
+    let audit = world
+        .query_filtered::<Entity, With<Pop>>()
+        .iter(world)
+        .count();
+    let mut body = match status.as_str() {
+        "clear" => "No sign of unregistered souls. The census balances.".to_string(),
+        _ => format!(
+            "Census: {census} registered. Audit counts {audit} mouths.\nSomething eats unregistered — run `muster` for a colony-wide census sweep."
+        ),
+    };
+    let exposed_rows: Vec<String> = world
+        .query::<(Entity, &Stowaway, &PopName)>()
+        .iter(world)
+        .filter(|(_, s, _)| s.exposed)
+        .map(|(entity, s, name)| {
+            format!(
+                "#{} \"{}\" — {} of {} ({} ticks hidden) [EXPOSED]",
+                entity.index(),
+                name.0,
+                s.agenda.label(),
+                s.home_faction,
+                s.ticks_hidden
+            )
+        })
+        .collect();
+    if !exposed_rows.is_empty() {
+        body.push_str(&format!(
+            "\n\nExposed — resolve with `pardon <id>` or `expel <id>`:\n{}",
+            exposed_rows.join("\n")
+        ));
+    }
+    print_dashboard_panel(
+        "THE STOWAWAY",
+        &body,
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 327. `muster` — colony-wide census sweep. Each hidden stowaway
+/// rolls detection against their elusiveness; the exposed are dragged
+/// into the light.
+fn handle_muster_command(world: &mut World) {
+    use scale::layer1::social::ship_stowaway::muster_sweep;
+
+    let exposed = muster_sweep(world);
+    let body = if exposed.is_empty() {
+        "The muster counts every registered soul twice. Nothing unregistered stirs.".to_string()
+    } else {
+        format!(
+            "The muster drags into the light: {}.\nSee `stowaway` for their stories — `pardon <id>` or `expel <id>`.",
+            exposed.join(", ")
+        )
+    };
+    print_dashboard_panel(
+        "MUSTER",
+        &body,
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Find a stowaway entity by the index shown in the `stowaway` panel.
+fn find_stowaway_by_id(world: &mut World, id: u32) -> Option<Entity> {
+    use scale::layer1::social::ship_stowaway::Stowaway;
+    world
+        .query::<(Entity, &Stowaway)>()
+        .iter(world)
+        .find(|(entity, _)| entity.index() == id)
+        .map(|(entity, _)| entity)
+}
+
+/// Resolve the target of `pardon`/`expel`: an explicit `<id>`, or — when
+/// omitted — the single exposed stowaway if there is exactly one.
+fn resolve_stowaway_target(world: &mut World, parts: &[&str], usage: &str) -> Option<Entity> {
+    use scale::layer1::social::ship_stowaway::single_exposed_stowaway;
+
+    let entity = match parts.get(1) {
+        None => single_exposed_stowaway(world),
+        Some(id_str) => match id_str.parse::<u32>() {
+            Ok(id) => find_stowaway_by_id(world, id),
+            Err(_) => {
+                print_dashboard_panel(
+                    "ERROR",
+                    &format!("Invalid stowaway id: '{id_str}'"),
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return None;
+            }
+        },
+    };
+    if entity.is_none() {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("No such stowaway. Usage: {usage} <id>  (list ids with `stowaway`)"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+    entity
+}
+
+/// Spec 327. `pardon [<id>]` — pardon an exposed stowaway; they join the
+/// colony as a registered colonist.
+fn handle_pardon_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::ship_stowaway::pardon_stowaway;
+
+    let Some(entity) = resolve_stowaway_target(world, parts, "pardon") else {
+        return;
+    };
+    match pardon_stowaway(world, entity) {
+        Ok(name) => print_dashboard_panel(
+            "PARDONED",
+            &format!("{name} is taken in as a registered colonist."),
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+/// Spec 327. `expel [<id>]` — expel an exposed stowaway; their home
+/// faction takes an agenda-scaled relations hit.
+fn handle_expel_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::ship_stowaway::expel_stowaway;
+
+    let Some(entity) = resolve_stowaway_target(world, parts, "expel") else {
+        return;
+    };
+    match expel_stowaway(world, entity) {
+        Ok(name) => print_dashboard_panel(
+            "EXPELLED",
+            &format!("{name} is put off the colony. Their faction will hear of this."),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(err) => print_dashboard_panel(
+            "ERROR",
+            &err,
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
 }
 
 /// Debug: pirate amnesty (Spec 322). A defeated fleet accepts the colony's
