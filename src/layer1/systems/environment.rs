@@ -119,6 +119,21 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Environment),
     );
+    // Spec 332 Architectural Eras: era advancement, construction stamping,
+    // heritage scoring, efficiency decay, and morale auras. Chained in
+    // dependency order (stamp -> calculate -> apply -> relief).
+    schedule.add_systems(
+        (
+            crate::layer1::architecture::architectural_eras::advance_era_system,
+            crate::layer1::architecture::architectural_eras::stamp_architectural_era_system,
+            crate::layer1::architecture::architectural_eras::calculate_heritage_system,
+            crate::layer1::architecture::architectural_eras::apply_heritage_efficiency_system,
+            crate::layer1::architecture::architectural_eras::apply_heritage_aura_system,
+            crate::layer1::architecture::architectural_eras::heritage_aura_relief_system,
+        )
+            .chain()
+            .in_set(Layer1SystemSet::Environment),
+    );
     schedule.add_systems(
         (
             crate::layer1::architecture::biomimetic::adjust_sympathetic_infrastructure_system,

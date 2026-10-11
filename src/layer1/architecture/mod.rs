@@ -2,6 +2,9 @@
 //!
 //! Defines building structures, housing, and structural integrity mechanics.
 
+/// Architectural eras (heritage, efficiency decay, morale auras).
+pub mod architectural_eras;
+
 /// Biomimetic architecture.
 pub mod biomimetic;
 /// General building framework and implementations.

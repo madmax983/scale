@@ -456,6 +456,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "informant" => handle_informant_command(world, &parts),
         "transplant" => handle_transplant_command(world, &parts),
         "organs" => print_organ_ledger(world),
+        "heritage" => print_heritage(world),
         "artifacts" => print_artifacts(world),
         "sell" => handle_sell_command(world, &parts),
         "museum" => handle_museum_command(world, &parts),
@@ -5356,6 +5357,11 @@ fn print_help() {
                     "Use one stored organ to cure a critical pop (Spec 270)",
                 ),
                 ("organs", "", "Show organ stock, price, and horror (Spec 270)"),
+                (
+                    "heritage",
+                    "",
+                    "Heritage report: era, stamped buildings, venerable sites (Spec 332)",
+                ),
                 ("howl [speed]", "", "Debug: wind surge so canyons howl (Spec 1374)"),
                 ("calm", "", "Debug: end the wind surge (Spec 1374)"),
                 ("crystal [x] [y]", "", "Debug: place a resonance crystal (Spec 1374)"),
@@ -6616,6 +6622,24 @@ fn print_organ_ledger(world: &mut World) {
             "Organs banked: {organs:.1} (perishable)\nMarket price: {price:.0} credits/organ\nPops gripped by harvest horror: {horrified}"
         ),
         Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Heritage report: current era, stamped buildings, venerable sites (Spec 332).
+fn print_heritage(world: &mut World) {
+    let summary =
+        scale::layer1::architecture::architectural_eras::heritage_summary(world);
+    print_dashboard_panel(
+        "ARCHITECTURAL HERITAGE",
+        &format!(
+            "Current era: {}\nStamped buildings: {}\nVenerable sites (heritage>=50): {}\nOldest building age: {} eras\n\nOld buildings lose efficiency but soothe nearby pops —\nthe colony remembers its builders.",
+            summary.current_era,
+            summary.stamped_buildings,
+            summary.venerable_buildings,
+            summary.oldest_age_eras,
+        ),
+        Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
     );
 }
