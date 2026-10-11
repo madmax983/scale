@@ -1,4 +1,5 @@
 use crate::layer1::skills::SkillType;
+use crate::layer1::social::seniority::{mentor_multiplier_for, Seniority};
 use bevy_ecs::prelude::*;
 
 /// Component representing an active mentorship relationship.
@@ -23,15 +24,25 @@ use crate::layer1::utility_types::ActionType;
 
 /// System to detect and establish mentorship relationships.
 /// Runs periodically to find Master-Apprentice pairs based on proximity and skill gap.
+#[allow(clippy::type_complexity)]
 pub fn check_mentorship_system(
     mut commands: Commands,
     // Query potential apprentices AND masters
-    pops: Query<(Entity, &GridPosition, &Skills, &MovementTarget), With<AtTarget>>,
+    pops: Query<
+        (
+            Entity,
+            &GridPosition,
+            &Skills,
+            &MovementTarget,
+            Option<&Seniority>,
+        ),
+        With<AtTarget>,
+    >,
     designations: Query<&Designation>,
 ) {
     // 1. Collect working pops and their SkillType
     let mut workers = Vec::new();
-    for (entity, pos, skills, mt) in &pops {
+    for (entity, pos, skills, mt, seniority) in &pops {
         if mt.for_action != ActionType::Work {
             continue;
         }
@@ -54,19 +65,19 @@ pub fn check_mentorship_system(
                 DesignationType::Consume => None,
             };
             if let Some(st) = skill_type {
-                workers.push((entity, *pos, skills, st));
+                workers.push((entity, *pos, skills, st, seniority));
             }
         }
     }
 
     // 2. Find pairs (O(N^2) for MVP is fine, N is small)
-    for (i, (app_entity, app_pos, app_skills, app_skill_type)) in workers.iter().enumerate() {
+    for (i, (app_entity, app_pos, app_skills, app_skill_type, _)) in workers.iter().enumerate() {
         let app_level = app_skills.get_level(*app_skill_type);
 
         // Find best master in range
-        let mut best_master = None;
+        let mut best_master: Option<(Entity, Option<&Seniority>)> = None;
 
-        for (j, (master_entity, master_pos, master_skills, master_skill_type)) in
+        for (j, (master_entity, master_pos, master_skills, master_skill_type, master_seniority)) in
             workers.iter().enumerate()
         {
             if i == j {
@@ -89,17 +100,20 @@ pub fn check_mentorship_system(
             let master_level = master_skills.get_level(*master_skill_type);
             if master_level >= app_level + 2 {
                 // Found a valid master
-                best_master = Some(*master_entity);
+                best_master = Some((*master_entity, *master_seniority));
                 break; // Take first found for MVP
             }
         }
 
-        if let Some(master) = best_master {
+        if let Some((master, master_seniority)) = best_master {
             commands.entity(*app_entity).insert(Mentorship {
                 master_entity: master,
                 skill: *app_skill_type,
-                multiplier: 1.5, // 50% bonus
-                expiration: 50,  // Re-check every 50 ticks
+                // Spec 333: the master's seniority authority scales the
+                // teaching bonus — founders (1.5x) and veterans (1.2x) are
+                // better mentors than new blood (1.0x).
+                multiplier: mentor_multiplier_for(master_seniority),
+                expiration: 50, // Re-check every 50 ticks
             });
         }
     }
@@ -114,8 +128,9 @@ pub fn apply_mentorship_xp_system(
         // Add small trickle XP per tick representing "learning by watching"
         // Base work gives 1.0 XP per tick.
         // Multiplier 1.5x means we should add 0.5 extra XP per tick.
-
-        let bonus = 0.5; // Fixed bonus for now
+        // Spec 333: the multiplier is now real — it carries the master's
+        // seniority authority (mentor_multiplier_for), so the bonus scales.
+        let bonus = mentorship.multiplier - 1.0;
         skills.add_xp(mentorship.skill, bonus);
 
         // Decay expiration

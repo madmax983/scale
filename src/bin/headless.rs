@@ -424,6 +424,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "expel" => handle_expel_command(world, &parts),
         "scare" => handle_scare_command(world, &parts),
         "panics" => print_panics(world),
+        "seniority" => handle_seniority_command(world, &parts),
         "howl" => handle_howl_command(world, &parts),
         "calm" => handle_calm_command(world),
         "crystal" => handle_crystal_command(world, &parts),
@@ -2697,6 +2698,11 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::cadet::scion_count;
         scion_count(world)
     };
+    let seniority = {
+        use scale::layer1::social::seniority::seniority_counts;
+        let (f, v, n) = seniority_counts(world);
+        format!("{f}/{v}/{n}")
+    };
     let martyrdom = {
         use scale::layer1::social::martyrdom::martyrdom_ticks_remaining;
         martyrdom_ticks_remaining(world)
@@ -2760,7 +2766,7 @@ fn print_stats(world: &mut World) {
     };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={}",
         tick,
         pops,
         avg_health,
@@ -2812,6 +2818,7 @@ fn print_stats(world: &mut World) {
         harpoon,
         stowaway,
         encroaching,
+        seniority,
     );
 }
 
@@ -3336,6 +3343,112 @@ fn print_panics(world: &mut World) {
             Some(comfy_table::Attribute::Bold),
         );
     }
+}
+
+/// Show Founder/Veteran/NewBlood seniority counts (Spec 333).
+///
+/// `seniority` — counts plus a sample of pops with their tier and authority.
+/// `seniority friction [a] [b]` — force a rankling encounter between two pops
+/// (auto-picks the first Founder and first NewBlood when no ids are given).
+fn handle_seniority_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::seniority::{Seniority, SeniorityFrictionEvent, SeniorityStatus};
+
+    if parts.get(1).is_some_and(|s| *s == "friction") {
+        let explicit_a: Option<u32> = parts.get(2).and_then(|s| s.parse().ok());
+        let explicit_b: Option<u32> = parts.get(3).and_then(|s| s.parse().ok());
+        let pair: Option<(Entity, Entity)> = match (explicit_a, explicit_b) {
+            (Some(a), Some(b)) => {
+                let a_ent = find_pop_by_id(world, a).map(|(e, _)| e);
+                let b_ent = find_pop_by_id(world, b).map(|(e, _)| e);
+                a_ent.zip(b_ent)
+            }
+            _ => {
+                // Auto-pick: first Founder and first NewBlood in the world.
+                let mut founder_ent = None;
+                let mut newblood_ent = None;
+                let mut q =
+                    world.query_filtered::<(Entity, &Seniority), With<Pop>>();
+                for (entity, seniority) in q.iter(world) {
+                    match seniority.status {
+                        SeniorityStatus::Founder if founder_ent.is_none() => {
+                            founder_ent = Some(entity);
+                        }
+                        SeniorityStatus::NewBlood if newblood_ent.is_none() => {
+                            newblood_ent = Some(entity);
+                        }
+                        _ => {}
+                    }
+                    if founder_ent.is_some() && newblood_ent.is_some() {
+                        break;
+                    }
+                }
+                founder_ent.zip(newblood_ent)
+            }
+        };
+        match pair {
+            Some((ae, be)) => {
+                world.send_event(SeniorityFrictionEvent { a: ae, b: be });
+                {
+                    use bevy_ecs::system::RunSystemOnce;
+                    let _ = world.run_system_once(
+                        scale::layer1::social::seniority::seniority_friction_event_system,
+                    );
+                }
+                print_dashboard_panel(
+                    "SENIORITY FRICTION",
+                    &format!(
+                        "Forced a rankling encounter between pop #{} and pop #{}.\nIf exactly one is a Founder and the other NewBlood, the founder now carries a decaying 'New Blood Friction' mood modifier.",
+                        ae.index(),
+                        be.index()
+                    ),
+                    Some(comfy_table::Color::Yellow),
+                    None,
+                );
+            }
+            None => println!(
+                "No Founder/NewBlood pair available — list ids with `pops` or wait for new arrivals."
+            ),
+        }
+        return;
+    }
+
+    use scale::layer1::social::seniority::seniority_counts;
+    use scale::layer1::social::seniority::{FRICTION_LABEL, OUTNUMBERED_LABEL};
+    use scale::layer1::social::morale::Morale;
+
+    let (f, v, n) = seniority_counts(world);
+    let mut rows: Vec<String> = Vec::new();
+    let mut q = world.query_filtered::<(Entity, Option<&PopName>, &Seniority, Option<&Morale>), With<Pop>>();
+    for (entity, name, seniority, morale) in q.iter(world).take(10) {
+        let name = name.map_or_else(|| "?".to_string(), |x| x.0.clone());
+        let tier = match seniority.status {
+            SeniorityStatus::Founder => "Founder",
+            SeniorityStatus::Veteran => "Veteran",
+            SeniorityStatus::NewBlood => "NewBlood",
+        };
+        let friction = morale.is_some_and(|m| {
+            m.modifiers
+                .iter()
+                .any(|x| x.label == FRICTION_LABEL || x.label == OUTNUMBERED_LABEL)
+        });
+        rows.push(format!(
+            "#{} {name} — {tier} (authority x{:.1}){}",
+            entity.index(),
+            seniority.authority_multiplier,
+            if friction { " [friction]" } else { "" }
+        ));
+    }
+    let body = if rows.is_empty() {
+        "No pops have seniority yet.".to_string()
+    } else {
+        rows.join("\n")
+    };
+    print_dashboard_panel(
+        "SENIORITY",
+        &format!("Founders: {f}  Veterans: {v}  NewBlood: {n}\n\n{body}"),
+        Some(comfy_table::Color::Cyan),
+        None,
+    );
 }
 
 /// Debug: trigger a wind surge so canyon tiles howl (Spec 1374).
@@ -5301,6 +5414,16 @@ fn print_help() {
                 ("dust", "", "Show Desire Dust and RoadMind status"),
                 ("scare [x] [y]", "", "Debug: spawn a terrifying sighting (Spec 1371)"),
                 ("panics", "", "List panicking pops (Spec 1371)"),
+                (
+                    "seniority",
+                    "",
+                    "Show Founder/Veteran/NewBlood counts (Spec 333)",
+                ),
+                (
+                    "seniority friction [a] [b]",
+                    "",
+                    "Debug: force a rankling Founder x NewBlood encounter (Spec 333)",
+                ),
                 (
                     "scion [n]",
                     "",

@@ -3,6 +3,7 @@ use crate::layer1::inspector::spawn_inspector_system;
 use crate::layer1::social::old_guard::{
     apply_founder_benefits_system, apply_mood_modifiers_system,
 };
+use crate::layer1::social::seniority::assign_seniority_system;
 use crate::layer1::*;
 use bevy_ecs::prelude::*;
 
@@ -315,6 +316,7 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::social::sub_lithic::evaluate_cult_formation,
             crate::layer1::social::sub_lithic::process_cult_sabotage,
             apply_founder_benefits_system,
+            assign_seniority_system.after(apply_founder_benefits_system),
             // Layer 2 visibility systems are handled in simulation.rs
         )
             .in_set(Layer1SystemSet::Economy),

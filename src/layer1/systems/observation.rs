@@ -237,6 +237,10 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::civic_ideology::decay_recent_action_system
                 .after(crate::layer1::civic_ideology::apply_ideological_modifiers_system),
             check_generational_friction_system.after(decay_needs_system),
+            crate::layer1::social::seniority::seniority_demographic_friction_system
+                .after(decay_needs_system),
+            crate::layer1::social::seniority::seniority_friction_event_system
+                .after(crate::layer1::social::seniority::seniority_demographic_friction_system),
             crate::layer1::social::process_generational_dissonance_system.after(decay_needs_system),
             crate::layer1::social::evaluate_safety_edicts_system.after(decay_needs_system),
             crate::layer1::social::architecture_of_paranoia::run_subversion_spread_system,

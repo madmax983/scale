@@ -560,6 +560,9 @@ pub mod old_guard;
 
 mod old_guard_tests;
 
+/// Seniority tiers: Founder / Veteran / NewBlood authority and friction (Spec 333).
+pub mod seniority;
+
 pub use debt::*;
 pub use grievances::*;
 
