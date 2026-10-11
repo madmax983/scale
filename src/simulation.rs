@@ -328,6 +328,9 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::disasters::deorbit::DeorbitEvent>>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitState>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitDirector>();
+    // Spec 330 Biome Aggression: encroachment event (fresh-world first-tick
+    // panic guard — EventWriters need the resource initialized).
+    world.init_resource::<Events<crate::layer1::nature::biome_aggression::BiomeEncroachmentEvent>>();
     // Spec 324 Kinetic Harpoons: launch/impact events, wanderer spawn director.
     world.init_resource::<Events<crate::layer1::tech::HarpoonLaunchEvent>>();
     world.init_resource::<Events<crate::layer1::tech::HarpoonImpactEvent>>();

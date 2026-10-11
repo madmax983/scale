@@ -70,3 +70,6 @@ pub use subterranean_smog::*;
 
 pub mod biosphere_inversion;
 pub use biosphere_inversion::*;
+
+pub mod biome_aggression;
+pub use biome_aggression::*;

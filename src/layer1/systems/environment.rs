@@ -107,6 +107,18 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Environment),
     );
+    // Spec 330 Biome Aggression: throttled flora encroachment on civilized
+    // tiles + the weeding-directive counterplay. Own block (not folded into
+    // the fire/flora tuple above) so the encroachment system gets an explicit
+    // `.after(flora_attack_system)` edge — both touch `Flora` mutably and
+    // Bevy 0.15 will not run them unordered.
+    schedule.add_systems(
+        (
+            biome_encroachment_system.after(flora_attack_system),
+            biome_weeding_directive_system.after(biome_encroachment_system),
+        )
+            .in_set(Layer1SystemSet::Environment),
+    );
     schedule.add_systems(
         (
             crate::layer1::architecture::biomimetic::adjust_sympathetic_infrastructure_system,

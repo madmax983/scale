@@ -81,6 +81,25 @@ pub enum FloraType {
     Lumiflora,
 }
 
+impl FloraType {
+    /// Ticks between biome-encroachment attempts (Spec 330).
+    ///
+    /// The spec's "encroachment rate by biome type (Jungle > Tundra)" maps
+    /// onto flora types: jungle-like constrictors press hardest, pale
+    /// slow-growing flora barely stir.
+    #[must_use]
+    pub const fn encroachment_interval(self) -> u32 {
+        match self {
+            Self::StrangleVines => 40,
+            Self::FireWeed => 60,
+            Self::XenoMoss => 100,
+            Self::SilentFlora => 150,
+            Self::Lumiflora => 200,
+            Self::Ironwood => 200,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BloomPhase {
     Dormant,
@@ -113,6 +132,8 @@ pub struct Flora {
     pub attack_timer: u32,
     /// Damage dealt to buildings on the same tile.
     pub damage: f32,
+    /// Ticks until the next biome-encroachment attempt (Spec 330).
+    pub encroach_timer: u32,
 }
 
 impl Default for Flora {
@@ -123,6 +144,7 @@ impl Default for Flora {
             spread_chance: 0.1,
             attack_timer: 50,
             damage: 5.0,
+            encroach_timer: 100,
         }
     }
 }
@@ -860,6 +882,7 @@ pub fn ecological_succession_system(
                     attack_timer: 0,
                     damage: 0.0,
                     spread_chance: 0.0,
+                    encroach_timer: 100,
                 },
                 GrowthStage {
                     current: 0,
@@ -1088,6 +1111,7 @@ mod ecological_succession_tests {
                     attack_timer: 0,
                     damage: 0.0,
                     spread_chance: 0.0,
+                    encroach_timer: 0,
                 },
                 GrowthStage {
                     current: 0,

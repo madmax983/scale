@@ -446,6 +446,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "winches" => print_winches(world),
         "feral" => handle_feral_command(world, &parts),
         "relocate" => handle_relocate_command(world, &parts),
+        "overgrow" => handle_overgrow_command(world, &parts),
         "extractor" => handle_extractor_command(world, &parts),
         "corpse" => handle_corpse_command(world, &parts),
         "harvest" => handle_harvest_command(world, &parts),
@@ -2752,9 +2753,13 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::ship_stowaway::stowaway_status_label;
         stowaway_status_label(world)
     };
+    let encroaching = {
+        use scale::layer1::nature::biome_aggression::encroaching_flora_count;
+        encroaching_flora_count(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={}",
         tick,
         pops,
         avg_health,
@@ -2805,6 +2810,7 @@ fn print_stats(world: &mut World) {
         paranoia,
         harpoon,
         stowaway,
+        encroaching,
     );
 }
 
@@ -5320,6 +5326,11 @@ fn print_help() {
                     "Order a pop to relocate — feral pops may refuse (Spec 273)",
                 ),
                 (
+                    "overgrow [x] [y]",
+                    "",
+                    "Debug: plant aggressive flora at a tile (Spec 330)",
+                ),
+                (
                     "extractor [x] [y]",
                     "",
                     "Debug: build a Biomass Extractor (Spec 270)",
@@ -6309,6 +6320,37 @@ fn handle_broadcast_command(world: &mut World, parts: &[&str]) {
             "A psychic distress wave from faction {faction} is inbound.\n{duration} ticks at {intensity}/tick stress; every pop will feel it.\nPops currently saturated: {affected}. The people will demand intervention."
         ),
         Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: plant aggressive StrangleVines flora at a tile (Spec 330).
+fn handle_overgrow_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::core::map::GridPosition;
+
+    let (mut x, mut y) = (40, 25);
+    if let (Some(px), Some(py)) = (parts.get(1), parts.get(2)) {
+        if let (Ok(px), Ok(py)) = (px.parse::<i32>(), py.parse::<i32>()) {
+            x = px;
+            y = py;
+        }
+    } else {
+        // Default: right next to the first pop with a position.
+        let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+        if let Some(pos) = q.iter(world).next() {
+            x = pos.x + 1;
+            y = pos.y;
+        }
+    }
+    let entity =
+        scale::layer1::nature::biome_aggression::debug_spawn_aggressive_flora(world, x, y);
+    print_dashboard_panel(
+        "OVERGROWTH",
+        &format!(
+            "Aggressive StrangleVines take root at ({x}, {y}) (entity #{}).\nThey will press against nearby buildings and roads — neglect maintenance and the wilds will take them.",
+            entity.index()
+        ),
+        Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
     );
 }
