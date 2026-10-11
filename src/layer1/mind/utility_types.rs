@@ -796,4 +796,6 @@ pub enum AssignmentType {
     Surgery,
     /// Working in a deep mine.
     DeepMining,
+    /// Tending the sick at a hospital (Spec 328).
+    Doctor,
 }

@@ -471,6 +471,8 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::biology::invasive::InvasiveConfig>();
     // Spec 327 The Stowaway: hidden-pop agenda tuning.
     world.init_resource::<crate::layer1::social::ship_stowaway::StowawayConfig>();
+    // Spec 328 Technological Regression: practical knowledge levels.
+    world.init_resource::<crate::layer1::tech::tech_regression::TechKnowledge>();
     if !world.contains_resource::<crate::layer3::bureaucracy_of_vanity::ImperialStanding>() {
         world.insert_resource(crate::layer3::bureaucracy_of_vanity::ImperialStanding { value: 50 });
     }
@@ -794,6 +796,15 @@ fn init_simulation_resources(world: &mut World) {
                 (
                     crate::layer1::social::ship_stowaway::stowaway_arrival_system,
                     crate::layer1::social::ship_stowaway::stowaway_agenda_system,
+                )
+                    .chain(),
+            );
+            // Spec 328 Technological Regression: use-it-or-lose-it knowledge;
+            // disused fields decay yearly, black-boxing advanced buildings.
+            schedule.add_systems(
+                (
+                    crate::layer1::tech::tech_regression::knowledge_practice_system,
+                    crate::layer1::tech::tech_regression::knowledge_decay_system,
                 )
                     .chain(),
             );

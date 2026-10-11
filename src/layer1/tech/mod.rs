@@ -830,6 +830,7 @@ pub mod temporal_smuggling;
 pub use symbiotic_data_weavers::*;
 pub mod black_market_genemods;
 pub mod nostalgia_engine;
+pub mod tech_regression;
 pub use nostalgia_engine::*;
 
 /// Kinetic harpoon tether launchers (Spec 324).

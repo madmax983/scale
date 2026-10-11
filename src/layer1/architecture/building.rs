@@ -48,6 +48,7 @@ use crate::layer1::social::Tavern;
 use crate::layer1::solar::SolarPower;
 use crate::layer1::sonic_suppression::Glass;
 use crate::layer1::tech::{DataStorage, Library, Tech, TechState};
+use crate::layer1::tech::tech_regression::tech_requirement_for;
 use crate::layer1::terrain::{TerrainGrid, TerrainType};
 use crate::layer1::trade::TradeDepot;
 use crate::layer1::water::{WaterSource, MAX_HYDRATION};
@@ -1365,6 +1366,11 @@ pub fn spawn_building(
     insert_base_building_components(&mut entity, building_type, material);
 
     configure_building_components(&mut entity, building_type);
+
+    // Spec 328: tag advanced buildings with their knowledge requirement.
+    if let Some(req) = tech_requirement_for(building_type) {
+        entity.insert(req);
+    }
 
     entity.id()
 }
