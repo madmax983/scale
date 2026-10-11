@@ -76,6 +76,7 @@ pub fn map_export_system(
                 TerrainType::DeepRock => [105, 105, 105],      // Dim Gray
                 TerrainType::MagmaRock => [178, 34, 34],       // Firebrick
                 TerrainType::SporeBloom => [148, 0, 211],      // Dark Violet
+                TerrainType::Ash => [128, 128, 128],            // Grey
                 TerrainType::Artifact => [255, 215, 0],        // Gold
                 TerrainType::Crater => [80, 80, 80],           // Dark Gray
                 TerrainType::FaultLine(true) => [255, 60, 20], // Magma Red

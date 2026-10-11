@@ -34,6 +34,8 @@ pub enum TerrainType {
     MagmaRock,
     /// Toxic fungal growth in the deep caverns.
     SporeBloom,
+    /// Scorched earth left by a quarantine burn.
+    Ash,
     /// Ancient, indestructible alien structure.
     Artifact,
     /// A geological fault line that can open or close based on orbital tides.
@@ -68,6 +70,7 @@ impl TerrainType {
             Self::IndestructibleStump => "Indestructible Stump",
             Self::MagmaRock => "Magma Rock",
             Self::SporeBloom => "Spore Bloom",
+            Self::Ash => "Ash",
             Self::Artifact => "Artifact",
             Self::FaultLine(true) => "Fault Line (Open)",
             Self::FaultLine(false) => "Fault Line (Closed)",
@@ -148,6 +151,7 @@ impl TerrainType {
             | Self::Shrub
             | Self::Sapling
             | Self::SporeBloom
+            | Self::Ash
             | Self::Bridge
             | Self::Void => 0.1,
         }

@@ -16,6 +16,7 @@ pub mod genetics;
 pub mod grafting;
 pub mod gut_biome;
 pub mod health;
+pub mod invasive;
 pub mod medical;
 #[cfg(test)]
 #[allow(missing_docs)]
@@ -34,6 +35,7 @@ pub use genetics::*;
 pub use grafting::*;
 pub use gut_biome::*;
 pub use health::*;
+pub use invasive::*;
 pub use medical::*;
 pub mod gravity_caste;
 pub mod rust_lung;

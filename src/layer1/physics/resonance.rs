@@ -75,6 +75,7 @@ pub const fn terrain_height(t: TerrainType) -> i32 {
         | TerrainType::Sapling
         | TerrainType::MagmaRock
         | TerrainType::SporeBloom
+        | TerrainType::Ash
         | TerrainType::FaultLine(_) => 0,
         TerrainType::Tree | TerrainType::Artifact | TerrainType::IndestructibleStump => 1,
         TerrainType::Rock | TerrainType::DeepRock => 2,

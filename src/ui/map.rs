@@ -678,6 +678,7 @@ pub const fn get_terrain_char(terrain: TerrainType) -> &'static str {
         TerrainType::IndestructibleStump => "I",
         TerrainType::MagmaRock => "≈",
         TerrainType::SporeBloom => "♣",
+        TerrainType::Ash => "·",
         TerrainType::Artifact => "Ω",
         TerrainType::FaultLine(true) => "≈",
         TerrainType::FaultLine(false) => "–",
@@ -714,6 +715,7 @@ pub const fn get_terrain_color(terrain: TerrainType) -> Color {
         TerrainType::IndestructibleStump => Color::White,
         TerrainType::MagmaRock => Color::Rgb(255, 60, 20),
         TerrainType::SporeBloom => Color::Rgb(150, 60, 200),
+        TerrainType::Ash => Color::Rgb(140, 140, 140),
         TerrainType::Artifact => Color::Rgb(255, 215, 0), // Gold
         TerrainType::FaultLine(true) => Color::Rgb(255, 60, 20),
         TerrainType::FaultLine(false) => Color::Rgb(100, 100, 110),

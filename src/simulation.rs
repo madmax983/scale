@@ -466,6 +466,9 @@ fn init_simulation_resources(world: &mut World) {
 
     world.init_resource::<crate::layer3::bureaucracy_of_vanity::ActiveDemands>();
     world.init_resource::<crate::layer1::administration::invasive_bureaucracy::EmpireStability>();
+
+    // Spec 326 Invasive Biology: spore hitchhiker tuning.
+    world.init_resource::<crate::layer1::biology::invasive::InvasiveConfig>();
     if !world.contains_resource::<crate::layer3::bureaucracy_of_vanity::ImperialStanding>() {
         world.insert_resource(crate::layer3::bureaucracy_of_vanity::ImperialStanding { value: 50 });
     }
@@ -773,6 +776,16 @@ fn init_simulation_resources(world: &mut World) {
                 crate::layer1::archaeological_contagion::ancient_routine_observation_system,
                 crate::layer1::archaeological_contagion::evaluate_ancient_routine,
             ));
+            // Spec 326 Invasive Biology: spores hitchhike on trade ships, spread,
+            // and burn out under quarantine orders.
+            schedule.add_systems(
+                (
+                    crate::layer1::biology::invasive::spore_hitchhiker_system,
+                    crate::layer1::biology::invasive::spore_spread_system,
+                    crate::layer1::biology::invasive::quarantine_burn_system,
+                )
+                    .chain(),
+            );
             schedule.add_systems((
                 (
                     crate::layer2::planetary_spin_up::apply_planetary_torque_system,
@@ -807,6 +820,13 @@ fn init_simulation_resources_more(world: &mut World) {
     }
     if !world.contains_resource::<crate::layer1::nature::atmosphere::SmogGrid>() {
         world.init_resource::<crate::layer1::nature::atmosphere::SmogGrid>();
+    }
+    // Spec 326 Invasive Biology: event buses for spore blooms / quarantine burns.
+    if !world.contains_resource::<Events<crate::layer1::biology::invasive::SporeBloomEvent>>() {
+        world.init_resource::<Events<crate::layer1::biology::invasive::SporeBloomEvent>>();
+    }
+    if !world.contains_resource::<Events<crate::layer1::biology::invasive::QuarantineBurnEvent>>() {
+        world.init_resource::<Events<crate::layer1::biology::invasive::QuarantineBurnEvent>>();
     }
 }
 
