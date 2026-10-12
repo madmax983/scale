@@ -425,6 +425,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "scare" => handle_scare_command(world, &parts),
         "panics" => print_panics(world),
         "vermin" => handle_vermin_command(world, &parts),
+        "pillar" => handle_pillar_command(world, &parts),
+        "integrity" => print_integrity(world),
         "infest" => handle_infest_command(world, &parts),
         "exterminate" => handle_exterminate_command(world, &parts),
         "seniority" => handle_seniority_command(world, &parts),
@@ -2686,6 +2688,13 @@ fn print_stats(world: &mut World) {
         use scale::layer1::nature::symbiotic_pests::vermin_total;
         vermin_total(world)
     };
+    let caveins_total = {
+        use scale::layer1::structural_integrity::CaveInLedger;
+        world
+            .get_resource::<CaveInLedger>()
+            .map(|l| l.total_cave_ins)
+            .unwrap_or(0)
+    };
     let panicking = {
         use scale::layer1::psychology::panic_spirals::panicking_count;
         panicking_count(world)
@@ -2797,7 +2806,7 @@ fn print_stats(world: &mut World) {
     };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={}",
         tick,
         pops,
         avg_health,
@@ -2854,6 +2863,7 @@ fn print_stats(world: &mut World) {
         shadows,
         provenance,
         vermin_total,
+        caveins_total,
     );
 }
 
@@ -3348,9 +3358,93 @@ fn handle_scare_command(world: &mut World, parts: &[&str]) {
 }
 
 
+/// Raise a support pillar at a tile (headless `pillar` command, Spec 338).
+fn handle_pillar_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::structural_integrity::place_support_pillar;
+
+    if parts.len() < 3 {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: pillar <x> <y>",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let (x, y) = match (parts[1].parse::<i32>(), parts[2].parse::<i32>()) {
+        (Ok(x), Ok(y)) => (x, y),
+        _ => {
+            print_dashboard_panel(
+                "ERROR",
+                "Invalid coordinates",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    place_support_pillar(world, x, y);
+    print_dashboard_panel(
+        "PILLAR RAISED",
+        &format!(
+            "A support pillar now bears the load at ({x}, {y}). Hollowed neighbors\nrecalculate their support next tick — pillar-and-stall mining keeps ceilings up."
+        ),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Structural integrity report: tracked tiles, support values, cave-in ledger (Spec 338).
+fn print_integrity(world: &mut World) {
+    use scale::layer1::structural_integrity::{
+        CaveInLedger, Collapsed, MinedStatus, SupportPillar, SupportValue, TileCoords,
+    };
+
+    let tiles: Vec<(Entity, i32, i32, f32)> = {
+        let mut q = world.query::<(Entity, &TileCoords, &SupportValue, &MinedStatus)>();
+        q.iter(world)
+            .filter(|(_, _, _, m)| m.is_mined)
+            .map(|(e, c, s, _)| (e, c.x, c.y, s.value))
+            .collect()
+    };
+    let mut collapsed = 0usize;
+    let mut weakest: Option<(i32, i32, f32)> = None;
+    for (e, x, y, v) in &tiles {
+        if world.get::<Collapsed>(*e).is_some() {
+            collapsed += 1;
+        }
+        match weakest {
+            Some((_, _, w)) if *v >= w => {}
+            _ => weakest = Some((*x, *y, *v)),
+        }
+    }
+    let pillars = world
+        .query_filtered::<Entity, With<SupportPillar>>()
+        .iter(world)
+        .count();
+    let ledger = world
+        .get_resource::<CaveInLedger>()
+        .map(|l| (l.total_cave_ins, l.total_damage))
+        .unwrap_or_default();
+    let body = format!(
+        "Tracked hollowed tiles: {}\nCollapsed (rubble): {collapsed}\nSupport pillars raised: {pillars}\nCave-ins: {} (total damage {:.0})\nWeakest tile: {}\n\nMine designations register their hollow for support tracking.\nSupport < 0.2 collapses: rubble seals the tunnel, nearby pops are hurt.",
+        tiles.len(),
+        ledger.0,
+        ledger.1,
+        weakest
+            .map(|(x, y, v)| format!("({x}, {y}) at {v:.2}"))
+            .unwrap_or_else(|| "none".to_string()),
+    );
+    print_dashboard_panel(
+        "STRUCTURAL INTEGRITY",
+        &body,
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 /// Show vermin status: counts by species + silk ledger (Spec 337).
-fn print_vermin(world: &mut World) {
-    use scale::layer1::nature::symbiotic_pests::{banked_silk, unharvested_silk, vermin_counts};
+fn print_vermin(world: &mut World) {    use scale::layer1::nature::symbiotic_pests::{banked_silk, unharvested_silk, vermin_counts};
 
     let (rats, beetles, spiders) = vermin_counts(world);
     let total = rats + beetles + spiders;
@@ -5726,6 +5820,16 @@ fn print_help() {
                     "provenance",
                     "",
                     "Material provenance: stamped buildings + inherited properties (Spec 336)",
+                ),
+                (
+                    "pillar [x] [y]",
+                    "",
+                    "Debug: raise a support pillar — bears load like rock (Spec 338)",
+                ),
+                (
+                    "integrity",
+                    "",
+                    "Structural integrity: tracked tiles, support, cave-ins (Spec 338)",
                 ),
                 ("howl [speed]", "", "Debug: wind surge so canyons howl (Spec 1374)"),
                 ("calm", "", "Debug: end the wind surge (Spec 1374)"),

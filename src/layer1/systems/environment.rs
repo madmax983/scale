@@ -146,6 +146,20 @@ pub fn register(schedule: &mut Schedule) {
             .chain()
             .in_set(Layer1SystemSet::Environment),
     );
+    // Spec 338 Structural Integrity: mined rock loses support; unsupported
+    // ceilings collapse. Chained in dependency order (mine -> diffuse ->
+    // check -> execute): diffusion reads Changed<MinedStatus>, execute reads
+    // CaveInEvent, and the Collapsed marker keeps each collapse to one event.
+    schedule.add_systems(
+        (
+            crate::layer1::structural_integrity::mining_system,
+            crate::layer1::structural_integrity::support_diffusion_system,
+            crate::layer1::structural_integrity::cave_in_check_system,
+            crate::layer1::structural_integrity::cave_in_execute_system,
+        )
+            .chain()
+            .in_set(Layer1SystemSet::Environment),
+    );
     schedule.add_systems(
         (
             crate::layer1::architecture::biomimetic::adjust_sympathetic_infrastructure_system,

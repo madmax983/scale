@@ -1153,10 +1153,14 @@ pub fn mine_rock(world: &mut World, designation_entity: Entity, work_amount: f32
         // Remove designation
         world.despawn(designation_entity);
 
-        // Check Stability
-        if !crate::layer1::structural_integrity::check_stability(world, pos) {
-            crate::layer1::structural_integrity::apply_collapse(world, pos);
-        }
+        // Spec 338: register the hollowed tile for structural support
+        // tracking. The graduated support model (mining_system ->
+        // support_diffusion_system -> cave_in_check_system ->
+        // cave_in_execute_system, chained in Layer1SystemSet::Environment)
+        // now owns live collapse detection; the legacy binary
+        // check_stability / apply_collapse path remains for its other
+        // (experimental/test) callers.
+        crate::layer1::structural_integrity::register_mined_tile(world, pos);
     }
 }
 
