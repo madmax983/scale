@@ -229,6 +229,17 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Economy),
     );
+    // Spec 334: the curio trade. Export processing must run before the
+    // cultural-loss application so same-tick exports grieve same-tick.
+    schedule.add_systems(
+        (
+            crate::layer1::economy::curio_trade::process_curio_export_system,
+            crate::layer1::economy::curio_trade::apply_cultural_loss_system.after(
+                crate::layer1::economy::curio_trade::process_curio_export_system,
+            ),
+        )
+            .in_set(Layer1SystemSet::Economy),
+    );
     schedule.add_systems(
         crate::layer3::integration::quantum_famine_export_dump_bridge
             .after(crate::layer3::market::quantum_famine::process_market_panic_hoarding)

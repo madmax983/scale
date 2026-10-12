@@ -1,6 +1,7 @@
 use crate::layer1::health::Dead;
 use crate::layer1::inventory::{Inventory, InventoryItem};
 use crate::layer1::items::ItemType;
+use crate::layer1::economy::curio_trade::Curio;
 use crate::layer1::pop::Pop;
 use crate::layer1::skills::Skills;
 use crate::layer1::stress::StressTracker;
@@ -64,11 +65,16 @@ pub fn harvest_memory_core_system(
         if let Ok(mut inv) = harvesters.get_mut(event.harvester) {
             if let Ok((skills, traits)) = targets.get(event.target) {
                 // Spawn a new entity to hold the MemoryCoreData
+                // Spec 334: harvested memory cores are curios - tag them while
+                // they remain local.
                 let data_entity = commands
-                    .spawn(MemoryCoreData {
-                        skills: skills.clone(),
-                        traits: traits.iter().collect(),
-                    })
+                    .spawn((
+                        MemoryCoreData {
+                            skills: skills.clone(),
+                            traits: traits.iter().collect(),
+                        },
+                        Curio,
+                    ))
                     .id();
 
                 // Yield the item into inventory

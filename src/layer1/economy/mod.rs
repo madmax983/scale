@@ -263,6 +263,8 @@ pub mod shadow_market;
 pub mod stockpile;
 /// Regular trade with off-world merchants.
 pub mod trade;
+/// The curio trade (spec 334): premium credit exports with cultural loss.
+pub mod curio_trade;
 
 pub use black_market::*;
 pub use hauling::*;

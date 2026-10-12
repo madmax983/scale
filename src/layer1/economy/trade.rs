@@ -13,6 +13,7 @@
 
 use crate::layer1::building::{Building, BuildingType};
 use crate::layer1::chronicle::{Chronicle, EventImportance};
+use crate::layer1::economy::curio_trade::{is_curio_resource, TradeCompletedEvent};
 use crate::layer1::resources::{ColonyResources, ResourceType};
 use crate::shared::time::SimulationTime;
 use bevy_ecs::prelude::*;
@@ -183,6 +184,22 @@ pub fn merchant_arrival_system(world: &mut World) {
             });
         }
 
+        // Spec 334: Core World elites occasionally send a buyer specifically
+        // for the colony's curios (memory cores) - the curio trade.
+        if rng.gen_bool(0.3) {
+            let give_type = match rng.gen_range(0..3) {
+                0 => ResourceType::Metal,
+                1 => ResourceType::Planks,
+                _ => ResourceType::Ore,
+            };
+            deals.push(TradeDeal {
+                cost_resource: ResourceType::MemoryCore,
+                cost_amount: rng.gen_range(1.0f32..4.0f32).round(),
+                give_resource: give_type,
+                give_amount: rng.gen_range(2.0f32..8.0f32).round(),
+            });
+        }
+
         let merchant = Merchant {
             name: name.clone(),
             arrival_tick: current_tick,
@@ -279,6 +296,16 @@ pub fn execute_trade(world: &mut World, deal: &TradeDeal) -> bool {
 
     // Add
     resources.add_resource(&deal.give_resource, deal.give_amount);
+
+    // Spec 334: announce completed trades so curio exports (memory cores sold
+    // to Core World elites) can pay their credit premium and inflict cultural
+    // loss. `init_resource` keeps this safe on bare worlds (doctests).
+    world.init_resource::<Events<TradeCompletedEvent>>();
+    world.send_event(TradeCompletedEvent {
+        resource: deal.cost_resource,
+        is_curio: is_curio_resource(deal.cost_resource),
+        amount: deal.cost_amount,
+    });
 
     true
 }
@@ -512,5 +539,90 @@ mod tests {
         let success = execute_trade(&mut world, &deal);
 
         assert!(!success, "Trade with infinite cost should fail");
+    }
+
+    #[test]
+    fn test_execute_trade_emits_curio_completed_event() {
+        let mut world = World::new();
+        world.insert_resource(ColonyResources {
+            memory_cores: 5.0,
+            ..Default::default()
+        });
+        let deal = TradeDeal {
+            cost_resource: ResourceType::MemoryCore,
+            cost_amount: 2.0,
+            give_resource: ResourceType::Metal,
+            give_amount: 3.0,
+        };
+        assert!(execute_trade(&mut world, &deal));
+        let events = world
+            .get_resource::<Events<TradeCompletedEvent>>()
+            .expect("execute_trade should register TradeCompletedEvent");
+        let mut iter = events.iter_current_update_events();
+        let first = iter
+            .next()
+            .expect("execute_trade should emit TradeCompletedEvent");
+        assert!(first.is_curio, "memory core exports are curio exports");
+        assert_eq!(first.amount, 2.0);
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_execute_trade_emits_non_curio_completed_event() {
+        let mut world = World::new();
+        world.insert_resource(ColonyResources {
+            wood: 100.0,
+            ..Default::default()
+        });
+        let deal = TradeDeal {
+            cost_resource: ResourceType::Wood,
+            cost_amount: 10.0,
+            give_resource: ResourceType::Metal,
+            give_amount: 5.0,
+        };
+        assert!(execute_trade(&mut world, &deal));
+        let events = world
+            .get_resource::<Events<TradeCompletedEvent>>()
+            .expect("execute_trade should register TradeCompletedEvent");
+        let mut iter = events.iter_current_update_events();
+        let first = iter
+            .next()
+            .expect("execute_trade should emit TradeCompletedEvent");
+        assert!(!first.is_curio, "wood exports are not curio exports");
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_curio_deals_appear_for_merchants() {
+        // RNG-driven deal generation: loop until a curio buyer is observed
+        // (established repo pattern for unmockable RNG, cf. hobby.rs).
+        let mut saw_curio_deal = false;
+        for _ in 0..50 {
+            let mut world = World::new();
+            world.insert_resource(MerchantState::default());
+            world.insert_resource(SimulationTime::default());
+            world.insert_resource(Chronicle::default());
+            world.spawn((
+                Building {
+                    building_type: BuildingType::TradeDepot,
+                },
+                TradeDepot,
+            ));
+            merchant_arrival_system(&mut world);
+            if world
+                .resource::<MerchantState>()
+                .active_merchant
+                .as_ref()
+                .is_some_and(|m| {
+                    m.deals
+                        .iter()
+                        .any(|d| d.cost_resource == ResourceType::MemoryCore)
+                })
+            {
+                saw_curio_deal = true;
+                break;
+            }
+        }
+        assert!(saw_curio_deal, "merchants should sometimes bring curio buyers");
     }
 }

@@ -458,6 +458,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "transplant" => handle_transplant_command(world, &parts),
         "organs" => print_organ_ledger(world),
         "heritage" => print_heritage(world),
+        "curio" => print_curio_ledger(world),
         "artifacts" => print_artifacts(world),
         "sell" => handle_sell_command(world, &parts),
         "museum" => handle_museum_command(world, &parts),
@@ -5485,6 +5486,11 @@ fn print_help() {
                     "",
                     "Heritage report: era, stamped buildings, venerable sites (Spec 332)",
                 ),
+                (
+                    "curio",
+                    "",
+                    "Curio trade ledger: exports, credits, cultural loss (Spec 334)",
+                ),
                 ("howl [speed]", "", "Debug: wind surge so canyons howl (Spec 1374)"),
                 ("calm", "", "Debug: end the wind surge (Spec 1374)"),
                 ("crystal [x] [y]", "", "Debug: place a resonance crystal (Spec 1374)"),
@@ -6763,6 +6769,29 @@ fn print_heritage(world: &mut World) {
             summary.oldest_age_eras,
         ),
         Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Curio trade ledger summary (headless `curio` command, Spec 334).
+fn print_curio_ledger(world: &mut World) {
+    let (exported, credits, loss) = world
+        .get_resource::<scale::layer1::economy::curio_trade::CurioTradeLedger>()
+        .map(|l| {
+            (
+                l.total_curios_exported,
+                l.total_credits_earned,
+                l.total_cultural_loss,
+            )
+        })
+        .unwrap_or_default();
+    print_dashboard_panel(
+        "CURIO TRADE",
+        &format!(
+            "Curios exported: {:.0}\nCredits earned: {:.0}\nCultural loss inflicted: {:.2}\n\nMemory cores sold to Core World elites pay a massive premium -\nbut the colony grieves what it sold.",
+            exported, credits, loss,
+        ),
+        Some(comfy_table::Color::Magenta),
         Some(comfy_table::Attribute::Bold),
     );
 }
