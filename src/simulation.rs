@@ -127,6 +127,19 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 337 Symbiotic Pests: vermin spawn at unprotected food stockpiles,
+    // drain food, spread fever, beetles hunt rats, spiders weave silk.
+    // Chained for deterministic within-tick order (spawn -> drain -> hunt).
+    schedule.add_systems(
+        (
+            crate::layer1::nature::symbiotic_pests::vermin_spawn_system,
+            crate::layer1::nature::symbiotic_pests::vermin_food_drain_system,
+            crate::layer1::nature::symbiotic_pests::vermin_predation_system,
+            crate::layer1::nature::symbiotic_pests::vermin_weave_system,
+            crate::layer1::nature::symbiotic_pests::vermin_disease_system,
+        )
+            .chain(),
+    );
     // Spec 1373 Recalled Product: recall notices, 5% use-failure, stock returns.
     schedule.add_systems(
         (
@@ -337,6 +350,8 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::nature::biome_aggression::BiomeEncroachmentEvent>>();
     // Spec 332 Architectural Eras: global era counter.
     world.init_resource::<crate::layer1::architecture::architectural_eras::GlobalEra>();
+    // Spec 337 Symbiotic Pests: silk bank ledger.
+    world.init_resource::<crate::layer1::nature::symbiotic_pests::SilkLedger>();
     // Spec 324 Kinetic Harpoons: launch/impact events, wanderer spawn director.
     world.init_resource::<Events<crate::layer1::tech::HarpoonLaunchEvent>>();
     world.init_resource::<Events<crate::layer1::tech::HarpoonImpactEvent>>();

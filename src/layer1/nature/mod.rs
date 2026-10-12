@@ -34,6 +34,12 @@ pub mod weather;
 mod weather_tests;
 pub mod wind;
 
+// Spec 337 Symbiotic Pests (deliberately NOT glob-exported: the
+// `Vermin` name is already taken by Spec 073's marker at
+// `crate::layer1::entities::vermin::Vermin`, glob-exported at the
+// `crate::layer1` root. Full path only.)
+pub mod symbiotic_pests;
+
 pub use atmosphere::*;
 pub use biosphere_empathy::*;
 pub use ecology::*;

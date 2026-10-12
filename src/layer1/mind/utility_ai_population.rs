@@ -624,7 +624,13 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
                 // Panicking pops flee, they don't work (Spec 1371).
                 Without<crate::layer1::psychology::panic_spirals::Panic>,
                 // The stowaway hides from the chore wheel — never a colony worker (Spec 327).
-                Without<crate::layer1::social::ship_stowaway::Stowaway>,
+                // Vermin are wildlife, not colonists — never colony workers (Spec 337).
+                // (Nested tuple: Bevy 0.15 caps filter tuples at 15 elements; full path
+                // since `Vermin` is also Spec 073's marker at the layer1 root.)
+                (
+                    Without<crate::layer1::social::ship_stowaway::Stowaway>,
+                    Without<crate::layer1::nature::symbiotic_pests::Vermin>,
+                ),
             )>()
             .iter(world)
             .filter(|item| {

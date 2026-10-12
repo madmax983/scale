@@ -424,6 +424,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "expel" => handle_expel_command(world, &parts),
         "scare" => handle_scare_command(world, &parts),
         "panics" => print_panics(world),
+        "vermin" => handle_vermin_command(world, &parts),
+        "infest" => handle_infest_command(world, &parts),
+        "exterminate" => handle_exterminate_command(world, &parts),
         "seniority" => handle_seniority_command(world, &parts),
         "howl" => handle_howl_command(world, &parts),
         "calm" => handle_calm_command(world),
@@ -2679,6 +2682,10 @@ fn print_stats(world: &mut World) {
     let governor = gov_id
         .map(|i| i.to_string())
         .unwrap_or_else(|| "none".to_string());
+    let vermin_total = {
+        use scale::layer1::nature::symbiotic_pests::vermin_total;
+        vermin_total(world)
+    };
     let panicking = {
         use scale::layer1::psychology::panic_spirals::panicking_count;
         panicking_count(world)
@@ -2790,7 +2797,7 @@ fn print_stats(world: &mut World) {
     };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={}",
         tick,
         pops,
         avg_health,
@@ -2846,6 +2853,7 @@ fn print_stats(world: &mut World) {
         shadowed,
         shadows,
         provenance,
+        vermin_total,
     );
 }
 
@@ -3335,6 +3343,176 @@ fn handle_scare_command(world: &mut World, parts: &[&str]) {
             entity.index()
         ),
         Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+
+/// Show vermin status: counts by species + silk ledger (Spec 337).
+fn print_vermin(world: &mut World) {
+    use scale::layer1::nature::symbiotic_pests::{banked_silk, unharvested_silk, vermin_counts};
+
+    let (rats, beetles, spiders) = vermin_counts(world);
+    let total = rats + beetles + spiders;
+    if total == 0 {
+        print_dashboard_panel(
+            "VERMIN STATUS",
+            "No vermin in the colony. The stockpiles are clean... for now.",
+            Some(comfy_table::Color::Green),
+            None,
+        );
+        return;
+    }
+    print_dashboard_panel(
+        "VERMIN STATUS",
+        &format!(
+            "Vermin: {total} total\n  Grain Rats: {rats} (food thieves)\n  Brain Borer Beetles: {beetles} (rat predators)\n  Silk Weaver Spiders: {spiders} (silk weavers)\nBanked silk: {:.1}\nUnharvested silk on spiders: {:.1}\n`vermin harvest` banks the woven silk; `exterminate` culls (rats become meat, spiders bank silk); `vermin protect` seals a stockpile.",
+            banked_silk(world),
+            unharvested_silk(world),
+        ),
+        Some(comfy_table::Color::Yellow),
+        None,
+    );
+}
+
+/// `vermin ...` — subcommand dispatcher (Spec 337):
+/// status | infest [n] [species] | exterminate [all|rat|beetle|spider] |
+/// harvest | protect [x] [y]
+fn handle_vermin_command(world: &mut World, parts: &[&str]) {
+    match parts.get(1).map(|s| s.to_ascii_lowercase()).as_deref() {
+        None | Some("status") | Some("list") => print_vermin(world),
+        // Re-slice so the sub-handlers see ["infest", n, species] etc.
+        Some("infest") => handle_infest_command(world, &parts[1..]),
+        Some("exterminate") => handle_exterminate_command(world, &parts[1..]),
+        Some("harvest") => {
+            use scale::layer1::nature::symbiotic_pests::harvest_silk;
+            let banked = harvest_silk(world);
+            print_dashboard_panel(
+                "SILK HARVEST",
+                &format!("Banked {banked:.1} silk from the weavers."),
+                Some(comfy_table::Color::Cyan),
+                None,
+            );
+        }
+        Some("protect") => {
+            use scale::layer1::nature::symbiotic_pests::toggle_pest_proof;
+            let (mut x, mut y) = (40, 25);
+            if let (Some(px), Some(py)) = (parts.get(2), parts.get(3)) {
+                if let (Ok(px), Ok(py)) = (px.parse::<i32>(), py.parse::<i32>()) {
+                    x = px;
+                    y = py;
+                }
+            }
+            match toggle_pest_proof(world, x, y) {
+                Some(true) => print_dashboard_panel(
+                    "PEST SAFE",
+                    &format!("The stockpile nearest ({x}, {y}) is now sealed against vermin (Pest Safe)."),
+                    Some(comfy_table::Color::Green),
+                    None,
+                ),
+                Some(false) => print_dashboard_panel(
+                    "PEST SAFE",
+                    &format!("The stockpile nearest ({x}, {y}) is no longer sealed — vermin may return."),
+                    Some(comfy_table::Color::Yellow),
+                    None,
+                ),
+                None => print_dashboard_panel(
+                    "PEST SAFE",
+                    "No stockpile buildings exist.",
+                    Some(comfy_table::Color::Red),
+                    None,
+                ),
+            }
+        }
+        Some(other) => print_dashboard_panel(
+            "VERMIN",
+            &format!(
+                "Unknown vermin subcommand: {other}. Try: status, infest, exterminate, harvest, protect."
+            ),
+            Some(comfy_table::Color::Red),
+            None,
+        ),
+    }
+}
+
+/// `infest [n] [species]` — debug: spawn n vermin near a stockpile (Spec 337).
+fn handle_infest_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::nature::symbiotic_pests::{spawn_vermin_at, VerminSpecies};
+
+    let n: usize = parts
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3)
+        .min(50);
+    let species = parts
+        .get(2)
+        .and_then(|s| VerminSpecies::parse(s))
+        .unwrap_or(VerminSpecies::GrainRat);
+    // Near the first stockpile building; fall back to the first pop's tile.
+    let (mut x, mut y) = (40, 25);
+    let mut q = world.query_filtered::<&GridPosition, With<Stockpile>>();
+    if let Some(pos) = q.iter(world).next() {
+        x = pos.x;
+        y = pos.y;
+    } else {
+        let mut pq = world.query_filtered::<&GridPosition, With<Pop>>();
+        if let Some(pos) = pq.iter(world).next() {
+            x = pos.x;
+            y = pos.y;
+        }
+    }
+    for i in 0..n {
+        let dx = (i % 3) as i32 - 1;
+        let dy = ((i / 3) % 3) as i32 - 1;
+        spawn_vermin_at(world, species, x + dx, y + dy);
+    }
+    print_dashboard_panel(
+        "INFESTATION",
+        &format!("Spawned {n} {} near ({x}, {y}).", species.label()),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// `exterminate [all|rat|beetle|spider]` — cull vermin (Spec 337). Rats are
+/// dressed for meat (+food), spiders bank their woven silk. Beetles eat the
+/// rats for you — cull them only if you mean it.
+fn handle_exterminate_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::nature::symbiotic_pests::{exterminate_vermin, VerminSpecies};
+
+    let species = match parts.get(1).map(|s| s.to_ascii_lowercase()).as_deref() {
+        None | Some("all") => None,
+        Some(other) => match VerminSpecies::parse(other) {
+            Some(s) => Some(s),
+            None => {
+                print_dashboard_panel(
+                    "EXTERMINATION",
+                    &format!("Unknown species: {other}. Try: all, rat, beetle, spider."),
+                    Some(comfy_table::Color::Red),
+                    None,
+                );
+                return;
+            }
+        },
+    };
+    let report = exterminate_vermin(world, species);
+    let total = report.rats + report.beetles + report.spiders;
+    if total == 0 {
+        print_dashboard_panel(
+            "EXTERMINATION",
+            "No matching vermin to exterminate.",
+            Some(comfy_table::Color::Green),
+            None,
+        );
+        return;
+    }
+    print_dashboard_panel(
+        "EXTERMINATION",
+        &format!(
+            "Culled: {} rats, {} beetles, {} spiders.\n+{:.1} food (dressed rats), +{:.1} silk banked.",
+            report.rats, report.beetles, report.spiders, report.food_gained, report.silk_gained
+        ),
+        Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
     );
 }
@@ -5441,6 +5619,33 @@ fn print_help() {
                 ("dust", "", "Show Desire Dust and RoadMind status"),
                 ("scare [x] [y]", "", "Debug: spawn a terrifying sighting (Spec 1371)"),
                 ("panics", "", "List panicking pops (Spec 1371)"),
+                (
+                    "vermin",
+                    "",
+                    "Show vermin status: counts, silk ledger (Spec 337)",
+                ),
+                (
+                    "vermin infest [n] [species]",
+                    "",
+                    "Debug: spawn n vermin near a stockpile (Spec 337)",
+                ),
+                (
+                    "vermin exterminate [all|rat|beetle|spider]",
+                    "",
+                    "Cull vermin: rats become meat, spiders bank silk (Spec 337)",
+                ),
+                (
+                    "vermin harvest",
+                    "",
+                    "Bank woven silk from living spiders (Spec 337)",
+                ),
+                (
+                    "vermin protect [x] [y]",
+                    "",
+                    "Toggle Pest-Safe sealing on the nearest stockpile (Spec 337)",
+                ),
+                ("infest [n] [species]", "", "Alias for `vermin infest`"),
+                ("exterminate [all|species]", "", "Alias for `vermin exterminate`"),
                 (
                     "seniority",
                     "",
