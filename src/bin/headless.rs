@@ -460,6 +460,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "organs" => print_organ_ledger(world),
         "heritage" => print_heritage(world),
         "curio" => print_curio_ledger(world),
+        "provenance" => print_provenance(world),
         "artifacts" => print_artifacts(world),
         "sell" => handle_sell_command(world, &parts),
         "museum" => handle_museum_command(world, &parts),
@@ -2719,6 +2720,8 @@ fn print_stats(world: &mut World) {
             .unwrap_or(0);
         (shadowed, shadows)
     };
+    let provenance =
+        scale::layer1::construction::material_provenance::stamped_building_count(world);
     let seniority = {
         use scale::layer1::social::seniority::seniority_counts;
         let (f, v, n) = seniority_counts(world);
@@ -2787,7 +2790,7 @@ fn print_stats(world: &mut World) {
     };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={}",
         tick,
         pops,
         avg_health,
@@ -2842,6 +2845,7 @@ fn print_stats(world: &mut World) {
         seniority,
         shadowed,
         shadows,
+        provenance,
     );
 }
 
@@ -5513,6 +5517,11 @@ fn print_help() {
                     "",
                     "Curio trade ledger: exports, credits, cultural loss (Spec 334)",
                 ),
+                (
+                    "provenance",
+                    "",
+                    "Material provenance: stamped buildings + inherited properties (Spec 336)",
+                ),
                 ("howl [speed]", "", "Debug: wind surge so canyons howl (Spec 1374)"),
                 ("calm", "", "Debug: end the wind surge (Spec 1374)"),
                 ("crystal [x] [y]", "", "Debug: place a resonance crystal (Spec 1374)"),
@@ -6814,6 +6823,46 @@ fn print_curio_ledger(world: &mut World) {
             exported, credits, loss,
         ),
         Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Material provenance report (headless `provenance` command, Spec 336).
+fn print_provenance(world: &mut World) {
+    use scale::layer1::architecture::building::{Building, Material};
+    use scale::layer1::construction::material_provenance::InheritedMaterialProperties;
+
+    let mut rows: Vec<String> = Vec::new();
+    let mut query = world.query::<(&Building, &Material, &InheritedMaterialProperties)>();
+    for (building, material, inherited) in query.iter(world) {
+        if rows.len() >= 20 {
+            break;
+        }
+        rows.push(format!(
+            "{:?} ({:?}): burn={:.2} insul={:.2} beauty={:.2}",
+            building.building_type,
+            material.0,
+            inherited.flammability,
+            inherited.insulation,
+            inherited.beauty,
+        ));
+    }
+    let total = world
+        .query::<&InheritedMaterialProperties>()
+        .iter(world)
+        .count();
+    print_dashboard_panel(
+        "MATERIAL PROVENANCE",
+        &format!(
+            "Stamped buildings: {}\n\n{}\n\nBuildings inherit flammability, insulation, and beauty\nfrom their construction materials (Spec 336).",
+            total,
+            if rows.is_empty() {
+                "(none stamped yet)".to_string()
+            } else {
+                rows.join("\n")
+            },
+        ),
+        Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
     );
 }

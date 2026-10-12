@@ -134,6 +134,18 @@ pub fn register(schedule: &mut Schedule) {
             .chain()
             .in_set(Layer1SystemSet::Environment),
     );
+    // Spec 336 Material Provenance: stamp inherited material properties at
+    // construction (multi-material average first, then single-material
+    // canonical profiles), then tune flammability of freshly stamped buildings.
+    schedule.add_systems(
+        (
+            crate::layer1::construction::material_provenance::apply_material_provenance_system,
+            crate::layer1::construction::material_provenance::stamp_single_material_provenance_system,
+            crate::layer1::construction::material_provenance::tune_flammability_system,
+        )
+            .chain()
+            .in_set(Layer1SystemSet::Environment),
+    );
     schedule.add_systems(
         (
             crate::layer1::architecture::biomimetic::adjust_sympathetic_infrastructure_system,
