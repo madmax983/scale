@@ -60,6 +60,10 @@ pub enum MemoryType {
     CannibalismTaboo,
     /// Psychological trauma from consuming sapient flesh (Spec 276).
     CannibalismTrauma,
+    /// Learned a craft by working alongside a master (Spec 339).
+    LearnedFromMentor,
+    /// Passed hard-won craft on to a novice (Spec 339).
+    TaughtNovice,
 }
 
 impl MemoryType {
@@ -77,6 +81,7 @@ impl MemoryType {
             Self::FakePositive => 0.5,
             Self::AteFineMeal | Self::AttendedFuneral => 0.1,
             Self::WonFight | Self::AdmiredArt => 0.05,
+            Self::LearnedFromMentor | Self::TaughtNovice => 0.05, // Spec 339: the warmth of craft passed on
             Self::SawCorpse => -0.05,
             Self::SleptInAwfulRoom => -0.1,
             Self::SleptInDullRoom => -0.05,
@@ -99,6 +104,7 @@ impl MemoryType {
             Self::CannibalismTaboo | Self::CannibalismTrauma => 0.0005, // Slow fade (2000 ticks): the colony does not forget
             Self::StarvationTrauma | Self::AttendedFuneral | Self::FleshTaxTrauma => 0.001, // Medium
             Self::AteFineMeal | Self::WonFight => 0.002, // Fast (500 ticks)
+            Self::LearnedFromMentor | Self::TaughtNovice => 0.002, // Spec 339: Fast (500 ticks), like other craft joys
             Self::SawCorpse | Self::AdmiredArt | Self::DisgustedByVermin => 0.01, // Very fast fade (100 ticks)
             Self::InspectorImpressed | Self::InspectorDisappointed | Self::FakePositive => 0.005, // Medium-long duration (~200 ticks)
             // Room thoughts last 1 day (100 ticks)

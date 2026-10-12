@@ -620,7 +620,7 @@ pub use factions::*;
 /// Tests for faction demands logic (Spec 085).
 pub mod faction_demands_tests;
 
-/// Mentorship system (Spec 069).
+/// Mentorship system (Spec 069, upgraded to Spec 339).
 pub mod mentorship;
 pub use mentorship::*;
 
