@@ -345,6 +345,9 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::disasters::deorbit::DeorbitEvent>>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitState>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitDirector>();
+    // Spec 342 The Void Between: incident event + ledger.
+    world.init_resource::<Events<crate::layer2::void_between::ShipIncidentEvent>>();
+    world.init_resource::<crate::layer2::void_between::VoidLedger>();
     // Spec 330 Biome Aggression: encroachment event (fresh-world first-tick
     // panic guard — EventWriters need the resource initialized).
     world.init_resource::<Events<crate::layer1::nature::biome_aggression::BiomeEncroachmentEvent>>();
@@ -1206,6 +1209,14 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         crate::layer2::propaganda::constellation_hack_system
             .after(crate::layer2::propaganda::update_constellation),
     ));
+    // Spec 342 The Void Between: incident roll -> resolve -> lost-ship
+    // drift, in its own block (fleet tuple above is near arity limits).
+    schedule.add_systems((
+        crate::layer2::void_between::ensure_travel_tracker_system,
+        crate::layer2::void_between::process_travel_incidents,
+        crate::layer2::void_between::resolve_ship_incident,
+        crate::layer2::void_between::lost_ship_drift_system,
+    ).chain());
     // Origin spawn director (adventurer origins).
     // Registered in their own block: the tuple above is at the
     // IntoSystemConfigs arity limit.

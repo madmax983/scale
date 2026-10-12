@@ -448,6 +448,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "shadow" => handle_shadow_command(world, &parts),
         "tether" => handle_tether_command(world, &parts),
         "tethers" => print_tethers(world),
+        "void" => handle_void_command(world, &parts),
         "harpoon" => handle_harpoon_command(world, &parts),
         "launch" => handle_launch_command(world, &parts),
         "winches" => print_winches(world),
@@ -2773,6 +2774,7 @@ fn print_stats(world: &mut World) {
         use scale::layer1::disasters::deorbit::tether_array_count;
         tether_array_count(world)
     };
+    let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
         empathy_broadcast_status_label(world)
@@ -2822,7 +2824,7 @@ fn print_stats(world: &mut World) {
     };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={}",
         tick,
         pops,
         avg_health,
@@ -2866,6 +2868,7 @@ fn print_stats(world: &mut World) {
         vetting,
         deorbit,
         tethers,
+        void_label,
         empathy,
         pirates,
         pension,
@@ -7458,6 +7461,123 @@ fn handle_museum_command(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Debug: the Void Between (Spec 342).
+/// `void` — incident ledger plus lost/tracked ship counts.
+/// `void ship` — launch a demo tracked ship on a maximally risky leg;
+/// the next ticks roll incidents for it (watch STATS `void=`).
+/// `void send <lost|delayed|ghost|mutated|wiped|anomaly>` (or just
+/// `void <type>`) — force that incident on a fresh demo ship and
+/// resolve it immediately.
+fn handle_void_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use bevy_ecs::system::RunSystemOnce;
+    use scale::layer2::fleet::{Fleet, FleetHealth, InTransit};
+    use scale::layer2::mining::FleetCargo;
+    use scale::layer2::void_between::{
+        lost_ship_count, resolve_ship_incident, tracked_transit_count, CargoHold, IncidentType,
+        ShipIncidentEvent, ShipTravelTracker, VoidLedger,
+    };
+
+    world.init_resource::<VoidLedger>();
+    world.init_resource::<Events<ShipIncidentEvent>>();
+
+    let sub = parts.get(1).map(|s| s.to_ascii_lowercase());
+    match sub.as_deref() {
+        None => {
+            let ledger = *world.resource::<VoidLedger>();
+            let lost = lost_ship_count(world);
+            let tracked = tracked_transit_count(world);
+            print_dashboard_panel(
+                "THE VOID BETWEEN",
+                &format!(
+                    "Incidents resolved: {} (lost {}, delayed {}, ghost returns {}, crew mutated {}, data wiped {}, anomalies {}).\nShips lost in the void now: {lost}. Tracked ships in transit: {tracked}.\nUse `void ship` to launch a risky crossing, or `void send <type>` to force an incident.",
+                    ledger.total,
+                    ledger.lost,
+                    ledger.delayed,
+                    ledger.ghost_returns,
+                    ledger.crew_mutated,
+                    ledger.data_wiped,
+                    ledger.anomalies,
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("ship") => {
+            let origin = world.spawn_empty().id();
+            let destination = world.spawn_empty().id();
+            let mut tracker = ShipTravelTracker::for_leg(100.0);
+            tracker.incident_risk_factor = 1.0; // demo leg: the void *will* notice
+            let ship = world
+                .spawn((
+                    Fleet,
+                    tracker,
+                    InTransit { origin, destination, progress: 0.0, duration: 100.0 },
+                    FleetCargo { contents: Vec::new(), capacity: 1000.0 },
+                    CargoHold::default(),
+                    FleetHealth { current: 100.0, max: 100.0 },
+                ))
+                .id();
+            print_dashboard_panel(
+                "VOID CROSSING",
+                &format!(
+                    "Demo ship #{} launched into the void on a maximally risky leg.\nRun `tick` and watch STATS void= / the chronicle — or `void send <type>` to force fate.",
+                    ship.index()
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("send") | Some(_) => {
+            let type_str = if sub.as_deref() == Some("send") {
+                parts.get(2).copied().unwrap_or("ghost")
+            } else {
+                parts.get(1).copied().unwrap_or("ghost")
+            };
+            let Some(kind) = IncidentType::parse(type_str) else {
+                print_dashboard_panel(
+                    "ERROR",
+                    "Usage: void | void ship | void send <lost|delayed|ghost|mutated|wiped|anomaly>",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return;
+            };
+            let ship = world
+                .spawn((
+                    Fleet,
+                    ShipTravelTracker { in_transit: true, ..ShipTravelTracker::default() },
+                    FleetCargo { contents: Vec::new(), capacity: 1000.0 },
+                    CargoHold::default(),
+                    FleetHealth { current: 100.0, max: 100.0 },
+                ))
+                .id();
+            // Clear stale buffered events first: a fresh run_system_once
+            // reader would otherwise replay earlier debug sends.
+            world.resource_mut::<Events<ShipIncidentEvent>>().clear();
+            world
+                .resource_mut::<Events<ShipIncidentEvent>>()
+                .send(ShipIncidentEvent { ship_entity: ship, incident_type: kind });
+            let _ = world.run_system_once(resolve_ship_incident);
+            let ledger_total = world.resource::<VoidLedger>().total;
+            let load = world
+                .get::<FleetCargo>(ship)
+                .map_or(0.0, FleetCargo::current_load);
+            let hold = world.get::<CargoHold>(ship).map_or(0.0, |h| h.amount);
+            print_dashboard_panel(
+                "VOID INCIDENT",
+                &format!(
+                    "Forced a '{}' incident on demo ship #{}. Fleet cargo load: {load:.1}; simple hold: {hold:.1}.\nVoid ledger total is now {ledger_total}. See `void` for the full ledger and `chronicle` for the story.",
+                    kind.label(),
+                    ship.index(),
+                ),
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
 }
 
 /// Debug: orbital megastructure deorbiting (Spec 277).
