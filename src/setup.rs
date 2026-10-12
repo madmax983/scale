@@ -309,6 +309,10 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(crate::layer1::economy::curio_trade::CurioTradeLedger::default());
     world.init_resource::<Events<crate::layer1::economy::curio_trade::TradeCompletedEvent>>();
     world.init_resource::<Events<crate::layer1::economy::curio_trade::CulturalLossEvent>>();
+    // Spec 341 Pop Memory: witness events, episode state, colony identity.
+    world.init_resource::<Events<crate::layer1::memory::WitnessEvent>>();
+    world.init_resource::<crate::layer1::memory::PopMemoryState>();
+    world.init_resource::<crate::layer1::memory::ColonyIdentity>();
     world.insert_resource(crate::layer1::beauty::BeautyGrid::new(80, 50));
     world.insert_resource(crate::layer1::erosion::ErosionGrid::new(80, 50));
     world.insert_resource(crate::layer1::water::WaterGrid::new(80, 50));

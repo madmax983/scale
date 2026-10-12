@@ -466,6 +466,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "heritage" => print_heritage(world),
         "curio" => print_curio_ledger(world),
         "provenance" => print_provenance(world),
+        "identity" => print_identity(world),
         "artifacts" => print_artifacts(world),
         "sell" => handle_sell_command(world, &parts),
         "museum" => handle_museum_command(world, &parts),
@@ -2808,9 +2809,20 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::mentorship::mentored_count;
         mentored_count(world)
     };
+    let memories = {
+        use scale::layer1::memory::Memories;
+        let mut query = world.query::<&Memories>();
+        query.iter(world).map(|m| m.items.len()).sum::<usize>()
+    };
+    let identity = {
+        use scale::layer1::memory::ColonyIdentity;
+        world
+            .get_resource::<ColonyIdentity>()
+            .map_or(0, |i| i.traits.len())
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={}",
         tick,
         pops,
         avg_health,
@@ -2869,6 +2881,8 @@ fn print_stats(world: &mut World) {
         vermin_total,
         caveins_total,
         mentored,
+        memories,
+        identity,
     );
 }
 
@@ -5836,6 +5850,11 @@ fn print_help() {
                     "",
                     "Structural integrity: tracked tiles, support, cave-ins (Spec 338)",
                 ),
+                (
+                    "identity",
+                    "",
+                    "Colony identity: shared memories that define the colony (Spec 341)",
+                ),
                 ("howl [speed]", "", "Debug: wind surge so canyons howl (Spec 1374)"),
                 ("calm", "", "Debug: end the wind surge (Spec 1374)"),
                 ("crystal [x] [y]", "", "Debug: place a resonance crystal (Spec 1374)"),
@@ -7142,6 +7161,68 @@ fn print_curio_ledger(world: &mut World) {
 }
 
 /// Material provenance report (headless `provenance` command, Spec 336).
+fn print_identity(world: &mut World) {
+    use scale::layer1::memory::{ColonyIdentity, Memories, MemoryType};
+
+    let identity_lines = world
+        .get_resource::<ColonyIdentity>()
+        .map(|identity| {
+            if identity.traits.is_empty() {
+                "(no colony identity has formed yet)".to_string()
+            } else {
+                identity
+                    .traits
+                    .iter()
+                    .map(|t| {
+                        format!(
+                            "{} — held by {:.0}% of the colony, formed tick {}",
+                            t.name,
+                            t.share * 100.0,
+                            t.formed_tick
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        })
+        .unwrap_or_else(|| "(identity not initialized)".to_string());
+
+    // Most widely held memories across the colony.
+    let mut counts: Vec<(MemoryType, usize)> = Vec::new();
+    let mut total_memories = 0usize;
+    let mut query = world.query::<&Memories>();
+    for memories in query.iter(world) {
+        total_memories += memories.items.len();
+        for item in &memories.items {
+            match counts.iter_mut().find(|(t, _)| *t == item.memory_type) {
+                Some((_, c)) => *c += 1,
+                None => counts.push((item.memory_type, 1)),
+            }
+        }
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1));
+    let top = counts
+        .iter()
+        .take(5)
+        .map(|(t, c)| format!("{t:?}: {c} pops"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    print_dashboard_panel(
+        "COLONY IDENTITY",
+        &format!(
+            "Active memories across all pops: {total_memories}\n\nIdentity:\n{identity_lines}\n\nMost widely held:\n{}\n\nShared memories harden into colony identity (Spec 341).",
+            if top.is_empty() {
+                "(no memories yet)".to_string()
+            } else {
+                top
+            },
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 fn print_provenance(world: &mut World) {
     use scale::layer1::architecture::building::{Building, Material};
     use scale::layer1::construction::material_provenance::InheritedMaterialProperties;

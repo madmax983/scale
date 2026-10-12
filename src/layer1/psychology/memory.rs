@@ -1,9 +1,14 @@
+use crate::layer1::chronicle::{AddChronicleEvent, EventImportance};
 use crate::layer1::day_night::TimeOfDay;
 use crate::layer1::edicts::{get_morale_modifier, ColonyPolicies};
-use crate::layer1::morale::Morale;
+use crate::layer1::morale::{MoodModifier, Morale};
 use crate::layer1::needs::Needs;
+use crate::layer1::pop::Pop;
+use crate::layer1::social::old_guard::{Arrival, Generation};
 use crate::layer1::social::SocialBuff;
+use crate::layer1::stress::TraumaTracker;
 use crate::layer1::traits::{get_trait_mood_modifier, Traits};
+use crate::shared::time::SimulationTime;
 use bevy_ecs::prelude::*;
 
 /// Types of memories a pop can acquire.
@@ -64,6 +69,10 @@ pub enum MemoryType {
     LearnedFromMentor,
     /// Passed hard-won craft on to a novice (Spec 339).
     TaughtNovice,
+    /// Lived through a colony-wide famine (Spec 341).
+    SurvivedFamine,
+    /// Was there at the founding of the colony (Spec 341).
+    ColonyFounder,
 }
 
 impl MemoryType {
@@ -82,6 +91,8 @@ impl MemoryType {
             Self::AteFineMeal | Self::AttendedFuneral => 0.1,
             Self::WonFight | Self::AdmiredArt => 0.05,
             Self::LearnedFromMentor | Self::TaughtNovice => 0.05, // Spec 339: the warmth of craft passed on
+            Self::SurvivedFamine => -0.10, // Spec 341: the hunger years leave a mark
+            Self::ColonyFounder => 0.05, // Spec 341: quiet pride of the first landing
             Self::SawCorpse => -0.05,
             Self::SleptInAwfulRoom => -0.1,
             Self::SleptInDullRoom => -0.05,
@@ -105,6 +116,8 @@ impl MemoryType {
             Self::StarvationTrauma | Self::AttendedFuneral | Self::FleshTaxTrauma => 0.001, // Medium
             Self::AteFineMeal | Self::WonFight => 0.002, // Fast (500 ticks)
             Self::LearnedFromMentor | Self::TaughtNovice => 0.002, // Spec 339: Fast (500 ticks), like other craft joys
+            Self::SurvivedFamine => 0.0005, // Spec 341: slow fade, like WitnessedDeath
+            Self::ColonyFounder => 0.0002, // Spec 341: founding is identity — fades slowest of all
             Self::SawCorpse | Self::AdmiredArt | Self::DisgustedByVermin => 0.01, // Very fast fade (100 ticks)
             Self::InspectorImpressed | Self::InspectorDisappointed | Self::FakePositive => 0.005, // Medium-long duration (~200 ticks)
             // Room thoughts last 1 day (100 ticks)
@@ -161,6 +174,57 @@ impl Memories {
             intensity: 1.0,
             forged: true,
         });
+    }
+
+    /// Adds a memory with a specific starting intensity (Spec 341).
+    ///
+    /// Intensity is clamped to `0.0..=1.0`. Enforces
+    /// [`MAX_MEMORIES_PER_POP`]: when the cap is exceeded, the weakest
+    /// memories are forgotten first.
+    pub fn add_with_intensity(
+        &mut self,
+        memory_type: MemoryType,
+        current_tick: u64,
+        intensity: f32,
+    ) {
+        self.items.push(ActiveMemory {
+            memory_type,
+            added_at: current_tick,
+            intensity: intensity.clamp(0.0, 1.0),
+            forged: false,
+        });
+        // Spec 341 §7: a pop can only carry so much. When the cap is
+        // exceeded, the weakest memories are forgotten first.
+        while self.items.len() > MAX_MEMORIES_PER_POP {
+            let weakest = self
+                .items
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| a.intensity.total_cmp(&b.intensity))
+                .map(|(i, _)| i);
+            match weakest {
+                Some(i) => {
+                    self.items.remove(i);
+                }
+                None => break,
+            }
+        }
+    }
+
+    /// Returns true if the pop holds at least one memory of the given type.
+    #[must_use]
+    pub fn has_memory(&self, memory_type: MemoryType) -> bool {
+        self.items.iter().any(|m| m.memory_type == memory_type)
+    }
+
+    /// Total weight (summed intensity) of the pop's memories of a type.
+    #[must_use]
+    pub fn memory_weight(&self, memory_type: MemoryType) -> f32 {
+        self.items
+            .iter()
+            .filter(|m| m.memory_type == memory_type)
+            .map(|m| m.intensity)
+            .sum()
     }
 
     /// Decays all memories by the given number of ticks.
@@ -415,5 +479,539 @@ mod tests {
         );
         // 0.5 - 0.05 = 0.45
         assert!((effective_day - 0.45).abs() < 0.001);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Spec 341: Pop Memory — witness events and colony identity
+//
+// The spec's `PopMemoryTracker` maps to the existing [`Memories`] component
+// and its mood impact flows through `calculate_raw_morale` (already folded
+// into the morale cache every tick). What this section adds is the missing
+// connective tissue: a generic `WitnessEvent` any system can fire to stamp
+// a memory on a specific pop, live producers for the spec's named memories
+// (famine survival, colony founding), and the "Colony Identity" that
+// emerges when a memory is shared by most of the colony.
+// ---------------------------------------------------------------------------
+
+/// Maximum number of active memories a single pop can hold (Spec 341 §7).
+/// When the cap is exceeded, the weakest memories are forgotten first.
+pub const MAX_MEMORIES_PER_POP: usize = 12;
+
+/// Ticks of zero food (per [`TraumaTracker`]) before the colony is said to
+/// have *lived through* a famine worth remembering.
+pub const FAMINE_WITNESS_THRESHOLD: u32 = 100;
+
+/// How often (in ticks) the colony-identity census runs.
+pub const IDENTITY_CENSUS_INTERVAL: u64 = 250;
+
+/// Share of pops that must hold a memory before it becomes colony identity.
+pub const IDENTITY_SHARE_THRESHOLD: f32 = 0.5;
+
+/// Minimum intensity for a memory to count toward colony identity.
+pub const IDENTITY_MEMORY_MIN_INTENSITY: f32 = 0.25;
+
+/// Event: a pop witnessed something that will stay with them (Spec 341).
+///
+/// Fire this from any system; [`record_pop_memory_system`] stamps the
+/// memory onto the pop's [`Memories`] with `severity` as its intensity.
+#[derive(Event, Debug, Clone, Copy)]
+pub struct WitnessEvent {
+    /// The pop who witnessed the event.
+    pub pop_entity: Entity,
+    /// The kind of memory left behind.
+    pub memory_type: MemoryType,
+    /// How deeply it marks them (0.0–1.0, becomes memory intensity).
+    pub severity: f32,
+}
+
+/// Records [`WitnessEvent`]s into pops' [`Memories`] (Spec 341).
+pub fn record_pop_memory_system(
+    mut events: EventReader<WitnessEvent>,
+    time: Option<Res<SimulationTime>>,
+    mut query: Query<&mut Memories>,
+) {
+    let tick = time.map_or(0, |t| t.tick);
+    for event in events.read() {
+        if let Ok(mut memories) = query.get_mut(event.pop_entity) {
+            memories.add_with_intensity(event.memory_type, tick, event.severity);
+        }
+    }
+}
+
+/// A shared memory that has become part of the colony's identity.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IdentityTrait {
+    /// The memory type the identity grew from.
+    pub memory_type: MemoryType,
+    /// The name the colony gives itself, e.g. "Famine-Forged".
+    pub name: &'static str,
+    /// Solidarity mood applied to every pop while the identity holds.
+    pub mood_value: f32,
+    /// Share of pops holding the memory at the last census (0.0–1.0).
+    pub share: f32,
+    /// Tick at which the identity formed.
+    pub formed_tick: u64,
+}
+
+/// Resource: the colony's emergent identity, derived from shared memories.
+#[derive(Resource, Default, Debug)]
+pub struct ColonyIdentity {
+    /// Active identity traits, in formation order.
+    pub traits: Vec<IdentityTrait>,
+}
+
+impl ColonyIdentity {
+    /// Returns true if the given memory type has become colony identity.
+    #[must_use]
+    pub fn has_identity(&self, memory_type: MemoryType) -> bool {
+        self.traits.iter().any(|t| t.memory_type == memory_type)
+    }
+}
+
+/// Identity name + solidarity mood for memory types heavy enough to define
+/// a colony. Lighter memories (a fine meal, a nice room) never qualify.
+#[must_use]
+pub fn identity_for(memory_type: MemoryType) -> Option<(&'static str, f32)> {
+    match memory_type {
+        MemoryType::SurvivedFamine => Some(("Famine-Forged", 0.03)),
+        MemoryType::ColonyFounder => Some(("First Landing", 0.02)),
+        MemoryType::WitnessedDeath => Some(("The Grieving", -0.02)),
+        MemoryType::StarvationTrauma => Some(("The Lean Years", 0.02)),
+        MemoryType::WonFight => Some(("The Blooded", 0.02)),
+        _ => None,
+    }
+}
+
+/// Memory types eligible to become colony identity (see [`identity_for`]).
+pub const IDENTITY_CANDIDATES: [MemoryType; 5] = [
+    MemoryType::SurvivedFamine,
+    MemoryType::ColonyFounder,
+    MemoryType::WitnessedDeath,
+    MemoryType::StarvationTrauma,
+    MemoryType::WonFight,
+];
+
+/// Periodic census: when more than half the colony holds the same heavy
+/// memory, it hardens into a [`ColonyIdentity`] trait (Spec 341 §5),
+/// announced in the chronicle and felt by every pop as a mood modifier.
+#[allow(clippy::cast_precision_loss)]
+pub fn colony_identity_census_system(
+    time: Res<SimulationTime>,
+    mut identity: ResMut<ColonyIdentity>,
+    mut chronicle: EventWriter<AddChronicleEvent>,
+    mut pops: Query<(&Memories, &mut Morale), With<Pop>>,
+) {
+    if time.tick == 0 || !time.tick.is_multiple_of(IDENTITY_CENSUS_INTERVAL) {
+        return;
+    }
+
+    let total = pops.iter().count();
+    if total == 0 {
+        return;
+    }
+
+    for candidate in IDENTITY_CANDIDATES {
+        let Some((name, mood_value)) = identity_for(candidate) else {
+            continue;
+        };
+        let holders = pops
+            .iter()
+            .filter(|(memories, _)| {
+                memories
+                    .items
+                    .iter()
+                    .any(|m| m.memory_type == candidate && m.intensity >= IDENTITY_MEMORY_MIN_INTENSITY)
+            })
+            .count();
+        let share = holders as f32 / total as f32;
+
+        if let Some(existing) = identity
+            .traits
+            .iter_mut()
+            .find(|t| t.memory_type == candidate)
+        {
+            existing.share = share;
+        } else if share > IDENTITY_SHARE_THRESHOLD {
+            identity.traits.push(IdentityTrait {
+                memory_type: candidate,
+                name,
+                mood_value,
+                share,
+                formed_tick: time.tick,
+            });
+            chronicle.send(AddChronicleEvent {
+                text: format!(
+                    "A shared memory has hardened into who we are. The colony is now {name}."
+                ),
+                importance: EventImportance::Major,
+            });
+        }
+    }
+
+    // Solidarity: every pop feels each active identity until the next census.
+    if !identity.traits.is_empty() {
+        let active: Vec<(&'static str, f32)> = identity
+            .traits
+            .iter()
+            .map(|t| (t.name, t.mood_value))
+            .collect();
+        for (_, mut morale) in pops.iter_mut() {
+            for (name, value) in &active {
+                morale.add_modifier(MoodModifier {
+                    label: format!("Identity: {name}"),
+                    value: *value,
+                    duration: u32::try_from(IDENTITY_CENSUS_INTERVAL).unwrap_or(u32::MAX),
+                });
+            }
+        }
+    }
+}
+
+/// Bookkeeping for [`famine_witness_system`]: is a famine episode ongoing?
+#[derive(Resource, Default, Debug)]
+pub struct PopMemoryState {
+    /// True between a famine's witness threshold and its end.
+    pub famine_episode_active: bool,
+}
+
+/// When the colony's food has sat at zero long enough
+/// ([`FAMINE_WITNESS_THRESHOLD`]), every living pop gains the
+/// `SurvivedFamine` memory via [`WitnessEvent`] — once per famine episode.
+pub fn famine_witness_system(
+    trauma: Res<TraumaTracker>,
+    mut state: ResMut<PopMemoryState>,
+    pops: Query<Entity, With<Pop>>,
+    mut writer: EventWriter<WitnessEvent>,
+) {
+    if !state.famine_episode_active && trauma.famine_ticks >= FAMINE_WITNESS_THRESHOLD {
+        state.famine_episode_active = true;
+        for entity in pops.iter() {
+            writer.send(WitnessEvent {
+                pop_entity: entity,
+                memory_type: MemoryType::SurvivedFamine,
+                severity: 1.0,
+            });
+        }
+    } else if state.famine_episode_active && trauma.famine_ticks == 0 {
+        state.famine_episode_active = false;
+    }
+}
+
+/// Marker: this pop has already been considered for the founder memory.
+#[derive(Component, Debug)]
+pub struct FounderMemoryStamped;
+
+/// Pops not yet considered for the founder memory.
+type UnstampedFounderQuery<'w, 's> = Query<
+    'w,
+    's,
+    (Entity, &'static Arrival),
+    (With<Pop>, Without<FounderMemoryStamped>),
+>;
+
+/// Founding-generation pops (per the Old Guard's
+/// [`Generation`](crate::layer1::social::old_guard::Generation)) carry the
+/// `ColonyFounder` memory: they were there when it all began (Spec 341).
+pub fn stamp_founder_memories_system(
+    mut commands: Commands,
+    query: UnstampedFounderQuery,
+    mut writer: EventWriter<WitnessEvent>,
+) {
+    for (entity, arrival) in query.iter() {
+        if arrival.generation() == Generation::Founder {
+            writer.send(WitnessEvent {
+                pop_entity: entity,
+                memory_type: MemoryType::ColonyFounder,
+                severity: 1.0,
+            });
+        }
+        commands.entity(entity).insert(FounderMemoryStamped);
+    }
+}
+
+#[cfg(test)]
+mod spec_341_tests {
+    use super::*;
+    use crate::layer1::morale::update_morale_cache_system;
+
+    /// Spec 341 RED test 1 (adapted): a `WitnessEvent` stamps the memory
+    /// onto the target pop's `Memories` (the spec's `PopMemoryTracker`).
+    #[test]
+    fn test_pop_gains_memory_from_event() {
+        let mut world = World::new();
+        world.init_resource::<Events<WitnessEvent>>();
+        world.insert_resource(SimulationTime::default());
+
+        let pop = world.spawn((Pop, Memories::default())).id();
+
+        world.send_event(WitnessEvent {
+            pop_entity: pop,
+            memory_type: MemoryType::SurvivedFamine,
+            severity: 1.0,
+        });
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(record_pop_memory_system);
+        schedule.run(&mut world);
+
+        let tracker = world.get::<Memories>(pop).unwrap();
+        assert!(tracker.has_memory(MemoryType::SurvivedFamine));
+        assert!((tracker.memory_weight(MemoryType::SurvivedFamine) - 1.0).abs() < 0.001);
+    }
+
+    /// Spec 341 RED test 2 (adapted): memories drag on mood. The real
+    /// architecture folds `Memories` into the morale cache via
+    /// `calculate_raw_morale`, so the modifier shows up in `Morale.value`.
+    #[test]
+    fn test_memory_influences_mood() {
+        let mut world = World::new();
+        let needs = Needs {
+            hunger: 0.5,
+            rest: 0.5,
+            leisure: 0.5,
+            hygiene: 0.5,
+        };
+
+        let baseline = world.spawn((Pop, needs, Morale::default())).id();
+
+        let mut memories = Memories::default();
+        memories.add(MemoryType::SurvivedFamine, 0);
+        let scarred = world
+            .spawn((Pop, needs, Morale::default(), memories))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(update_morale_cache_system);
+        schedule.run(&mut world);
+
+        let base = world.get::<Morale>(baseline).unwrap().value;
+        let scar = world.get::<Morale>(scarred).unwrap().value;
+        assert!((base - 0.5).abs() < 0.01, "baseline morale {base}");
+        assert!(
+            (scar - 0.4).abs() < 0.01,
+            "SurvivedFamine should drag morale 0.5 -> 0.4, got {scar}"
+        );
+    }
+
+    /// Spec 341 §7: a pop can only hold so many memories; the weakest are
+    /// forgotten first when the cap is exceeded.
+    #[test]
+    fn test_memory_cap_forgets_weakest() {
+        let mut world = World::new();
+        world.init_resource::<Events<WitnessEvent>>();
+        world.insert_resource(SimulationTime::default());
+
+        let pop = world.spawn((Pop, Memories::default())).id();
+
+        // Twelve searing memories, then three faint ones.
+        for _ in 0..12 {
+            world.send_event(WitnessEvent {
+                pop_entity: pop,
+                memory_type: MemoryType::WonFight,
+                severity: 1.0,
+            });
+        }
+        for _ in 0..3 {
+            world.send_event(WitnessEvent {
+                pop_entity: pop,
+                memory_type: MemoryType::WonFight,
+                severity: 0.1,
+            });
+        }
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(record_pop_memory_system);
+        schedule.run(&mut world);
+
+        let tracker = world.get::<Memories>(pop).unwrap();
+        assert_eq!(tracker.items.len(), MAX_MEMORIES_PER_POP);
+        assert!(
+            (tracker.memory_weight(MemoryType::WonFight) - 12.0).abs() < 0.001,
+            "the faint memories should have been forgotten, weight {}",
+            tracker.memory_weight(MemoryType::WonFight)
+        );
+    }
+
+    /// A famine that lasts becomes a shared scar: every living pop gains
+    /// `SurvivedFamine`, once per episode — and again for the next famine.
+    #[test]
+    fn test_famine_witness_broadcast_once_per_episode() {
+        let mut world = World::new();
+        world.init_resource::<Events<WitnessEvent>>();
+        world.insert_resource(TraumaTracker {
+            recent_deaths: 0,
+            famine_ticks: FAMINE_WITNESS_THRESHOLD + 50,
+        });
+        world.init_resource::<PopMemoryState>();
+
+        let pops: Vec<Entity> = (0..3)
+            .map(|_| world.spawn((Pop, Memories::default())).id())
+            .collect();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((famine_witness_system, record_pop_memory_system).chain());
+
+        // Famine crosses the witness threshold: everyone remembers.
+        schedule.run(&mut world);
+        for pop in &pops {
+            let tracker = world.get::<Memories>(*pop).unwrap();
+            assert!(tracker.has_memory(MemoryType::SurvivedFamine));
+            assert_eq!(tracker.items.len(), 1);
+        }
+
+        // Still starving: no second helping of trauma.
+        schedule.run(&mut world);
+        for pop in &pops {
+            assert_eq!(world.get::<Memories>(*pop).unwrap().items.len(), 1);
+        }
+
+        // Famine ends, then a new one begins: a second, distinct memory.
+        world.resource_mut::<TraumaTracker>().famine_ticks = 0;
+        schedule.run(&mut world);
+        world.resource_mut::<TraumaTracker>().famine_ticks = FAMINE_WITNESS_THRESHOLD + 10;
+        schedule.run(&mut world);
+        for pop in &pops {
+            let tracker = world.get::<Memories>(*pop).unwrap();
+            assert_eq!(tracker.items.len(), 2);
+            assert!((tracker.memory_weight(MemoryType::SurvivedFamine) - 2.0).abs() < 0.001);
+        }
+    }
+
+    /// Founding-generation pops carry `ColonyFounder`; late arrivals don't,
+    /// and nobody gets stamped twice.
+    #[test]
+    fn test_founder_stamping() {
+        let mut world = World::new();
+        world.init_resource::<Events<WitnessEvent>>();
+
+        let founder = world
+            .spawn((Pop, Arrival { tick: 5 }, Memories::default()))
+            .id();
+        let immigrant = world
+            .spawn((Pop, Arrival { tick: 9_000 }, Memories::default()))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((stamp_founder_memories_system, record_pop_memory_system).chain());
+        schedule.run(&mut world);
+        schedule.run(&mut world);
+
+        let founder_mem = world.get::<Memories>(founder).unwrap();
+        assert!(founder_mem.has_memory(MemoryType::ColonyFounder));
+        assert_eq!(
+            founder_mem
+                .items
+                .iter()
+                .filter(|m| m.memory_type == MemoryType::ColonyFounder)
+                .count(),
+            1,
+            "founder memory must be stamped exactly once"
+        );
+        assert!(!world
+            .get::<Memories>(immigrant)
+            .unwrap()
+            .has_memory(MemoryType::ColonyFounder));
+    }
+
+    fn census_world(famine_holders: usize, total: usize, tick: u64) -> World {
+        let mut world = World::new();
+        world.init_resource::<Events<AddChronicleEvent>>();
+        world.init_resource::<ColonyIdentity>();
+        world.insert_resource(SimulationTime {
+            tick,
+            ..Default::default()
+        });
+        for i in 0..total {
+            let mut memories = Memories::default();
+            if i < famine_holders {
+                memories.add(MemoryType::SurvivedFamine, 0);
+            }
+            world.spawn((Pop, Morale::default(), memories));
+        }
+        world
+    }
+
+    /// Spec 341 §5: when most of the colony shares a memory, it becomes
+    /// colony identity — chronicled, and felt by everyone as solidarity.
+    #[test]
+    fn test_colony_identity_forms_from_shared_memory() {
+        let mut world = census_world(6, 10, IDENTITY_CENSUS_INTERVAL);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(colony_identity_census_system);
+        schedule.run(&mut world);
+
+        let identity = world.resource::<ColonyIdentity>();
+        assert!(identity.has_identity(MemoryType::SurvivedFamine));
+        let identity_trait = &identity.traits[0];
+        assert_eq!(identity_trait.name, "Famine-Forged");
+        assert!((identity_trait.share - 0.6).abs() < 0.01);
+
+        // The formation was chronicled.
+        let events = world.resource::<Events<AddChronicleEvent>>();
+        let mut cursor = events.get_cursor();
+        assert!(
+            cursor
+                .read(events)
+                .any(|e| e.text.contains("Famine-Forged")),
+            "identity formation should be written into the chronicle"
+        );
+
+        // Every pop feels the solidarity modifier.
+        let mut query = world.query::<&Morale>();
+        for morale in query.iter(&world) {
+            assert!(
+                morale
+                    .modifiers
+                    .iter()
+                    .any(|m| m.label == "Identity: Famine-Forged" && (m.value - 0.03).abs() < 0.001),
+                "every pop should carry the identity mood modifier"
+            );
+        }
+    }
+
+    /// A memory held by a minority is just a memory — no identity forms.
+    #[test]
+    fn test_colony_identity_needs_majority() {
+        let mut world = census_world(4, 10, IDENTITY_CENSUS_INTERVAL);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(colony_identity_census_system);
+        schedule.run(&mut world);
+
+        assert!(world.resource::<ColonyIdentity>().traits.is_empty());
+        let mut query = world.query::<&Morale>();
+        for morale in query.iter(&world) {
+            assert!(morale.modifiers.is_empty());
+        }
+    }
+
+    /// Live-schedule end-to-end: founding pops in a real game world gain
+    /// the `ColonyFounder` memory through the actual simulation schedule.
+    #[test]
+    fn test_live_schedule_founders_gain_memory() {
+        use crate::setup::{setup_world_with_config, SetupConfig};
+        use crate::simulation::run_simulation_tick;
+
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            ..Default::default()
+        });
+        for _ in 0..10 {
+            run_simulation_tick(&mut world);
+        }
+
+        let mut query = world.query::<&Memories>();
+        let total = query.iter(&world).count();
+        let holders = query
+            .iter(&world)
+            .filter(|m| m.has_memory(MemoryType::ColonyFounder))
+            .count();
+        assert!(total > 0, "live world should have pops");
+        assert!(
+            holders > 0,
+            "founding pops should carry the ColonyFounder memory in the live sim ({holders}/{total})"
+        );
     }
 }

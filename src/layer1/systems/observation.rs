@@ -460,6 +460,22 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Observation),
     );
 
+    // Spec 341: Pop Memory — witness recording, famine/founder producers,
+    // and the colony-identity census.
+    schedule.add_systems(
+        (
+            crate::layer1::memory::famine_witness_system
+                .after(crate::layer1::integration::famine_tracking_system),
+            crate::layer1::memory::stamp_founder_memories_system,
+            crate::layer1::memory::record_pop_memory_system
+                .after(crate::layer1::memory::famine_witness_system)
+                .after(crate::layer1::memory::stamp_founder_memories_system),
+            crate::layer1::memory::colony_identity_census_system
+                .after(crate::layer1::memory::record_pop_memory_system),
+        )
+            .in_set(Layer1SystemSet::Observation),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::integration::predatory_weather_impact_bridge_system,

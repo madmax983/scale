@@ -526,6 +526,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer3::diplomacy::diplomatic_fashion::DiplomaticMeetingEvent>>();
     world.init_resource::<crate::layer1::mind::fugue::FugueEventTracker>();
     world.init_resource::<Events<crate::layer1::pop_memories::FamineEvent>>();
+    // Spec 341 Pop Memory: witness events, episode state, colony identity.
+    world.init_resource::<Events<crate::layer1::memory::WitnessEvent>>();
+    world.init_resource::<crate::layer1::memory::PopMemoryState>();
+    world.init_resource::<crate::layer1::memory::ColonyIdentity>();
     world.init_resource::<Events<crate::layer1::diplomacy::wards::WarDeclaredEvent>>();
     world.init_resource::<Events<crate::layer1::execution::mining::harmonic_mining::TriggerSonicDrillEvent>>();
     if !world.contains_resource::<crate::layer1::diplomacy::wards::DiplomaticStanding>() {
