@@ -440,6 +440,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
         "deorbit" => handle_deorbit_command(world, &parts),
+        "shadow" => handle_shadow_command(world, &parts),
         "tether" => handle_tether_command(world, &parts),
         "tethers" => print_tethers(world),
         "harpoon" => handle_harpoon_command(world, &parts),
@@ -2699,6 +2700,25 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::cadet::scion_count;
         scion_count(world)
     };
+    let (shadowed, shadows) = {
+        use scale::layer1::environment::orbital_shadow::{
+            OrbitalShadowCasters, OrbitalShadowMap, SHADOWED_TILE_THRESHOLD,
+        };
+        let shadowed = world
+            .get_resource::<OrbitalShadowMap>()
+            .map(|m| {
+                m.shadows
+                    .values()
+                    .filter(|b| **b >= SHADOWED_TILE_THRESHOLD)
+                    .count()
+            })
+            .unwrap_or(0);
+        let shadows = world
+            .get_resource::<OrbitalShadowCasters>()
+            .map(|c| c.casters.len())
+            .unwrap_or(0);
+        (shadowed, shadows)
+    };
     let seniority = {
         use scale::layer1::social::seniority::seniority_counts;
         let (f, v, n) = seniority_counts(world);
@@ -2767,7 +2787,7 @@ fn print_stats(world: &mut World) {
     };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={}",
         tick,
         pops,
         avg_health,
@@ -2820,6 +2840,8 @@ fn print_stats(world: &mut World) {
         stowaway,
         encroaching,
         seniority,
+        shadowed,
+        shadows,
     );
 }
 
@@ -6998,6 +7020,65 @@ fn handle_museum_command(world: &mut World, parts: &[&str]) {
 /// `deorbit [size] [x] [y]` — trigger a deorbit crisis.
 /// size: fragment | hulk | megastructure (default hulk).
 /// Target defaults to the colony heart once the trigger system runs.
+/// Debug: park a Layer-2 vessel over the colony (Spec 335). `shadow [size]`
+/// — size is the Layer-2 vessel footprint in tiles (1-8, default 3); the
+/// shadow footprint on the colony map is size x ORBITAL_PROJECTION_SCALE.
+fn handle_shadow_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::core::map::GridPosition;
+    use scale::layer1::environment::orbital_shadow::{
+        OrbitalShadowCaster, OrbitalShadowCasters, OrbitalShadowMap, ORBITAL_PROJECTION_SCALE,
+    };
+    use scale::layer1::pop::Pop;
+
+    let size: u32 = parts
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .map(|s: u32| s.clamp(1, 8))
+        .unwrap_or(3);
+
+    // Park over the colony heart (mean living-pop position; map center fallback).
+    let heart = {
+        let mut query = world.query_filtered::<&GridPosition, With<Pop>>();
+        let positions: Vec<GridPosition> = query.iter(world).copied().collect();
+        if positions.is_empty() {
+            GridPosition { x: 40, y: 25 }
+        } else {
+            let (sx, sy) = positions
+                .iter()
+                .fold((0i64, 0i64), |(x, y), p| (x + p.x as i64, y + p.y as i64));
+            #[allow(clippy::cast_possible_truncation)]
+            GridPosition {
+                x: (sx / positions.len() as i64) as i32,
+                y: (sy / positions.len() as i64) as i32,
+            }
+        }
+    };
+
+    world.init_resource::<OrbitalShadowCasters>();
+    world.init_resource::<OrbitalShadowMap>();
+    {
+        let mut casters = world.resource_mut::<OrbitalShadowCasters>();
+        casters.casters.push(OrbitalShadowCaster {
+            name: "dreadnought squadron",
+            center: heart,
+            layer2_size: size,
+            peak_block: 85.0,
+            drift: (1, 0),
+            farmland_chronicled: false,
+        });
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let radius = size as f32 * ORBITAL_PROJECTION_SCALE / 2.0;
+    print_dashboard_panel(
+        "ORBITAL SHADOW",
+        &format!(
+            "A dreadnought squadron has parked in orbit above the colony.\nIts shadow (~{radius:.0} tile radius) is crawling across the map — solar panels and crops in the shade will suffer."
+        ),
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 fn handle_deorbit_command(world: &mut World, parts: &[&str]) {
     use bevy_ecs::event::Events;
     use scale::layer1::core::map::GridPosition;

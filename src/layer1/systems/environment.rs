@@ -319,4 +319,26 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Environment),
     );
+    // Spec 335: Orbital Shadow. The projection rebuild lives in
+    // Environment; the light application must run AFTER
+    // update_lighting_system (Execution, which resets the map to ambient),
+    // and the solar dimming in Economy after update_solar_output_system
+    // and before power_grid_system. Environment runs after Economy in the
+    // real schedule, so all three systems are registered here with their
+    // ordering edges instead of in one Environment tuple.
+    schedule.add_systems(
+        crate::layer1::environment::orbital_shadow::project_orbital_shadows_system
+            .in_set(Layer1SystemSet::Environment),
+    );
+    schedule.add_systems(
+        crate::layer1::environment::orbital_shadow::apply_orbital_shadows_system
+            .after(crate::layer1::lighting::update_lighting_system)
+            .in_set(Layer1SystemSet::Execution),
+    );
+    schedule.add_systems(
+        crate::layer1::environment::orbital_shadow::dim_shadowed_solar_system
+            .after(crate::layer1::solar::update_solar_output_system)
+            .before(crate::layer1::energy::power_grid_system)
+            .in_set(Layer1SystemSet::Economy),
+    );
 }
