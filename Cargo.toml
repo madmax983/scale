@@ -86,3 +86,7 @@ pollster = "0.3.0"
 # on wasm32; the --cfg hack in .cargo/config.toml is inert for getrandom 0.3.
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
+
+[patch.crates-io]
+# Upstream panics on wasm32 (std::time::Instant); see vendor/ratatui-hypertile-extras/README.md.
+ratatui-hypertile-extras = { path = "vendor/ratatui-hypertile-extras" }

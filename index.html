@@ -3,6 +3,14 @@
   <head>
     <meta charset="utf-8">
     <title>SCALE WASM</title>
+    <!-- ratzilla draws default-colored cells as white text on a transparent
+         background, so the page itself has to supply the dark terminal backdrop. -->
+    <style>
+      body { margin: 0; background-color: #000; }
+      /* Each grid row is a <pre>; the browser's default 1em margin would
+         make rows taller than the cell height ratzilla measured. */
+      pre { margin: 0; }
+    </style>
     <!-- wasm-opt must be told about the WASM features rustc enables by default,
          or it rejects the module (e.g. memory.copy needs bulk-memory). -->
     <link data-trunk rel="rust" data-bin="wasm_app"

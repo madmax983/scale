@@ -3515,13 +3515,12 @@ dependencies = [
 [[package]]
 name = "ratatui-hypertile-extras"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f95626aec3bbdd25ae006e669b7082649fed8561248bdca2ff613e4b5c5472d"
 dependencies = [
  "ratatui",
  "ratatui-hypertile",
  "serde",
  "serde_json",
+ "web-time",
 ]
 
 [[package]]
