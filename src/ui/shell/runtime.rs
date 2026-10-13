@@ -517,10 +517,7 @@ impl UiShell {
                 name: self.workspace_names[index].clone(),
                 root: runtime.core().root().clone(),
                 focused_pane: runtime.focused_pane(),
-                panes: runtime
-                    .core()
-                    .state()
-                    .pane_ids()
+                panes: tree_pane_ids(runtime)
                     .into_iter()
                     .filter_map(|pane_id| {
                         runtime
@@ -718,11 +715,21 @@ fn preferred_pane_placement(plugin_type: &str) -> PanePlacement {
     }
 }
 
+/// Pane ids of the runtime's current layout tree, in tree (preorder) order.
+///
+/// Do NOT replace this with `core().state().pane_ids()`: in
+/// ratatui-hypertile 0.4.2 that iterator walks the *layout cache*, which
+/// is empty until the first `compute_layout` and is cleared by every
+/// tree mutation (`set_root`, split, close). Reading it while applying
+/// a workspace layout — before the first render — silently yields zero
+/// panes, which once left every pane bound to the placeholder "block"
+/// plugin (see `default_shell_binds_preset_plugins_before_first_render`).
+fn tree_pane_ids(runtime: &HypertileRuntime) -> Vec<PaneId> {
+    ratatui_hypertile::raw::collect_pane_ids(runtime.core().root())
+}
+
 fn find_pane_by_plugin_type(runtime: &HypertileRuntime, plugin_type: &str) -> Option<PaneId> {
-    runtime
-        .core()
-        .state()
-        .pane_ids()
+    tree_pane_ids(runtime)
         .into_iter()
         .find(|pane_id| runtime.registry().plugin_type_for(*pane_id) == Some(plugin_type))
 }
@@ -742,7 +749,7 @@ fn apply_workspace_layout(
         .set_root(workspace.root.clone())
         .map_err(|error| error.to_string())?;
 
-    let pane_ids: Vec<_> = runtime.core().state().pane_ids().collect();
+    let pane_ids = tree_pane_ids(runtime);
     for pane_id in pane_ids {
         let Some(binding) = workspace
             .panes
@@ -1076,10 +1083,7 @@ mod tests {
 
     fn count_plugin_instances(shell: &UiShell, plugin_type: &str) -> usize {
         let runtime = shell.workspaces().active_runtime();
-        runtime
-            .core()
-            .state()
-            .pane_ids()
+        tree_pane_ids(runtime)
             .into_iter()
             .filter(|pane_id| runtime.registry().plugin_type_for(*pane_id) == Some(plugin_type))
             .count()
@@ -1106,5 +1110,66 @@ mod tests {
             s.push_str(cell.symbol());
         }
         s
+    }
+
+    #[test]
+    fn default_shell_binds_preset_plugins_before_first_render() {
+        // Regression: ratatui-hypertile 0.4.2 `state().pane_ids()` walks
+        // the layout cache, which is empty until the first
+        // `compute_layout`. `apply_workspace_layout` used that iterator,
+        // so it replaced zero pane plugins and every pane kept the
+        // placeholder "block" binding — the whole shell rendered as
+        // empty boxes titled "Block". This test never renders: the
+        // bindings must be correct straight out of `build_default_shell`.
+        let mut shell = build_default_shell_for_test();
+
+        let colony_ops = [
+            (PaneId::ROOT, COLONY_MAP_PLUGIN_TYPE),
+            (PaneId::new(1), INSPECTOR_PLUGIN_TYPE),
+            (PaneId::new(2), CHRONICLE_PLUGIN_TYPE),
+            (PaneId::new(3), STATUS_PLUGIN_TYPE),
+        ];
+        {
+            let runtime = shell.workspaces().active_runtime();
+            for (pane_id, expected) in colony_ops {
+                assert_eq!(
+                    runtime.registry().plugin_type_for(pane_id),
+                    Some(expected),
+                    "Colony Ops pane {} should be bound before first render",
+                    pane_id.get()
+                );
+            }
+        }
+
+        // No pane in any workspace may keep the placeholder binding.
+        for index in 0..shell.workspace_names.len() {
+            shell.workspaces_mut().go_to_tab(index);
+            let runtime = shell.workspaces().active_runtime();
+            for pane_id in tree_pane_ids(runtime) {
+                assert_ne!(
+                    runtime.registry().plugin_type_for(pane_id),
+                    Some("block"),
+                    "workspace {} pane {} kept the placeholder plugin",
+                    shell.workspace_names[index],
+                    pane_id.get()
+                );
+            }
+        }
+
+        // End to end: rendering the default workspace must show real
+        // pane content, never the placeholder title.
+        shell.workspaces_mut().go_to_tab(0);
+        let area = Rect::new(0, 0, 120, 40);
+        let mut buffer = Buffer::empty(area);
+        shell.render(area, &mut buffer);
+        let text = buffer_text(&buffer);
+        assert!(
+            !text.contains("Block"),
+            "rendered shell must not contain the placeholder pane title"
+        );
+        assert!(
+            text.contains("Chronicle"),
+            "rendered shell should show the chronicle pane"
+        );
     }
 }
