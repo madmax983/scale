@@ -1,6 +1,8 @@
 # Backlog
 ## High Priority
 
+- [ ] `1382` Save System — Persistent Colonies (Native Files, Browser IndexedDB) — `specs/1382-save-system.md` — QUEUED NEXT by Mark 2026-10-12 (after in-flight 345): Mark-approved design (IndexedDB saves, localStorage settings crumbs, file export/import)
+- [ ] `1383` Mobile Controls — Touch Play for the WASM Build — `specs/1383-mobile-controls.md` — queued after 1382 at Mark's request 2026-10-12
 - [ ] `1370` Civilizational Compost — `specs/1370-civilizational-compost.md`
 - [ ] `1371` Panic Spirals — `specs/1371-panic-spirals.md`
 - [ ] `1372` Gravity-Fed Logistics — `specs/1372-gravity-fed-logistics.md`
