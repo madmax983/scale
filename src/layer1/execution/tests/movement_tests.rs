@@ -488,3 +488,63 @@ fn test_cleanup_handles_despawned_building() {
 
     assert!(world.get::<AssignedTo>(pop).is_none());
 }
+
+// --- Spec 344: seasonal movement (snow / mud) ---
+
+#[test]
+fn test_movement_winter_snow_blocks_first_step_summer_moves() {
+    use crate::layer1::seasons::{Season, SeasonState};
+
+    // Summer control: full speed, a Speed-carrying pop steps immediately.
+    let mut world = setup_world();
+    world.insert_resource(SeasonState {
+        current_season: Season::Summer,
+    });
+    let pop = world
+        .spawn((
+            Pop,
+            GridPosition { x: 0, y: 0 },
+            Speed {
+                base: 1.0,
+                current: 1.0,
+                accumulator: 0.0,
+            },
+            MovementTarget {
+                target_entity: Entity::from_raw(1),
+                target_position: GridPosition { x: 5, y: 5 },
+                for_action: ActionType::Work,
+            },
+        ))
+        .id();
+    world.run_system_once(movement_system).unwrap();
+    let pos = world.get::<GridPosition>(pop).unwrap();
+    assert_eq!((pos.x, pos.y), (1, 0), "summer pop should step");
+
+    // Winter: snow cuts the accumulator gain to 0.6, below the coyote
+    // threshold for a cost-1.0 grass step, so the pop does not move yet.
+    let mut world = setup_world();
+    world.insert_resource(SeasonState {
+        current_season: Season::Winter,
+    });
+    let pop = world
+        .spawn((
+            Pop,
+            GridPosition { x: 0, y: 0 },
+            Speed {
+                base: 1.0,
+                current: 1.0,
+                accumulator: 0.0,
+            },
+            MovementTarget {
+                target_entity: Entity::from_raw(1),
+                target_position: GridPosition { x: 5, y: 5 },
+                for_action: ActionType::Work,
+            },
+        ))
+        .id();
+    world.run_system_once(movement_system).unwrap();
+    let pos = world.get::<GridPosition>(pop).unwrap();
+    assert_eq!((pos.x, pos.y), (0, 0), "winter snow should delay the step");
+    let speed = world.get::<Speed>(pop).unwrap();
+    assert!((speed.accumulator - 0.6).abs() < 0.001);
+}

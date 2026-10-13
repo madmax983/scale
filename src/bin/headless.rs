@@ -467,6 +467,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "heritage" => print_heritage(world),
         "curio" => print_curio_ledger(world),
         "rumors" => print_rumors(world),
+        "season" => print_season(world),
         "provenance" => print_provenance(world),
         "identity" => print_identity(world),
         "artifacts" => print_artifacts(world),
@@ -2828,8 +2829,13 @@ fn print_stats(world: &mut World) {
         known_rumor_count(world)
     };
 
+    // Short season name for STATS; the full summary is the `season` command.
+    let season_name = world
+        .get_resource::<scale::layer1::seasons::SeasonState>()
+        .map_or("Spring", |s| s.current_season.name());
+
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} season={}",
         tick,
         pops,
         avg_health,
@@ -2892,6 +2898,7 @@ fn print_stats(world: &mut World) {
         memories,
         identity,
         rumors,
+        season_name,
     );
 }
 
@@ -5850,6 +5857,11 @@ fn print_help() {
                     "Rumor web: circulation, false-rumor believers, debunks, panics (Spec 343)",
                 ),
                 (
+                    "season",
+                    "",
+                    "Seasonal rhythms: season, ambient temp, food/growth/movement modifiers (Spec 344)",
+                ),
+                (
                     "provenance",
                     "",
                     "Material provenance: stamped buildings + inherited properties (Spec 336)",
@@ -7175,6 +7187,22 @@ fn print_curio_ledger(world: &mut World) {
 }
 
 /// Rumor web report (headless `rumors` command, Spec 343).
+fn print_season(world: &mut World) {
+    use scale::layer1::seasons::season_status_label;
+    print_dashboard_panel(
+        "SEASONAL RHYTHMS",
+        &format!(
+            "Season: {}\n\nSeasons drive the colony's rhythm (Spec 344): ambient temperature \
+            sets heating and cold/heat risk, food x is the farm yield modifier, growth x scales \
+            crop stage progression, and movement x is the snow/mud speed factor. \
+            Stockpile in autumn — winter is coming.",
+            season_status_label(world),
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 fn print_rumors(world: &mut World) {
     use scale::layer1::social::rumor::{
         false_rumor_believer_count, known_rumor_count, RumorWebLedger,

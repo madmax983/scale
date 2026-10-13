@@ -1,5 +1,8 @@
 use crate::layer1::balance::{
-    SEASON_MODIFIER_AUTUMN, SEASON_MODIFIER_SPRING, SEASON_MODIFIER_SUMMER, SEASON_MODIFIER_WINTER,
+    SEASON_GROWTH_MODIFIER_AUTUMN, SEASON_GROWTH_MODIFIER_SPRING, SEASON_GROWTH_MODIFIER_SUMMER,
+    SEASON_GROWTH_MODIFIER_WINTER, SEASON_MODIFIER_AUTUMN, SEASON_MODIFIER_SPRING,
+    SEASON_MODIFIER_SUMMER, SEASON_MODIFIER_WINTER, SEASON_MOVE_MODIFIER_AUTUMN,
+    SEASON_MOVE_MODIFIER_SPRING, SEASON_MOVE_MODIFIER_SUMMER, SEASON_MOVE_MODIFIER_WINTER,
     TICKS_PER_YEAR,
 };
 use crate::layer1::chronicle::{AddChronicleEvent, EventImportance};
@@ -64,6 +67,85 @@ impl Season {
             Self::Winter => -5.0,
         }
     }
+
+    /// Movement speed multiplier for this season (Spec 344): winter snow
+    /// (0.6) and spring mud (0.85) slow pops outdoors; summer is full speed.
+    #[must_use]
+    pub const fn movement_modifier(&self) -> f32 {
+        match self {
+            Self::Spring => SEASON_MOVE_MODIFIER_SPRING,
+            Self::Summer => SEASON_MOVE_MODIFIER_SUMMER,
+            Self::Autumn => SEASON_MOVE_MODIFIER_AUTUMN,
+            Self::Winter => SEASON_MOVE_MODIFIER_WINTER,
+        }
+    }
+
+    /// Crop growth-rate multiplier for this season (Spec 344): growth
+    /// nearly stops in winter (0.1) and peaks in summer (1.5). Distinct
+    /// from `food_modifier`, which scales harvested yield in `farm.rs`.
+    #[must_use]
+    pub const fn growth_modifier(&self) -> f32 {
+        match self {
+            Self::Spring => SEASON_GROWTH_MODIFIER_SPRING,
+            Self::Summer => SEASON_GROWTH_MODIFIER_SUMMER,
+            Self::Autumn => SEASON_GROWTH_MODIFIER_AUTUMN,
+            Self::Winter => SEASON_GROWTH_MODIFIER_WINTER,
+        }
+    }
+
+    /// Short label for the season's ground condition (Spec 344).
+    #[must_use]
+    pub const fn ground_condition(&self) -> &'static str {
+        match self {
+            Self::Spring => "Mud",
+            Self::Summer => "Dry ground",
+            Self::Autumn => "Firm ground",
+            Self::Winter => "Snow",
+        }
+    }
+}
+
+/// Ticks in one season (a quarter of the year).
+pub const TICKS_PER_SEASON: u64 = TICKS_PER_YEAR / 4;
+
+/// Hook emitted when the season changes (Spec 344 §7), alongside the
+/// chronicle entry. Other systems (UI, events) can react to this.
+#[derive(Event, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeasonTransitionEvent {
+    /// The season that just began.
+    pub season: Season,
+    /// Simulation tick at which the transition happened.
+    pub tick: u64,
+}
+
+/// The season for a world, defaulting to Spring when no state exists.
+#[must_use]
+pub fn current_season(world: &World) -> Season {
+    world
+        .get_resource::<SeasonState>()
+        .map_or(Season::Spring, |s| s.current_season)
+}
+
+/// One-line season summary for the headless console (Spec 344).
+#[must_use]
+pub fn season_status_label(world: &World) -> String {
+    let season = current_season(world);
+    let tick = world
+        .get_resource::<SimulationTime>()
+        .map_or(0, |t| t.tick);
+    let into = tick % TICKS_PER_SEASON;
+    format!(
+        "{} (tick {} of {}), next: {}, ambient {:.0}C, food x{:.2}, growth x{:.2}, movement x{:.2} ({})",
+        season.name(),
+        into,
+        TICKS_PER_SEASON,
+        season.next().name(),
+        season.base_temperature(),
+        season.food_modifier(),
+        season.growth_modifier(),
+        season.movement_modifier(),
+        season.ground_condition(),
+    )
 }
 
 /// Tracks the current season of the colony.
@@ -81,6 +163,7 @@ pub fn advance_season_system(
     time: Res<SimulationTime>,
     mut state: ResMut<SeasonState>,
     mut events: EventWriter<AddChronicleEvent>,
+    mut transitions: EventWriter<SeasonTransitionEvent>,
 ) {
     let tick = time.tick;
     let ticks_per_season = TICKS_PER_YEAR / 4;
@@ -98,6 +181,10 @@ pub fn advance_season_system(
         events.send(AddChronicleEvent {
             text: format!("The season turns. {} has arrived.", new_season.name()),
             importance: EventImportance::Standard,
+        });
+        transitions.send(SeasonTransitionEvent {
+            season: new_season,
+            tick,
         });
     }
 }
@@ -131,6 +218,7 @@ mod tests {
             ..Default::default()
         });
         world.init_resource::<Events<AddChronicleEvent>>();
+        world.init_resource::<Events<SeasonTransitionEvent>>();
 
         world.run_system_once(advance_season_system).unwrap();
 
@@ -143,6 +231,7 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(SeasonState::default());
         world.init_resource::<Events<AddChronicleEvent>>();
+        world.init_resource::<Events<SeasonTransitionEvent>>();
 
         // Ticks per season = 1000 / 4 = 250
         // Spring: 0-249, Summer: 250-499
@@ -172,6 +261,7 @@ mod tests {
             current_season: Season::Summer,
         });
         world.init_resource::<Events<AddChronicleEvent>>();
+        world.init_resource::<Events<SeasonTransitionEvent>>();
         world.insert_resource(SimulationTime {
             tick: 251,
             ..Default::default()
@@ -196,6 +286,70 @@ mod tests {
         assert!((Season::Summer.food_modifier() - 1.2).abs() < f32::EPSILON);
         assert!((Season::Autumn.food_modifier() - 1.5).abs() < f32::EPSILON);
         assert!((Season::Winter.food_modifier() - 0.5).abs() < f32::EPSILON);
+    }
+
+    // --- Spec 344 RED tests (adapted to the real Season/SeasonState types) ---
+
+    #[test]
+    fn test_season_movement_modifiers_snow_and_mud() {
+        // Winter snow is the slowest going, Spring mud drags, Summer is full speed.
+        assert!((Season::Winter.movement_modifier() - 0.6).abs() < f32::EPSILON);
+        assert!((Season::Spring.movement_modifier() - 0.85).abs() < f32::EPSILON);
+        assert!((Season::Autumn.movement_modifier() - 0.95).abs() < f32::EPSILON);
+        assert!((Season::Summer.movement_modifier() - 1.0).abs() < f32::EPSILON);
+        assert!(Season::Winter.movement_modifier() < Season::Spring.movement_modifier());
+        assert!(Season::Spring.movement_modifier() < Season::Summer.movement_modifier());
+    }
+
+    #[test]
+    fn test_season_growth_modifiers() {
+        // Spec 344: winter nearly stops growth (0.1x), summer peaks (1.5x).
+        assert!((Season::Winter.growth_modifier() - 0.1).abs() < f32::EPSILON);
+        assert!((Season::Summer.growth_modifier() - 1.5).abs() < f32::EPSILON);
+        assert!(Season::Winter.growth_modifier() < Season::Spring.growth_modifier());
+        assert!(Season::Spring.growth_modifier() < Season::Summer.growth_modifier());
+        assert!(Season::Autumn.growth_modifier() < Season::Summer.growth_modifier());
+    }
+
+    #[test]
+    fn test_advance_season_emits_transition_event() {
+        let mut world = World::new();
+        world.insert_resource(SeasonState::default());
+        world.init_resource::<Events<AddChronicleEvent>>();
+        world.init_resource::<Events<SeasonTransitionEvent>>();
+        world.insert_resource(SimulationTime {
+            tick: 250,
+            ..Default::default()
+        });
+
+        world.run_system_once(advance_season_system).unwrap();
+
+        let events = world.resource::<Events<SeasonTransitionEvent>>();
+        #[allow(deprecated)]
+        let mut reader = events.get_reader();
+        let emitted: Vec<_> = reader.read(events).collect();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].season, Season::Summer);
+        assert_eq!(emitted[0].tick, 250);
+    }
+
+    #[test]
+    fn test_season_public_strings_are_original() {
+        // IP guard (Spec 344): season names / ground-condition labels are
+        // plain generic words, no borrowed IP.
+        for season in [
+            Season::Spring,
+            Season::Summer,
+            Season::Autumn,
+            Season::Winter,
+        ] {
+            let text = format!("{} {}", season.name(), season.ground_condition());
+            for banned in ["SeasonTracker", "CropGrowth"] {
+                assert!(!text.contains(banned), "leaked mock type name: {banned}");
+            }
+        }
+        assert_eq!(Season::Winter.ground_condition(), "Snow");
+        assert_eq!(Season::Spring.ground_condition(), "Mud");
     }
 
     #[test]

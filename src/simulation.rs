@@ -443,6 +443,7 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::anomalies::echo::SpawnEchoSourceEvent>>();
     world.init_resource::<Events<crate::layer1::anomalies::void_sirens::SirenSignalEvent>>();
     world.init_resource::<Events<crate::layer1::agriculture::pollination::GrowthCycleEvent>>();
+    world.init_resource::<Events<crate::layer1::seasons::SeasonTransitionEvent>>();
     world.init_resource::<Events<crate::layer1::memetics::memetic_hazards::ConversationEvent>>();
 
     world.init_resource::<Events<crate::layer1::economy::black_market::SmugglerArrivalEvent>>();
@@ -1878,6 +1879,7 @@ mod tests {
         world.init_resource::<Events<crate::layer1::anomalies::echo::SpawnEchoSourceEvent>>();
         world.init_resource::<Events<crate::layer1::anomalies::void_sirens::SirenSignalEvent>>();
         world.init_resource::<Events<crate::layer1::agriculture::pollination::GrowthCycleEvent>>();
+    world.init_resource::<Events<crate::layer1::seasons::SeasonTransitionEvent>>();
         world
             .init_resource::<Events<crate::layer1::memetics::memetic_hazards::ConversationEvent>>();
 

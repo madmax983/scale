@@ -120,6 +120,7 @@ pub struct MovementContext<'w, 's> {
     wind_grid: Option<Res<'w, crate::layer1::wind::WindGrid>>,
     tide: Option<Res<'w, crate::layer1::atmosphere::AtmosphericTide>>,
     clutter_grid: Option<Res<'w, crate::layer1::clutter::ClutterGrid>>,
+    season: Option<Res<'w, crate::layer1::seasons::SeasonState>>,
     buildings: Query<
         'w,
         's,
@@ -211,9 +212,16 @@ fn process_single_movement(
     let fog_mod = fog.map_or(1.0, |f| f.movement_penalty);
     let rust_lung_mod = health.map_or(1.0, |h| if h.has_rust_lung { 0.8 } else { 1.0 });
 
+    // Spec 344: seasonal ground conditions (winter snow, spring mud)
+    // scale how fast pops accumulate movement each tick.
+    let season_mod = ctx
+        .season
+        .as_deref()
+        .map_or(1.0, |s| s.current_season.movement_modifier());
+
     // Accumulate speed
     if let Some(ref mut speed) = speed_opt {
-        speed.accumulator += speed.current * trait_mod * fog_mod * rust_lung_mod;
+        speed.accumulator += speed.current * trait_mod * fog_mod * rust_lung_mod * season_mod;
     }
 
     let target_pos = mt.target_position;

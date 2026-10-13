@@ -1585,6 +1585,7 @@ mod tests {
                 FarmCrop {
                     growth_stage: FarmGrowthStage::Seedling,
                     requires_pollination: false,
+                    growth_progress: 0.0,
                 },
                 GridPosition { x: 10, y: 10 },
             ))
