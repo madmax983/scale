@@ -90,6 +90,18 @@ impl UiShell {
         runtime.registry().plugin_type_for(pane_id)
     }
 
+    /// The last rendered rect of the focused pane, if any.
+    #[must_use]
+    pub fn focused_pane_rect(&self) -> Option<Rect> {
+        let runtime = self.workspaces.active_runtime();
+        let pane_id = runtime.focused_pane()?;
+        runtime
+            .panes()
+            .into_iter()
+            .find(|pane| pane.id == pane_id)
+            .map(|pane| pane.rect)
+    }
+
     #[must_use]
     pub fn config(&self) -> &ShellConfig {
         &self.config

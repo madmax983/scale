@@ -3,17 +3,19 @@ use bevy_ecs::prelude::*;
 
 use crate::layer1::{
     try_cancel_designation, try_designate_area, try_place_building, BuildMode, CameraTarget,
-    ChronicleUiState, DesignationMode, DesignationType, GridPosition, Pop, Viewport,
+    ChronicleUiState, DesignationMode, DesignationType, GridPosition, Pop, TerrainGrid, Viewport,
 };
 use crate::shared::keyboard::{GameKeyCode, GameKeyEvent, GameMouseEvent};
 use crate::shared::state::GameState;
 use crate::shared::time::{SimSpeed, SimulationTime};
 use crate::shared::view_mode::ViewMode;
 use crate::layer1::culture::origins::OriginChoice;
+use crate::ui::map::{centered_viewport, map_inner_area};
 use crate::ui::menu_state::{MenuSelector, MenuState};
 use crate::ui::selection::{handle_selection_click, screen_to_world, Selection, SelectionTarget};
 use crate::ui::shell::plugins::{SharedWorld, COLONY_MAP_PLUGIN_TYPE, SYSTEM_MAP_PLUGIN_TYPE};
 use crate::ui::shell::UiShell;
+use ratatui::layout::Rect;
 
 /// Defines the current input handling context.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Hash)]
@@ -135,17 +137,36 @@ pub fn route_root_input(world: &SharedWorld, shell: &mut UiShell, key: GameKeyEv
     route_input(&mut world.borrow_mut(), key);
 }
 
+/// The viewport pointer input must be mapped through for a map pane
+/// with inner area `map_inner`: the camera viewport re-centered
+/// exactly as [`crate::ui::map::render_map`] centers it, so a click
+/// lands on the tile rendered under the cursor. Falls back to the
+/// raw camera viewport when the pane area is unknown or the world
+/// has no terrain grid.
+fn effective_map_viewport(world: &World, map_inner: Option<Rect>) -> Viewport {
+    let viewport = *world.resource::<Viewport>();
+    match (map_inner, world.get_resource::<TerrainGrid>()) {
+        (Some(inner), Some(terrain)) => centered_viewport(&viewport, terrain, inner),
+        _ => viewport,
+    }
+}
+
 /// Route mouse input to the appropriate handler based on current context.
-pub fn route_mouse_input(world: &mut World, mouse: GameMouseEvent) {
+///
+/// `map_inner` is the inner area of the focused colony map pane (see
+/// [`map_inner_area`]); it lets selection account for the map
+/// centering the renderer applies on panes larger than the world.
+/// Pass `None` when no colony map pane is focused.
+pub fn route_mouse_input(world: &mut World, mouse: GameMouseEvent, map_inner: Option<Rect>) {
     let context = world.resource::<InputContextStack>().current();
 
     match context {
         InputContext::Normal => {
-            let viewport = *world.resource::<Viewport>();
+            let viewport = effective_map_viewport(world, map_inner);
             handle_selection_click(world, mouse, &viewport);
         }
         InputContext::DesignationMode => {
-            handle_designation_mouse(world, mouse);
+            handle_designation_mouse(world, mouse, map_inner);
         }
         _ => {}
     }
@@ -162,14 +183,24 @@ pub fn route_root_mouse_input(world: &SharedWorld, shell: &UiShell, mouse: GameM
         return;
     }
 
+    let focused = shell.focused_plugin_type();
     if !matches!(
-        shell.focused_plugin_type(),
+        focused,
         Some(COLONY_MAP_PLUGIN_TYPE | SYSTEM_MAP_PLUGIN_TYPE)
     ) {
         return;
     }
 
-    route_mouse_input(&mut world.borrow_mut(), mouse);
+    // Clicks on the colony map are mapped through the same centering
+    // the renderer applies on panes larger than the world; the system
+    // map does not center, so it keeps the raw camera viewport.
+    let map_inner = if focused == Some(COLONY_MAP_PLUGIN_TYPE) {
+        shell.focused_pane_rect().map(map_inner_area)
+    } else {
+        None
+    };
+
+    route_mouse_input(&mut world.borrow_mut(), mouse, map_inner);
 }
 
 fn handle_direct_control_mode(world: &mut World, key: GameKeyEvent) {
@@ -605,8 +636,8 @@ fn handle_designation_mode(world: &mut World, key: GameKeyEvent) {
     }
 }
 
-fn handle_designation_mouse(world: &mut World, mouse: GameMouseEvent) {
-    let viewport = *world.resource::<Viewport>();
+fn handle_designation_mouse(world: &mut World, mouse: GameMouseEvent, map_inner: Option<Rect>) {
+    let viewport = effective_map_viewport(world, map_inner);
     let (world_x, world_y) = screen_to_world(mouse.x, mouse.y, &viewport);
 
     let mode = world.resource::<DesignationMode>();
@@ -1113,7 +1144,7 @@ mod tests {
         // Need GridPosition/Entity to select? Or just select tile.
         // Selecting tile is enough to verify "something happened".
 
-        route_mouse_input(&mut world, mouse_event(10, 10));
+        route_mouse_input(&mut world, mouse_event(10, 10), None);
 
         let selection = world.resource::<Selection>();
         assert_eq!(selection.target(), SelectionTarget::Tile(10, 10));
@@ -1128,7 +1159,7 @@ mod tests {
         world.insert_resource(Viewport::default());
         world.insert_resource(Selection::default());
 
-        route_mouse_input(&mut world, mouse_event(10, 10));
+        route_mouse_input(&mut world, mouse_event(10, 10), None);
 
         let selection = world.resource::<Selection>();
         assert!(!selection.is_selected());
@@ -1143,10 +1174,116 @@ mod tests {
         world.insert_resource(Viewport::default());
         world.insert_resource(Selection::default());
 
-        route_mouse_input(&mut world, mouse_event(10, 10));
+        route_mouse_input(&mut world, mouse_event(10, 10), None);
 
         let selection = world.resource::<Selection>();
         assert!(!selection.is_selected());
+    }
+
+    /// Builds a world with a 10x8 grass terrain whose raw camera sits
+    /// at (5, 5) — the geometry of `render_map_centers_world_in_
+    /// oversized_pane` in the `ui::map` tests: in a 42x22 pane (inner
+    /// 40x20) the world renders centered, so tile (0, 0) appears at
+    /// inner cell (15, 6).
+    fn centered_map_world(context: InputContext) -> World {
+        use crate::layer1::{TerrainGrid, TerrainType};
+        let mut world = World::new();
+        let mut stack = InputContextStack::default();
+        stack.push(context);
+        world.insert_resource(stack);
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 8,
+            tiles: vec![TerrainType::Grass; 80],
+        });
+        world.insert_resource(Viewport { x: 5, y: 5 });
+        world.insert_resource(Selection::default());
+        world
+    }
+
+    #[test]
+    fn test_route_mouse_centered_map_click_selects_rendered_tile() {
+        let mut world = centered_map_world(InputContext::Normal);
+        let pop = world.spawn((Pop, GridPosition { x: 0, y: 0 })).id();
+
+        // Clicking the cell where tile (0, 0) is rendered must select
+        // the pop standing there — not the tile the raw camera
+        // viewport (5, 5) would produce for that cell.
+        route_mouse_input(
+            &mut world,
+            mouse_event(15, 6),
+            Some(Rect::new(0, 0, 40, 20)),
+        );
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Entity(pop)
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_centered_map_margin_click_selects_outside_tile() {
+        let mut world = centered_map_world(InputContext::Normal);
+
+        // A click in the centering margin behaves like any other
+        // out-of-world click: it selects the off-map tile (which the
+        // inspector reports as empty space) instead of wrapping or
+        // clamping onto a real tile.
+        route_mouse_input(&mut world, mouse_event(0, 0), Some(Rect::new(0, 0, 40, 20)));
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(-15, -6)
+        );
+        assert!(crate::ui::selection::inspect_tile(&world, -15, -6).contains("outside map"));
+    }
+
+    #[test]
+    fn test_route_mouse_small_pane_click_unchanged_by_centering() {
+        use crate::layer1::{TerrainGrid, TerrainType};
+        let mut world = World::new();
+        let mut stack = InputContextStack::default();
+        stack.push(InputContext::Normal);
+        world.insert_resource(stack);
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 8,
+            tiles: vec![TerrainType::Grass; 80],
+        });
+        world.insert_resource(Viewport { x: 3, y: 2 });
+        world.insert_resource(Selection::default());
+
+        // Pane (inner 4x3) smaller than the world: no centering, the
+        // camera anchors input exactly as before — mirroring
+        // render_map_small_pane_keeps_camera_anchor, where tile
+        // (3, 2) renders at inner cell (0, 0).
+        route_mouse_input(&mut world, mouse_event(0, 0), Some(Rect::new(0, 0, 4, 3)));
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(3, 2)
+        );
+
+        route_mouse_input(&mut world, mouse_event(1, 1), Some(Rect::new(0, 0, 4, 3)));
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(4, 3)
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_centered_map_designation_uses_centered_tile() {
+        let mut world = centered_map_world(InputContext::DesignationMode);
+        world.insert_resource(DesignationMode::default());
+
+        route_mouse_input(
+            &mut world,
+            mouse_event(15, 6),
+            Some(Rect::new(0, 0, 40, 20)),
+        );
+
+        let mode = world.resource::<DesignationMode>();
+        assert_eq!(mode.drag_start.map(|p| (p.x, p.y)), Some((0, 0)));
+        assert_eq!((mode.cursor.x, mode.cursor.y), (0, 0));
     }
 
     #[test]

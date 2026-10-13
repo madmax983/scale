@@ -573,6 +573,15 @@ pub fn centered_viewport(viewport: &Viewport, terrain: &TerrainGrid, area: Rect)
     centered
 }
 
+/// The area inside the colony map pane's border: the region
+/// [`render_map`] draws tiles into. Pointer input must be mapped
+/// against this same area so a click lands on the tile that was
+/// rendered under the cursor.
+#[must_use]
+pub fn map_inner_area(area: Rect) -> Rect {
+    Block::default().borders(Borders::ALL).inner(area)
+}
+
 /// Render terrain grid, buildings, and pops to the given frame area with viewport offset.
 pub fn render_map_layer(frame: &mut Frame, ctx: MapRenderContext<'_>) {
     let area = ctx.area;
@@ -592,7 +601,7 @@ pub fn render_map(frame: &mut Frame, area: Rect, world: &World) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(" Colony ");
-    let inner = block.inner(area);
+    let inner = map_inner_area(area);
     frame.render_widget(block, area);
 
     // Render terrain inside
