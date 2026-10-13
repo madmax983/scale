@@ -991,3 +991,53 @@ classDiagram
     MarketModule ..> GalacticMarket : Modifies supply_pool
     MarketModule ..> GalacticMarket : Recalculates prices
 ```
+
+## Agent Mesh (Development Tooling)
+
+The agent mesh coordinates the AI agents that build SCALE. It is not part of the game build. See [ADR 050](adr/050-agent-mesh.md) and `crates/agent-mesh/README.md`.
+
+```mermaid
+flowchart TB
+    subgraph Claude[Claude Code session]
+        C[Coordinator: main chat<br/>skill mesh-coordinator]
+        W[Workers: .claude/agents/*.md]
+        H[PreToolUse hook<br/>scripts/mesh-hook.sh]
+    end
+    subgraph Crate[crates/agent-mesh]
+        CLI[mesh CLI] --> Store[store: lock, replay, append]
+        Store --> Ledger[ledger: commands to events]
+        Ledger --> Life[lifecycle: states, leases, tokens]
+        CLI --> Scope[scope + hook]
+        CLI --> Doctor[doctor]
+    end
+    subgraph Repo[.mesh/]
+        Reg[registry.toml]
+        Log[(ledger.jsonl)]
+        Board[BOARD.md]
+    end
+    C -- brief --> W
+    W -- report --> C
+    C --> CLI
+    W -. Edit/Write .-> H --> Scope
+    Store --> Log
+    Store --> Board
+    Scope --> Reg
+    Doctor --> Reg
+    Doctor --> Log
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> submitted
+    submitted --> working: claim
+    working --> completed: complete
+    working --> failed: fail / expiry, no budget
+    working --> input_required: ask
+    working --> submitted: expiry, budget left
+    input_required --> submitted: answer
+    failed --> submitted: retry, budget left
+    submitted --> canceled: cancel
+    working --> canceled: cancel
+    input_required --> canceled: cancel
+    failed --> canceled: cancel
+```

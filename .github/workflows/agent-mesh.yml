@@ -1,0 +1,93 @@
+name: Agent Mesh
+
+on:
+  push:
+    branches: [trunk, main]
+    paths:
+      - "crates/agent-mesh/**"
+      - ".mesh/**"
+      - ".claude/**"
+      - "scripts/mesh*"
+      - ".gitattributes"
+      - ".github/workflows/agent-mesh.yml"
+  pull_request:
+    branches: [trunk, main]
+    paths:
+      - "crates/agent-mesh/**"
+      - ".mesh/**"
+      - ".claude/**"
+      - "scripts/mesh*"
+      - ".gitattributes"
+      - ".github/workflows/agent-mesh.yml"
+
+concurrency:
+  group: agent-mesh-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy, test, coverage, doctor
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/agent-mesh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/agent-mesh -> target
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Format
+        run: cargo fmt -- --check
+
+      - name: Clippy (pedantic + nursery)
+        run: cargo clippy --all-targets -- -D warnings -W clippy::pedantic -W clippy::nursery
+
+      - name: Tests with coverage (85% line minimum)
+        run: cargo llvm-cov --fail-under-lines 85
+
+      - name: Mesh doctor (strict)
+        run: cargo run --quiet -- --dir ../../.mesh doctor --strict
+
+  verus:
+    name: Verus proof of the task lifecycle
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # The release that verified the model when it was written. CI falls back to the latest release.
+      VERUS_TAG: release/rolling/0.2026.10.13.96607e2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Verus
+        run: |
+          mkdir -p "$RUNNER_TEMP/verus"
+          gh release download "$VERUS_TAG" --repo verus-lang/verus --pattern '*x86-linux.zip' --dir "$RUNNER_TEMP/verus" \
+            || gh release download --repo verus-lang/verus --pattern '*x86-linux.zip' --dir "$RUNNER_TEMP/verus"
+          unzip -q "$RUNNER_TEMP"/verus/*.zip -d "$RUNNER_TEMP/verus"
+          echo "VERUS=$(find "$RUNNER_TEMP/verus" -type f -name verus -perm -u+x | head -n 1)" >> "$GITHUB_ENV"
+
+      - name: Verify crates/agent-mesh/verus/lifecycle.rs
+        run: |
+          run() { "$VERUS" crates/agent-mesh/verus/lifecycle.rs 2>&1; }
+          if ! out="$(run)"; then
+            # Verus names the Rust toolchain that it needs. Install it, then run again.
+            toolchain="$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+-x86_64-unknown-linux-gnu' <<<"$out" | head -n 1 || true)"
+            if [ -z "$toolchain" ]; then echo "$out"; exit 1; fi
+            rustup toolchain install "$toolchain" --profile minimal
+            out="$(run)" || { echo "$out"; exit 1; }
+          fi
+          echo "$out"
+          grep -q "0 errors" <<<"$out"

@@ -66,7 +66,7 @@ macro_rules! id_type {
 
         impl fmt::Display for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(&self.0)
+                f.pad(&self.0)
             }
         }
 
@@ -99,7 +99,7 @@ pub struct Token(pub u64);
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        fmt::Display::fmt(&self.0, f)
     }
 }
 
@@ -172,5 +172,12 @@ mod tests {
         assert!("-1".parse::<Token>().is_err());
         assert!("x".parse::<Token>().is_err());
         assert_eq!(Token(9).to_string(), "9");
+    }
+
+    #[test]
+    fn display_honors_width() {
+        let id = TaskId::new("ab").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(format!("[{id:<4}]"), "[ab  ]");
+        assert_eq!(format!("[{:>3}]", Token(7)), "[  7]");
     }
 }
