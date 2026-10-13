@@ -32,6 +32,12 @@ fn setup() -> (tempfile::TempDir, std::path::PathBuf) {
 
 #[test]
 fn threads_racing_for_one_task_produce_one_winner() {
+    for _ in 0..3 {
+        thread_race();
+    }
+}
+
+fn thread_race() {
     let (_tmp, dir) = setup();
     Store::open(&dir)
         .and_then(|s| s.execute(1, add("a")))
@@ -72,7 +78,7 @@ fn threads_racing_for_one_task_produce_one_winner() {
     let r = Store::open(&dir)
         .and_then(|s| s.load())
         .unwrap_or_else(|e| panic!("{e}"));
-    assert!(r.issues.is_empty());
+    assert_eq!(r.issues.len(), 0);
     assert_eq!(r.envelopes.len(), 2);
 }
 
@@ -124,6 +130,12 @@ fn run(root: &Path, args: &[&str]) -> std::process::Child {
 
 #[test]
 fn processes_racing_for_one_task_produce_one_winner() {
+    for _ in 0..3 {
+        process_race();
+    }
+}
+
+fn process_race() {
     let (tmp, dir) = setup();
     Store::open(&dir)
         .and_then(|s| s.execute(1, add("a")))
@@ -141,4 +153,14 @@ fn processes_racing_for_one_task_produce_one_winner() {
         .filter(|w| *w)
         .count();
     assert_eq!(wins, 1);
+    let r = Store::open(&dir)
+        .and_then(|s| s.load())
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.issues.is_empty(), "{:?}", r.issues);
+    let claims = r
+        .envelopes
+        .iter()
+        .filter(|e| matches!(e.event, agent_mesh::Event::Claimed { .. }))
+        .count();
+    assert_eq!(claims, 1, "exactly one claim is in the ledger");
 }
