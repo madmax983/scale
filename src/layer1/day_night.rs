@@ -84,7 +84,23 @@ const DAY_THRESHOLD: f32 = 0.75;
 const DUSK_THRESHOLD: f32 = 0.85;
 
 /// Updates the `DayNightCycle` based on `SimulationTime`.
-pub fn update_day_night_cycle_system(time: Res<SimulationTime>, mut cycle: ResMut<DayNightCycle>) {
+///
+/// Spec 345: on a Tidally Locked world there is no cycle to advance —
+/// the colony heart sits on the permanent day side, so the phase is
+/// frozen at Day (lighting zones across the grid are handled by the
+/// solar path's `tidal_solar_factor`, not by a global phase).
+pub fn update_day_night_cycle_system(
+    time: Res<SimulationTime>,
+    mut cycle: ResMut<DayNightCycle>,
+    traits: Option<Res<crate::layer1::quirks::PlanetaryTraits>>,
+) {
+    if traits.as_deref().is_some_and(|t| {
+        t.has(crate::layer1::quirks::PlanetaryTrait::TidallyLocked)
+    }) {
+        cycle.time_of_day = TimeOfDay::Day;
+        return;
+    }
+
     let tick = time.tick;
     let ticks_in_day = cycle.ticks_per_day;
 

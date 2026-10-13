@@ -274,6 +274,9 @@ pub fn build_simulation_schedule() -> Schedule {
 #[allow(clippy::too_many_lines)]
 fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::agriculture::compost::CompostSoil>();
+    // Spec 345 Planetary Quirks: centralized global modifiers derived
+    // from PlanetaryTraits (init only — never clobber a derived value).
+    world.init_resource::<crate::layer1::quirks::GlobalModifiers>();
     // Spec 325 Orbital Strike Blackmail: colony stance toward the Tollkeeper.
     world.init_resource::<crate::layer1::diplomacy::blackmail::BlackmailStance>();
     // Spec 1373 Recalled Product: manufacturer recalls, failure chance, returns.

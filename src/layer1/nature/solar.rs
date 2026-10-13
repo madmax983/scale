@@ -86,32 +86,60 @@ pub fn update_solar_cycle_system(mut state: ResMut<SolarCycleState>, time: Res<S
 }
 
 /// System to update solar power output based on cycle and time of day.
+///
+/// Spec 345 (Planetary Quirks): the active [`PlanetaryTraits`] compose
+/// into this real solar path — Dense Atmosphere halves sunlight
+/// (`solar_modifier`), and on a Tidally Locked world the global
+/// day/night cycle is replaced by permanent zones: a panel's column
+/// decides its sun (day side 1.0, terminator 0.5, night side 0.0).
+/// Panels without a grid position are assumed to sit on the day side
+/// (the colony heart), so they keep producing — the spec's RED test.
 pub fn update_solar_output_system(
     state: Res<SolarCycleState>,
     day_night: Option<Res<DayNightCycle>>,
     eclipse: Option<Res<crate::layer2::void_leviathan::LeviathanEclipse>>,
-    mut query: Query<(&mut PowerSource, &SolarPower)>,
+    traits: Option<Res<crate::layer1::quirks::PlanetaryTraits>>,
+    mut query: Query<(
+        &mut PowerSource,
+        &SolarPower,
+        Option<&crate::layer1::map::GridPosition>,
+    )>,
 ) {
     let cycle_modifier = state.current_cycle.power_modifier();
-
-    let day_modifier = if let Some(cycle) = day_night {
-        match cycle.time_of_day {
-            TimeOfDay::Night => 0.0,
-            TimeOfDay::Dawn | TimeOfDay::Dusk => 0.5,
-            TimeOfDay::Day => 1.0,
-        }
-    } else {
-        1.0
-    };
 
     let eclipse_modifier = if eclipse.is_some_and(|e| e.active) {
         0.0
     } else {
         1.0
     };
-    let total_modifier = cycle_modifier * day_modifier * eclipse_modifier;
 
-    for (mut source, solar) in &mut query {
+    let tidally_locked = traits.as_deref().is_some_and(|t| {
+        t.has(crate::layer1::quirks::PlanetaryTrait::TidallyLocked)
+    });
+    let quirk_solar_modifier = traits.as_deref().map_or(1.0, |t| {
+        crate::layer1::quirks::GlobalModifiers::from_traits(&t.0).solar
+    });
+
+    // The colony grid is 80 tiles wide (see setup); tidal zones split it
+    // into thirds by column.
+    const TIDAL_GRID_WIDTH: i32 = 80;
+
+    for (mut source, solar, position) in &mut query {
+        let day_modifier = if tidally_locked {
+            position.map_or(1.0, |pos| {
+                crate::layer1::quirks::tidal_solar_factor(pos.x, TIDAL_GRID_WIDTH)
+            })
+        } else if let Some(cycle) = day_night.as_deref() {
+            match cycle.time_of_day {
+                TimeOfDay::Night => 0.0,
+                TimeOfDay::Dawn | TimeOfDay::Dusk => 0.5,
+                TimeOfDay::Day => 1.0,
+            }
+        } else {
+            1.0
+        };
+        let total_modifier =
+            cycle_modifier * day_modifier * eclipse_modifier * quirk_solar_modifier;
         source.output = solar.base_output * total_modifier;
     }
 }

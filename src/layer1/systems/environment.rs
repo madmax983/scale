@@ -198,6 +198,9 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::environment::geomes::diffuse_geome_hazards_system,
             crate::layer1::environment::geomes::environmental_damage_system
                 .after(crate::layer1::environment::geomes::diffuse_geome_hazards_system),
+            // Spec 345: carnivorous flora bites pops near strangling
+            // vines, but only on worlds carrying the quirk.
+            crate::layer1::quirks::carnivorous_flora_system,
         )
             .in_set(Layer1SystemSet::Environment),
     );

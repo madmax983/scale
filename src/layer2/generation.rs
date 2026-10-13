@@ -75,6 +75,14 @@ fn generate_planet_traits(planet_type: PlanetType, rng: &mut StdRng) -> Vec<Plan
             if rng.gen_bool(0.3) {
                 planet_traits.push(PlanetaryTrait::ThinAtmosphere);
             }
+            // Spec 345: rocky worlds can be volcanic or overgrown with
+            // flora that bites back.
+            if rng.gen_bool(0.15) {
+                planet_traits.push(PlanetaryTrait::Volcanic);
+            }
+            if rng.gen_bool(0.2) {
+                planet_traits.push(PlanetaryTrait::CarnivorousFlora);
+            }
         }
         PlanetType::GasGiant => {
             planet_traits.push(PlanetaryTrait::HighGravity);
@@ -90,6 +98,11 @@ fn generate_planet_traits(planet_type: PlanetType, rng: &mut StdRng) -> Vec<Plan
 
     if rng.gen_bool(0.1) {
         planet_traits.push(PlanetaryTrait::SilentWorld);
+    }
+
+    // Spec 345: any world can turn out tidally locked to its star.
+    if rng.gen_bool(0.1) {
+        planet_traits.push(PlanetaryTrait::TidallyLocked);
     }
 
     planet_traits

@@ -468,6 +468,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "curio" => print_curio_ledger(world),
         "rumors" => print_rumors(world),
         "season" => print_season(world),
+        "quirks" => print_quirks(world),
+        "quirk" => handle_quirk_command(world, &parts),
         "provenance" => print_provenance(world),
         "identity" => print_identity(world),
         "artifacts" => print_artifacts(world),
@@ -2834,8 +2836,11 @@ fn print_stats(world: &mut World) {
         .get_resource::<scale::layer1::seasons::SeasonState>()
         .map_or("Spring", |s| s.current_season.name());
 
+    // Spec 345: canonical quirk names for STATS; full panel is `quirks`.
+    let quirks_label = scale::layer1::quirks::quirks_summary(world);
+
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} season={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} season={} quirks={}",
         tick,
         pops,
         avg_health,
@@ -2899,6 +2904,7 @@ fn print_stats(world: &mut World) {
         identity,
         rumors,
         season_name,
+        quirks_label,
     );
 }
 
@@ -5862,6 +5868,16 @@ fn print_help() {
                     "Seasonal rhythms: season, ambient temp, food/growth/movement modifiers (Spec 344)",
                 ),
                 (
+                    "quirks",
+                    "",
+                    "Planetary quirks: this world's global modifiers (Spec 345)",
+                ),
+                (
+                    "quirk <name>|clear",
+                    "",
+                    "Debug: add a planetary quirk by name, or clear them all (Spec 345)",
+                ),
+                (
                     "provenance",
                     "",
                     "Material provenance: stamped buildings + inherited properties (Spec 336)",
@@ -7184,6 +7200,89 @@ fn print_curio_ledger(world: &mut World) {
         Some(comfy_table::Color::Magenta),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Planetary quirks report (headless `quirks` command, Spec 345).
+fn print_quirks(world: &mut World) {
+    use scale::layer1::quirks::quirks_status_label;
+    print_dashboard_panel(
+        "PLANETARY QUIRKS",
+        &format!(
+            "{}\n\nEvery world is an alien puzzle (Spec 345): quirks are chosen when the \
+            world is generated and apply global Layer 1 modifiers — gravity bends \
+            movement speed and cost, a tidally locked world splits into permanent \
+            day / terminator / night zones, dense air halves sunlight but doubles \
+            wind, volcanic heat feeds geothermal, and some flora bites back. \
+            `quirk <name>` adds one after the fact; `quirk clear` removes them all.",
+            quirks_status_label(world),
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug setter for planetary quirks (headless `quirk <name>` / `quirk clear`).
+fn handle_quirk_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::quirks::{add_quirk_by_name, clear_quirks, quirks_summary};
+    if parts.len() < 2 {
+        print_dashboard_panel(
+            "PLANETARY QUIRKS",
+            "Usage: quirk <name> — add a quirk (e.g. `quirk high_gravity`); quirk clear — remove all quirks; quirks — show the panel.",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    if parts[1].eq_ignore_ascii_case("clear") {
+        clear_quirks(world);
+        print_dashboard_panel(
+            "PLANETARY QUIRKS",
+            "All quirks cleared — this world is unremarkable again.",
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    match add_quirk_by_name(world, parts[1]) {
+        Ok(quirk) => {
+            // Chronicle the change if the event channel exists (drained
+            // into the Chronicle by the simulation schedule next tick).
+            if world.contains_resource::<bevy_ecs::event::Events<
+                scale::layer1::core::chronicle::AddChronicleEvent,
+            >>() {
+                world
+                    .resource_mut::<bevy_ecs::event::Events<
+                        scale::layer1::core::chronicle::AddChronicleEvent,
+                    >>()
+                    .send(scale::layer1::core::chronicle::AddChronicleEvent {
+                        text: format!(
+                            "The surveyors revise their report: this world is {} after all.",
+                            quirk.label()
+                        ),
+                        importance: scale::layer1::core::chronicle::EventImportance::Major,
+                    });
+            }
+            print_dashboard_panel(
+                "PLANETARY QUIRKS",
+                &format!(
+                    "Quirk added: {} ({}). Active now: {}",
+                    quirk.label(),
+                    quirk.name(),
+                    quirks_summary(world),
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Err(message) => {
+            print_dashboard_panel(
+                "PLANETARY QUIRKS",
+                &message,
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
 }
 
 /// Rumor web report (headless `rumors` command, Spec 343).

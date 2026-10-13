@@ -121,6 +121,7 @@ pub struct MovementContext<'w, 's> {
     tide: Option<Res<'w, crate::layer1::atmosphere::AtmosphericTide>>,
     clutter_grid: Option<Res<'w, crate::layer1::clutter::ClutterGrid>>,
     season: Option<Res<'w, crate::layer1::seasons::SeasonState>>,
+    quirks: Option<Res<'w, crate::layer1::quirks::PlanetaryTraits>>,
     buildings: Query<
         'w,
         's,
@@ -274,6 +275,15 @@ fn process_single_movement(
         return;
     };
 
+    // Spec 345: planetary quirks scale the per-tile movement *cost* —
+    // the other side of the accumulator from the Spec 344 season factor
+    // above. High gravity makes every tile cost 1.5x the accumulated
+    // speed (the sketch's PopMovementCost, on the real cost path);
+    // Speed.current already carries the quirk speed factor via
+    // apply_quirk_modifiers_system, so the two compose, not duplicate.
+    let quirk_cost_mod = ctx.quirks.as_deref().map_or(1.0, |q| {
+        crate::layer1::quirks::GlobalModifiers::from_traits(&q.0).movement_cost
+    });
     let movement_cost = calculate_movement_cost(
         new_pos,
         *current_pos,
@@ -281,7 +291,7 @@ fn process_single_movement(
         ctx.wind_grid.as_deref(),
         ctx.tide.as_deref(),
         ctx.clutter_grid.as_deref(),
-    );
+    ) * quirk_cost_mod;
 
     if !try_apply_movement_speed(speed_opt, movement_cost, commands, *current_pos) {
         return;

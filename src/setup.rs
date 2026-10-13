@@ -403,6 +403,21 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     system_schedule.add_systems(crate::layer2::generation::generate_system);
     system_schedule.run(&mut world);
 
+    // Spec 345: generation just chose this world's quirks — derive the
+    // centralized GlobalModifiers from them and chronicle the survey
+    // report, so the player learns what kind of world they landed on.
+    {
+        let traits = world.resource::<crate::layer1::PlanetaryTraits>().0.clone();
+        world.insert_resource(crate::layer1::quirks::GlobalModifiers::from_traits(&traits));
+        if let Some(text) = crate::layer1::quirks::quirks_chronicle_text(&traits) {
+            world.resource_mut::<Chronicle>().add_event(
+                0,
+                text,
+                crate::layer1::chronicle::EventImportance::Major,
+            );
+        }
+    }
+
     initialize_visitor_source(&mut world);
     world.insert_resource(crate::layer1::inspector::InspectorSource {
         next_visit_tick: 5000,

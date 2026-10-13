@@ -195,6 +195,7 @@ impl TemperatureGrid {
 pub fn update_temperature_system(
     grid: Option<ResMut<TemperatureGrid>>,
     season: Option<Res<SeasonState>>,
+    quirks: Option<Res<crate::layer1::quirks::PlanetaryTraits>>,
     cycle: Option<Res<DayNightCycle>>,
     eclipse: Option<Res<crate::layer2::void_leviathan::LeviathanEclipse>>,
     terrain: Res<TerrainGrid>,
@@ -212,6 +213,12 @@ pub fn update_temperature_system(
 
     if eclipse.is_some_and(|e| e.active) {
         grid.ambient -= 20.0; // Significant temp drop
+    }
+
+    // Spec 345: planetary quirks shift the ambient baseline (Volcanic +5C).
+    if let Some(traits) = quirks.as_deref() {
+        grid.ambient +=
+            crate::layer1::quirks::GlobalModifiers::from_traits(&traits.0).temperature_offset;
     }
 
     // 2. Solar Heat (Spec 198)
