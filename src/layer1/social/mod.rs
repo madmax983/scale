@@ -757,3 +757,9 @@ pub use informants::*;
 /// its full path to avoid an ambiguous-glob collision with the legacy
 /// `crate::layer1::Stowaway` (the physics::harpoon precedent).
 pub mod ship_stowaway;
+
+/// The Long-Haulers (Spec 351): temporary colonists on a fixed tour —
+/// normal workers carrying a Traveler due-date who ship out permanently
+/// on the first passenger-capable trade ship at/after that date.
+pub mod long_haulers;
+pub use long_haulers::*;

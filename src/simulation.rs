@@ -208,6 +208,13 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems(
         crate::layer1::social::cadet::process_scion_arrival_system,
     );
+    // Spec 351 The Long-Haulers: temporary colonists arrive on a fixed
+    // tour and depart permanently when a trade ship arrives at/after
+    // their departure tick. Arrival first, departures second.
+    schedule.add_systems((
+        crate::layer1::social::long_haulers::process_traveler_arrival_system,
+        crate::layer1::social::long_haulers::process_traveler_departures_system,
+    ));
     // Spec 323 The Informant's Dilemma: the Citizen Informant edict pays
     // pops to report dissent — unrest drops, paranoia spreads, paranoid pops
     // stop socializing and level false treason accusations (justice consumes
@@ -290,6 +297,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::factions::subcontractor_factions::MegacorpSecuritySweepEvent>>();
     // Spec 1208 The Cadet Branch: scion arrival events.
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::cadet::ScionArrivalEvent>>();
+    // Spec 351 The Long-Haulers: arrival + departed events (first-tick
+    // Events pattern: init before any system can read them).
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::long_haulers::TravelerArrivalEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::long_haulers::TravelerDepartedEvent>>();
     // Spec 333 The Old Guard: seniority friction events + demographics
     // (first-tick Events pattern: init before any system can read them).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::seniority::SeniorityFrictionEvent>>();

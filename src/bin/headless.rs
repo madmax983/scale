@@ -452,6 +452,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "lease" => handle_lease_command(world, &parts),
         "leases" => print_leases(world),
         "scion" => handle_scion_command(world, &parts),
+        "traveler" => handle_traveler_command(world, &parts),
+        "travelers" => print_travelers(world),
+        "shipout" => handle_shipout_command(world),
         "martyr" => handle_martyr_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
@@ -3083,6 +3086,12 @@ fn print_stats(world: &mut World) {
         .get_resource::<scale::layer1::economy::black_market::ColonyStats>()
         .map_or(0.0, |s| s.corruption);
 
+    // Spec 351: living Long-Haulers still on tour (or waiting on a ship).
+    let travelers = {
+        use scale::layer1::social::long_haulers::traveler_count;
+        traveler_count(world)
+    };
+
     // Spec 1382: number of saves visible to the file backend.
     let saves_count = FileSaveStore::default_dir()
         .list()
@@ -3090,7 +3099,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={}",
         tick,
         pops,
         avg_health,
@@ -3162,6 +3171,7 @@ fn print_stats(world: &mut World) {
         corruption,
         graves,
         stashes,
+        travelers,
     );
 }
 
@@ -6222,6 +6232,21 @@ fn print_help() {
                     "Debug: Homeworld courier delivers n noble scions (Spec 1208)",
                 ),
                 (
+                    "traveler [n] [stay]",
+                    "",
+                    "Debug: n Long-Haulers sign on for a tour of [stay] ticks (Spec 351)",
+                ),
+                (
+                    "travelers",
+                    "",
+                    "List Long-Haulers: names, due ticks, best skills (Spec 351)",
+                ),
+                (
+                    "shipout",
+                    "",
+                    "Debug: an outbound trade ship arrives — due Long-Haulers board it (Spec 351)",
+                ),
+                (
                     "martyr [pop_id|name] [faction_id]",
                     "",
                     "Debug: martyr a pop — enemy-slain leader test (Spec 272)",
@@ -6835,6 +6860,96 @@ fn handle_scion_command(world: &mut World, parts: &[&str]) {
         &format!(
             "A courier from the Homeworld is inbound with {count} noble scions.\nUseless, exquisite, enormously well-funded — keep them alive."
         ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: Long-Haulers sign on for a fixed tour (Spec 351).
+/// `traveler [n] [stay_ticks]` — they work as normal pops until their
+/// tour is up, then board the next outbound trade ship (`shipout`).
+fn handle_traveler_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::long_haulers::{TravelerArrivalEvent, DEFAULT_STAY_TICKS};
+
+    let count: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(3);
+    let stay_ticks: u64 = parts
+        .get(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_STAY_TICKS);
+
+    world.init_resource::<bevy_ecs::event::Events<TravelerArrivalEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<TravelerArrivalEvent>>()
+        .send(TravelerArrivalEvent { count, stay_ticks });
+    print_dashboard_panel(
+        "THE LONG-HAULERS",
+        &format!(
+            "{count} Long-Haulers are signing on for a {stay_ticks}-tick tour.\nThey work like everyone else — then they ship out for good. See `travelers`."
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: an outbound trade ship arrives (Spec 351). Fires the real
+/// `TradeShipArrivalEvent` the beacon fires — every due Long-Hauler
+/// boards, and the usual trade/stowaway bridges see the ship too.
+fn handle_shipout_command(world: &mut World) {
+    use scale::layer2::trade::blockade::TradeShipArrivalEvent;
+
+    world.init_resource::<bevy_ecs::event::Events<TradeShipArrivalEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<TradeShipArrivalEvent>>()
+        .send(TradeShipArrivalEvent {
+            cargo_value: 1000.0,
+            faction: "Independent Merchants".to_string(),
+        });
+    print_dashboard_panel(
+        "OUTBOUND SHIP",
+        "A trade ship is in orbit and taking passengers.\nRun `tick` — every Long-Hauler whose tour is up boards and leaves for good.",
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Panel: every living Long-Hauler — name, due tick, ticks remaining
+/// (or DUE), and the best skill the colony stands to lose.
+fn print_travelers(world: &mut World) {
+    use scale::layer1::skills::Skills;
+    use scale::layer1::social::long_haulers::{best_skill, Traveler};
+    use scale::layer1::PopName;
+
+    let tick = world.resource::<SimulationTime>().tick;
+    let mut rows: Vec<String> = world
+        .query::<(Entity, &Traveler, Option<&PopName>, Option<&Skills>)>()
+        .iter(world)
+        .map(|(entity, t, name, skills)| {
+            let name = name.map_or_else(|| "Unnamed".to_string(), |n| n.0.clone());
+            let due = if tick >= t.departure_tick {
+                "DUE — waiting on a ship".to_string()
+            } else {
+                format!("{} ticks left", t.departure_tick - tick)
+            };
+            let skill = skills
+                .and_then(best_skill)
+                .map(|(s, l)| format!("best: {s:?} lvl {l}"))
+                .unwrap_or_else(|| "best: none yet".to_string());
+            format!("#{} \"{name}\" — due tick {} ({due}; {skill})", entity.index(), t.departure_tick)
+        })
+        .collect();
+    rows.sort();
+    let body = if rows.is_empty() {
+        "No Long-Haulers on the roster. Everyone here calls this rock home.".to_string()
+    } else {
+        format!(
+            "{} Long-Hauler(s) on tour. They ship out on the first trade ship at/after their due tick (`shipout` to call one):\n{}",
+            rows.len(),
+            rows.join("\n")
+        )
+    };
+    print_dashboard_panel(
+        "THE LONG-HAULERS",
+        &body,
         Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
     );
