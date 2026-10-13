@@ -9,6 +9,7 @@ on:
       - ".claude/**"
       - "scripts/mesh*"
       - ".gitattributes"
+      - ".cargo/**"
       - ".github/workflows/agent-mesh.yml"
   pull_request:
     branches: [trunk, main]
@@ -18,6 +19,7 @@ on:
       - ".claude/**"
       - "scripts/mesh*"
       - ".gitattributes"
+      - ".cargo/**"
       - ".github/workflows/agent-mesh.yml"
 
 concurrency:
@@ -37,8 +39,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      # A pinned toolchain: a new Rust release cannot add lints that turn CI red.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.99.0"
           components: rustfmt, clippy, llvm-tools-preview
 
       - uses: Swatinem/rust-cache@v2
@@ -58,24 +62,24 @@ jobs:
       - name: Tests with coverage (85% line minimum)
         run: cargo llvm-cov --fail-under-lines 85
 
-      - name: Mesh doctor (strict)
-        run: cargo run --quiet -- --dir ../../.mesh doctor --strict
+      # Errors fail. Warnings (overdue leases, blocked tasks) depend on the clock, so they do not.
+      - name: Mesh doctor
+        run: cargo run --quiet -- --dir ../../.mesh doctor
 
   verus:
     name: Verus proof of the task lifecycle
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      # The release that verified the model when it was written. CI falls back to the latest release.
-      VERUS_TAG: release/rolling/0.2026.10.13.96607e2
+      # A stable (non-rolling) release. Rolling tags are deleted, so they do not stay reproducible.
+      VERUS_TAG: release/0.2026.10.04.426d8b0
     steps:
       - uses: actions/checkout@v4
 
       - name: Download Verus
         run: |
           mkdir -p "$RUNNER_TEMP/verus"
-          gh release download "$VERUS_TAG" --repo verus-lang/verus --pattern '*x86-linux.zip' --dir "$RUNNER_TEMP/verus" \
-            || gh release download --repo verus-lang/verus --pattern '*x86-linux.zip' --dir "$RUNNER_TEMP/verus"
+          gh release download "$VERUS_TAG" --repo verus-lang/verus --pattern '*x86-linux.zip' --dir "$RUNNER_TEMP/verus"
           unzip -q "$RUNNER_TEMP"/verus/*.zip -d "$RUNNER_TEMP/verus"
           echo "VERUS=$(find "$RUNNER_TEMP/verus" -type f -name verus -perm -u+x | head -n 1)" >> "$GITHUB_ENV"
 
@@ -90,4 +94,4 @@ jobs:
             out="$(run)" || { echo "$out"; exit 1; }
           fi
           echo "$out"
-          grep -q "0 errors" <<<"$out"
+          grep -qE 'verified, 0 errors$' <<<"$out"

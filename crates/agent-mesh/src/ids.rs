@@ -92,25 +92,69 @@ id_type!(
     Skill
 );
 
-/// A fencing token. Each claim gets a larger token than all earlier claims.
+/// A fencing token: a counter and a random nonce, written `7-9f3a2b1c`.
+///
+/// Each claim gets a larger counter than all earlier claims in the ledger.
+/// The nonce keeps tokens unique when a ledger is rolled back or merged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct Token(pub u64);
+#[serde(try_from = "String", into = "String")]
+pub struct Token {
+    /// The counter.
+    pub n: u64,
+    /// The nonce.
+    pub nonce: u32,
+}
+
+impl Token {
+    /// Makes a token.
+    #[must_use]
+    pub const fn new(n: u64, nonce: u32) -> Self {
+        Self { n, nonce }
+    }
+}
+
+impl TryFrom<String> for Token {
+    type Error = MeshError;
+    fn try_from(s: String) -> Result<Self, MeshError> {
+        s.parse()
+    }
+}
+
+impl From<Token> for String {
+    fn from(t: Token) -> Self {
+        t.to_string()
+    }
+}
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
+        f.pad(&format!("{}-{:08x}", self.n, self.nonce))
     }
+}
+
+/// A new random nonce for a token. It is unique enough to tell claims apart; it is not a secret.
+#[must_use]
+pub fn fresh_nonce() -> u32 {
+    use std::hash::BuildHasher;
+    let seed = (std::time::SystemTime::now(), std::process::id());
+    let hash = std::collections::hash_map::RandomState::new().hash_one(seed);
+    let [a, b, c, d, ..] = hash.to_le_bytes();
+    u32::from_le_bytes([a, b, c, d])
 }
 
 impl FromStr for Token {
     type Err = MeshError;
     fn from_str(s: &str) -> Result<Self, MeshError> {
-        s.parse::<u64>()
+        let bad = || MeshError::InvalidToken(s.to_string());
+        let (n, nonce) = s.split_once('-').unwrap_or((s, "0"));
+        let n = n.parse::<u64>().ok().filter(|n| *n > 0).ok_or_else(bad)?;
+        let hex =
+            !nonce.is_empty() && nonce.len() <= 8 && nonce.bytes().all(|b| b.is_ascii_hexdigit());
+        let nonce = u32::from_str_radix(nonce, 16)
             .ok()
-            .filter(|n| *n > 0)
-            .map(Self)
-            .ok_or_else(|| MeshError::InvalidToken(s.to_string()))
+            .filter(|_| hex)
+            .ok_or_else(bad)?;
+        Ok(Self { n, nonce })
     }
 }
 
@@ -167,17 +211,20 @@ mod tests {
 
     #[test]
     fn token_parses_positive_integers_only() {
-        assert_eq!("7".parse::<Token>().ok(), Some(Token(7)));
+        assert_eq!("7".parse::<Token>().ok(), Some(Token::new(7, 0)));
+        assert_eq!("7-0000002a".parse::<Token>().ok(), Some(Token::new(7, 42)));
+        assert!("7-xyz".parse::<Token>().is_err());
+        assert!("7-123456789".parse::<Token>().is_err());
         assert!("0".parse::<Token>().is_err());
         assert!("-1".parse::<Token>().is_err());
         assert!("x".parse::<Token>().is_err());
-        assert_eq!(Token(9).to_string(), "9");
+        assert_eq!(Token::new(9, 0xab).to_string(), "9-000000ab");
     }
 
     #[test]
     fn display_honors_width() {
         let id = TaskId::new("ab").unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(format!("[{id:<4}]"), "[ab  ]");
-        assert_eq!(format!("[{:>3}]", Token(7)), "[  7]");
+        assert_eq!(format!("[{:>12}]", Token::new(7, 0)), "[  7-00000000]");
     }
 }

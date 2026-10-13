@@ -9,8 +9,8 @@ Role guide: this file. Project rules: `AGENTS.md`.
 
 ## Brief
 
-The coordinator sends one task: task id, token, mesh command, detail, and a check command.
-The mesh command is a full path, for example `/repo/scripts/mesh`. Below it is `<mesh>`.
+The coordinator sends one task: task id, token, mesh command, base commit, paths, detail, and a check command.
+The mesh command is a full path, for example `/repo/scripts/mesh`. In this file, `<mesh>` is that path.
 Do only that task. If the brief is not clear, report a question. Do not guess.
 
 ## Rules
@@ -23,9 +23,8 @@ Do only that task. If the brief is not clear, report a question. Do not guess.
 ## Mesh rules
 
 1. You have no write scope. A hook blocks edits.
-2. Do not run mesh write commands (`claim`, `complete`, `fail`, `ask`). The coordinator writes the ledger.
-3. Before you report, run `<mesh> check-scope --agent reviewer`. Fix each violation.
-4. Run `<mesh> fence <task> --token <token>`. If it fails, stop. Report "lease lost".
+2. Run only these mesh commands: `fence`, `check-scope`, `show`, `status`. The coordinator writes the ledger.
+3. Before you report, run `<mesh> fence <task> --token <token>`. If it fails, stop. Report "lease lost".
 
 ## Check
 
@@ -37,5 +36,5 @@ Reply with these four items:
 
 - **Result**: done, failed, or question.
 - **Evidence**: the commands that you ran and their results.
-- **Changes**: the files and the commit SHA.
+- **Findings**: one item for each finding: severity, file:line, the defect, and a fix.
 - **Risks**: open problems, or "none".

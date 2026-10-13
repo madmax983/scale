@@ -131,6 +131,10 @@ fn init_creates_the_mesh_once() {
 #[test]
 fn no_mesh_gives_a_clear_error() {
     let repo = Repo::empty();
+    assert!(
+        agent_mesh::Store::discover(repo.root()).is_err(),
+        "run the tests with TMPDIR outside any mesh"
+    );
     let err = repo.fail(1, &["status"]);
     assert!(err.contains("mesh init"), "{err}");
 }
@@ -236,7 +240,8 @@ fn json_outputs() {
     );
     assert_eq!(added[0]["event"]["type"], "task_added");
     let claimed = repo.json(11, &["claim", "--next", "--agent", "builder"]);
-    assert_eq!(claimed[0]["event"]["token"], 1);
+    let token = claimed[0]["event"]["token"].as_str().unwrap_or_default();
+    assert!(token.starts_with("1-"), "{token}");
     let status = repo.json(12, &["status"]);
     assert_eq!(status["counts"]["working"], 1);
     assert_eq!(status["tasks"][0]["id"], "a");
@@ -412,7 +417,10 @@ fn check_scope_reads_git_changes() {
     repo.git(&["commit", "-q", "-m", "init"]);
     repo.write("src/lib.rs", "// b\n");
     repo.write("specs/new.md", "x\n");
-    let out = repo.mesh(1, &["check-scope", "--agent", "architect"]);
+    let out = repo.mesh(
+        1,
+        &["check-scope", "--agent", "architect", "--base", "HEAD"],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stdout = text(&out.stdout);
     assert!(stdout.contains("src/lib.rs"), "{stdout}");
@@ -516,4 +524,46 @@ fn bad_input_is_rejected() {
         .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(out.status.code(), Some(1));
     assert!(text(&out.stderr).contains("MESH_NOW"));
+}
+
+#[test]
+fn check_scope_reports_untracked_out_of_scope_files() {
+    let repo = Repo::new();
+    repo.git(&["init", "-q"]);
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "-q", "--no-verify", "-m", "init"]);
+    repo.write("src/new.rs", "// new\n");
+    let out = repo.mesh(
+        1,
+        &["check-scope", "--agent", "architect", "--base", "HEAD"],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stdout).contains("src/new.rs"),
+        "{}",
+        text(&out.stdout)
+    );
+}
+
+#[test]
+fn plan_dry_run_checks_skills() {
+    let repo = Repo::new();
+    let plan = repo.write(
+        "p.toml",
+        "[[task]]\nid = \"a\"\ntitle = \"A\"\nskill = \"dance\"\n",
+    );
+    let err = repo.fail(1, &["plan", plan.to_str().unwrap_or_default(), "--dry-run"]);
+    assert!(err.contains("dance"), "{err}");
+}
+
+#[test]
+fn status_marks_overdue_at_the_expiry_second() {
+    let repo = Repo::new();
+    repo.ok(
+        100,
+        &["add", "--id", "a", "--title", "A", "--skill", "build"],
+    );
+    repo.ok(100, &["claim", "a", "--agent", "builder", "--ttl", "10"]);
+    assert_eq!(repo.json(109, &["status"])["tasks"][0]["overdue"], false);
+    assert_eq!(repo.json(110, &["status"])["tasks"][0]["overdue"], true);
 }

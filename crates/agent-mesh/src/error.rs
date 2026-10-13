@@ -10,11 +10,13 @@ use crate::lifecycle::State;
 pub enum MeshError {
     /// The text is not a valid id.
     #[error(
-        "invalid id `{0}`: use 1-64 characters a-z, 0-9, '.', '_', '-'; start with a-z or 0-9"
+        "invalid id {0:?}: use 1-64 characters a-z, 0-9, '.', '_', '-'; start with a-z or 0-9"
     )]
     InvalidId(String),
     /// The text is not a valid token.
-    #[error("invalid token `{0}`: use a positive integer")]
+    #[error(
+        "invalid token {0:?}: use the token that `mesh claim` printed, for example 7-9f3a2b1c"
+    )]
     InvalidToken(String),
     /// A required text field is empty.
     #[error("{0} must not be empty")]
@@ -85,7 +87,7 @@ pub enum MeshError {
         skill: Skill,
     },
     /// The agent does not have the skill of the task.
-    #[error("agent `{agent}` does not have skill `{skill}` for task `{task}`")]
+    #[error("agent `{agent}` does not have skill `{skill}` for task `{task}`; run `mesh agents`")]
     SkillMismatch {
         /// The task.
         task: TaskId,
@@ -95,7 +97,7 @@ pub enum MeshError {
         skill: Skill,
     },
     /// The agent has too many working tasks.
-    #[error("agent `{agent}` has {active} working tasks; the limit is {limit}")]
+    #[error("agent `{agent}` has {active} working tasks; the limit is {limit}; complete or fail one first")]
     WipLimit {
         /// The agent.
         agent: AgentId,
@@ -105,7 +107,7 @@ pub enum MeshError {
         limit: u32,
     },
     /// No task is ready for the agent.
-    #[error("no ready task for agent `{0}`")]
+    #[error("no ready task for agent `{0}`; run `mesh status`")]
     NothingReady(AgentId),
     /// The operation is not valid in this state.
     #[error("cannot {op} task `{task}` in state `{state}`")]
@@ -125,6 +127,14 @@ pub enum MeshError {
         /// Dependencies that are not completed.
         waiting: Vec<TaskId>,
     },
+    /// A dependency failed or was canceled, so the task cannot start.
+    #[error("task `{task}` is blocked by: {}; retry them, or cancel this task", join(.by))]
+    Blocked {
+        /// The task.
+        task: TaskId,
+        /// The dependencies that block it.
+        by: Vec<TaskId>,
+    },
     /// The token is not the token of the current lease.
     #[error("stale token {token} for task `{task}`; the lease is lost; stop work on this task")]
     StaleToken {
@@ -134,13 +144,16 @@ pub enum MeshError {
         token: Token,
     },
     /// The token is not larger than all earlier tokens.
-    #[error("token {token} for task `{task}` is not fresh")]
+    #[error("token {token} for task `{task}` is not fresh; a merge or a copy reused it")]
     TokenReused {
         /// The task.
         task: TaskId,
         /// The token.
         token: Token,
     },
+    /// A counter reached its largest value.
+    #[error("the {0} counter is at its limit; start a new ledger")]
+    Exhausted(&'static str),
     /// The lease time is over.
     #[error("the lease of task `{0}` expired; stop work on this task")]
     LeaseExpired(TaskId),
@@ -215,7 +228,7 @@ mod tests {
     fn stale_token_message_tells_the_worker_to_stop() {
         let e = MeshError::StaleToken {
             task: id("t1"),
-            token: Token(4),
+            token: Token::new(4, 0),
         };
         assert!(e.to_string().contains("stop work"));
     }

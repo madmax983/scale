@@ -1028,6 +1028,7 @@ flowchart TB
 
 ```mermaid
 stateDiagram-v2
+    state "input-required" as input_required
     [*] --> submitted
     submitted --> working: claim
     working --> completed: complete

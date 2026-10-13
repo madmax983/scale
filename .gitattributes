@@ -1,2 +1,6 @@
-# Agent mesh: keep both sides of a merge. Replay reports conflicts.
-.mesh/ledger.jsonl merge=union
+# Agent mesh. Keep LF line endings: bash cannot run CRLF scripts, and the board check compares text.
+scripts/mesh text eol=lf
+*.sh text eol=lf
+# Keep both sides of a git merge. `mesh doctor` reports conflicting events. Run `mesh board` after a merge.
+.mesh/ledger.jsonl text eol=lf merge=union
+.mesh/BOARD.md text eol=lf merge=union

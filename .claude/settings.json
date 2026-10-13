@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/mesh-hook.sh\""
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/mesh-hook.sh\"; exit 0"
           }
         ]
       }

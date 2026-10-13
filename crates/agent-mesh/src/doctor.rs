@@ -1,18 +1,17 @@
-//! Health checks for a mesh. CI runs `mesh doctor --strict`.
+//! Health checks for a mesh. CI runs `mesh doctor`. Errors fail; warnings need attention.
 
 use std::fmt;
 use std::path::Path;
 
 use serde::Serialize;
 
-use crate::board;
 use crate::ledger::Readiness;
 use crate::registry::Registry;
-use crate::store::{Replay, ReplayIssue, Store, BOARD_FILE};
+use crate::store::{Replay, ReplayIssue, Store};
 use crate::time::fmt_utc;
 
-/// The `.gitattributes` line that makes git merge ledgers by union.
-pub const UNION_RULE: &str = ".mesh/ledger.jsonl merge=union";
+/// The `.gitattributes` line that makes git merge ledgers by union with LF line endings.
+pub const UNION_RULE: &str = ".mesh/ledger.jsonl text eol=lf merge=union";
 
 /// How bad a finding is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -111,11 +110,8 @@ pub fn run(store: &Store, now: u64) -> Report {
     let registry = match store.registry() {
         Ok(reg) => Some(reg),
         Err(e) => {
-            r.push(
-                Severity::Error,
-                "registry",
-                format!("{e}; fix .mesh/registry.toml"),
-            );
+            let message = format!("{e}; fix .mesh/registry.toml");
+            r.push(Severity::Error, "registry", message);
             None
         }
     };
@@ -123,50 +119,74 @@ pub fn run(store: &Store, now: u64) -> Report {
         check_agent_files(store.root(), reg, &mut r);
     }
     match store.load() {
-        Ok(replay) => check_ledger(store, &replay, registry.as_ref(), now, &mut r),
+        Ok(replay) => {
+            check_replay(&replay, registry.as_ref(), &mut r);
+            check_tasks(store, &replay, registry.as_ref(), now, &mut r);
+        }
         Err(e) => r.push(Severity::Error, "ledger", e.to_string()),
     }
     let attrs = std::fs::read_to_string(store.root().join(".gitattributes")).unwrap_or_default();
-    if !attrs
-        .lines()
-        .any(|l| l.split_whitespace().collect::<Vec<_>>().join(" ") == UNION_RULE)
-    {
-        r.push(
-            Severity::Warning,
-            "gitattributes",
-            format!("add `{UNION_RULE}` to .gitattributes"),
-        );
+    let union = attrs.lines().any(|l| {
+        let mut parts = l.split_whitespace();
+        parts.next() == Some(".mesh/ledger.jsonl") && parts.any(|p| p == "merge=union")
+    });
+    if !union {
+        let message = format!("add `{UNION_RULE}` to .gitattributes");
+        r.push(Severity::Error, "gitattributes", message);
     }
     r
 }
 
-fn check_ledger(
+/// Ledger lines, merges, and WIP limits.
+fn check_replay(replay: &Replay, registry: Option<&Registry>, r: &mut Report) {
+    for issue in &replay.issues {
+        let what = match issue {
+            ReplayIssue::Corrupt { line, error, .. } => {
+                format!("line {line} is not a valid event ({error})")
+            }
+            ReplayIssue::Conflict {
+                line, seq, error, ..
+            } => format!("line {line} (seq {seq}) conflicts with earlier events ({error})"),
+        };
+        let message = format!(
+            "{what}; fix the task state with mesh commands, then run `mesh ack {} --note \"<what you did>\"`",
+            issue.fingerprint()
+        );
+        r.push(Severity::Error, "ledger", message);
+    }
+    if let Some(first) = replay.merged_lines.first() {
+        let message = format!(
+            "{} lines (first: line {first}) have sequence numbers that repeat or go down; a git merge joined two ledgers; check `mesh log` and `mesh status`",
+            replay.merged_lines.len()
+        );
+        r.push(Severity::Warning, "merge", message);
+    }
+    for card in registry.map_or(&[][..], Registry::cards) {
+        let active = replay.ledger.active_count(&card.id);
+        if active > card.max_active as usize {
+            let message = format!(
+                "agent `{}` holds {active} working tasks; the limit is {}; fail or cancel the extra tasks",
+                card.id, card.max_active
+            );
+            r.push(Severity::Warning, "wip", message);
+        }
+    }
+}
+
+/// Task skills, blocked tasks, overdue leases, and the board.
+fn check_tasks(
     store: &Store,
     replay: &Replay,
     registry: Option<&Registry>,
     now: u64,
     r: &mut Report,
 ) {
-    for issue in &replay.issues {
-        let message = match issue {
-            ReplayIssue::Corrupt { line, error } => {
-                format!("line {line} is not a valid event ({error}); repair or remove the line")
-            }
-            ReplayIssue::Conflict { line, seq, error } => format!(
-                "line {line} (seq {seq}) conflicts with earlier events ({error}); a merge mixed two ledgers"
-            ),
-        };
-        r.push(Severity::Error, "ledger", message);
-    }
     let ledger = &replay.ledger;
     for t in ledger.tasks() {
         let id = &t.spec.id;
         if !t.life.invariant_holds() {
-            r.push(
-                Severity::Error,
-                "invariants",
-                format!("task `{id}` breaks the lifecycle invariants"),
-            );
+            let message = format!("task `{id}` breaks the lifecycle invariants");
+            r.push(Severity::Error, "invariants", message);
         }
         if registry.is_some_and(|reg| !reg.serves(&t.spec.skill)) && !t.life.state().is_terminal() {
             let message = format!(
@@ -195,9 +215,7 @@ fn check_ledger(
             r.push(Severity::Warning, "leases", message);
         }
     }
-    let current = std::fs::read_to_string(store.dir().join(BOARD_FILE))
-        .is_ok_and(|b| b == board::render(ledger));
-    if !current {
+    if !store.board_is_current().unwrap_or(false) {
         let message = "BOARD.md does not match the ledger; run `mesh board`".to_string();
         r.push(Severity::Error, "board", message);
     }
@@ -206,25 +224,18 @@ fn check_ledger(
 fn check_agent_files(root: &Path, registry: &Registry, r: &mut Report) {
     for card in registry.cards() {
         let rel = format!(".claude/agents/{}.md", card.id);
-        match std::fs::read_to_string(root.join(&rel)) {
-            Err(_) => r.push(
-                Severity::Error,
-                "agent-files",
-                format!("{rel} is missing; add a subagent file for the role"),
-            ),
+        let message = match std::fs::read_to_string(root.join(&rel)) {
+            Err(_) => format!("{rel} is missing; add a subagent file for the role"),
             Ok(text) => match frontmatter_name(&text) {
-                Some(name) if name == card.id.as_str() => {}
-                found => r.push(
-                    Severity::Error,
-                    "agent-files",
-                    format!(
-                        "{rel} has name `{}`; use `{}`",
-                        found.unwrap_or_default(),
-                        card.id
-                    ),
+                Some(name) if name == card.id.as_str() => continue,
+                Some(name) => format!("{rel} has name `{name}`; use `{}`", card.id),
+                None => format!(
+                    "{rel} has no `name` in its frontmatter; add `name: {}`",
+                    card.id
                 ),
             },
-        }
+        };
+        r.push(Severity::Error, "agent-files", message);
     }
 }
 
@@ -395,5 +406,44 @@ mod tests {
         let r = run(&store, 1);
         assert!(checks(&r).contains(&"registry"));
         assert!(!r.passes(false));
+    }
+
+    #[test]
+    fn corrupt_ledger_is_an_error() {
+        let (_tmp, store) = healthy();
+        std::fs::write(store.dir().join("ledger.jsonl"), "garbage\n")
+            .unwrap_or_else(|e| panic!("{e}"));
+        let r = run(&store, 1);
+        let ledger = r.findings.iter().find(|f| f.check == "ledger");
+        assert_eq!(ledger.map(|f| f.severity), Some(Severity::Error));
+        assert!(ledger.is_some_and(|f| f.message.contains("mesh ack")));
+    }
+
+    #[test]
+    fn terminal_tasks_need_no_skill() {
+        let (_tmp, store) = healthy();
+        let tid = TaskId::new("a").unwrap_or_else(|e| panic!("{e}"));
+        let spec = TaskSpec::new(
+            tid.clone(),
+            "A",
+            Skill::new("build").unwrap_or_else(|e| panic!("{e}")),
+        );
+        store
+            .execute(1, Command::Add(spec))
+            .unwrap_or_else(|e| panic!("{e}"));
+        store
+            .execute(
+                1,
+                Command::Cancel {
+                    task: tid,
+                    reason: "done".into(),
+                },
+            )
+            .unwrap_or_else(|e| panic!("{e}"));
+        let without_build =
+            DEFAULT_REGISTRY.replace("skills = [\"build\", \"fix\"]", "skills = [\"fix\"]");
+        std::fs::write(store.dir().join("registry.toml"), without_build)
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert!(!checks(&run(&store, 1)).contains(&"skills"));
     }
 }

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::board;
 use crate::error::{MeshError, Result};
-use crate::event::Envelope;
+use crate::event::{Envelope, Event};
 use crate::ledger::{Command, Ctx, Ledger};
 use crate::registry::{Registry, DEFAULT_REGISTRY};
 
@@ -33,6 +33,8 @@ pub enum ReplayIssue {
     Corrupt {
         /// Line number (1-based).
         line: usize,
+        /// The line fingerprint, for `mesh ack`.
+        fingerprint: String,
         /// The parse error.
         error: String,
     },
@@ -40,6 +42,8 @@ pub enum ReplayIssue {
     Conflict {
         /// Line number (1-based).
         line: usize,
+        /// The line fingerprint, for `mesh ack`.
+        fingerprint: String,
         /// The event sequence number.
         seq: u64,
         /// Why the ledger rejected it.
@@ -47,23 +51,50 @@ pub enum ReplayIssue {
     },
 }
 
+impl ReplayIssue {
+    /// The line fingerprint.
+    #[must_use]
+    pub fn fingerprint(&self) -> &str {
+        match self {
+            Self::Corrupt { fingerprint, .. } | Self::Conflict { fingerprint, .. } => fingerprint,
+        }
+    }
+}
+
 /// The result of a replay.
 #[derive(Debug, Clone)]
 pub struct Replay {
     /// The rebuilt ledger.
     pub ledger: Ledger,
-    /// All parsed envelopes, in file order. Conflicting envelopes are included.
+    /// All parsed envelopes, in file order. Rejected envelopes are included.
     pub envelopes: Vec<Envelope>,
-    /// Problems found.
+    /// Indexes into `envelopes` of the envelopes that the ledger rejected.
+    pub rejected: Vec<usize>,
+    /// Lines whose sequence number is not larger than an earlier one (a merge joined two ledgers).
+    pub merged_lines: Vec<usize>,
+    /// Problems that the coordinator did not acknowledge.
     pub issues: Vec<ReplayIssue>,
 }
 
+/// The fingerprint of a ledger line: 64-bit FNV-1a of the trimmed text, as 16 hex digits.
+#[must_use]
+pub fn fingerprint(line: &str) -> String {
+    let hash = line.trim().bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    format!("{hash:016x}")
+}
+
 /// Rebuilds the ledger from ledger text. Bad lines do not stop the replay.
+/// Problems on lines that an `acknowledged` event names are not reported.
 #[must_use]
 pub fn replay(text: &str) -> Replay {
     let mut ledger = Ledger::new();
     let mut envelopes = Vec::new();
+    let mut rejected = Vec::new();
+    let mut merged_lines = Vec::new();
     let mut issues = Vec::new();
+    let mut max_seq = 0;
     for (i, line) in text.lines().enumerate() {
         let line_no = i + 1;
         if line.trim().is_empty() {
@@ -71,10 +102,16 @@ pub fn replay(text: &str) -> Replay {
         }
         match Envelope::from_line(line) {
             Ok(env) => {
+                if env.seq <= max_seq {
+                    merged_lines.push(line_no);
+                }
+                max_seq = max_seq.max(env.seq);
                 if let Err(e) = ledger.apply(&env) {
                     ledger.observe(&env);
+                    rejected.push(envelopes.len());
                     issues.push(ReplayIssue::Conflict {
                         line: line_no,
+                        fingerprint: fingerprint(line),
                         seq: env.seq,
                         error: e.to_string(),
                     });
@@ -83,13 +120,17 @@ pub fn replay(text: &str) -> Replay {
             }
             Err(e) => issues.push(ReplayIssue::Corrupt {
                 line: line_no,
+                fingerprint: fingerprint(line),
                 error: e.to_string(),
             }),
         }
     }
+    issues.retain(|issue| !ledger.is_acked(issue.fingerprint()));
     Replay {
         ledger,
         envelopes,
+        rejected,
+        merged_lines,
         issues,
     }
 }
@@ -116,10 +157,14 @@ fn write_new(path: PathBuf, content: &str, created: &mut Vec<PathBuf>) -> Result
     }
 }
 
-/// Writes a temp file, then renames it over `path`.
+/// Writes a temp file, syncs it, then renames it over `path`.
+/// A crash leaves the old file or the new file, never a part of one.
 fn write_atomic(path: &Path, content: &str) -> Result<()> {
     let tmp = path.with_extension("tmp");
-    fs::write(&tmp, content).map_err(|e| MeshError::io(&tmp, e))?;
+    let mut file = File::create(&tmp).map_err(|e| MeshError::io(&tmp, e))?;
+    file.write_all(content.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|e| MeshError::io(&tmp, e))?;
     fs::rename(&tmp, path).map_err(|e| MeshError::io(path, e))
 }
 
@@ -156,13 +201,18 @@ impl Store {
     ///
     /// # Errors
     /// [`MeshError::NotFound`] if no folder has it.
+    /// The search stops at the first folder that has `.git` (the repository root).
     pub fn discover(start: &Path) -> Result<Self> {
-        start
-            .ancestors()
-            .map(|a| a.join(MESH_DIR))
-            .find(|d| d.join(REGISTRY_FILE).is_file())
-            .map(|dir| Self { dir })
-            .ok_or(MeshError::NotFound)
+        for folder in start.ancestors() {
+            let dir = folder.join(MESH_DIR);
+            if dir.join(REGISTRY_FILE).is_file() {
+                return Ok(Self { dir });
+            }
+            if folder.join(".git").exists() {
+                break;
+            }
+        }
+        Err(MeshError::NotFound)
     }
 
     /// Makes the mesh folder with the default registry, an empty ledger, a board,
@@ -242,8 +292,18 @@ impl Store {
     /// Returns all new events, lease expiries first.
     ///
     /// # Errors
-    /// The command error, or [`MeshError::Io`]. On error nothing is written.
+    /// The command error, or [`MeshError::Io`]. On a command error, it writes only the lease
+    /// expiries. If an expiry ended the lease that a worker command needs, the error is
+    /// [`MeshError::LeaseExpired`].
     pub fn execute(&self, now: u64, cmd: Command) -> Result<Vec<Envelope>> {
+        self.execute_report(now, cmd).map(|(events, _)| events)
+    }
+
+    /// Like [`Store::execute`]. It also returns the ledger right after the write.
+    ///
+    /// # Errors
+    /// See [`Store::execute`].
+    pub fn execute_report(&self, now: u64, cmd: Command) -> Result<(Vec<Envelope>, Ledger)> {
         let registry = self.registry()?;
         let _guard = self.lock(true)?;
         let path = self.ledger_path();
@@ -254,28 +314,37 @@ impl Store {
             registry: &registry,
         };
         let mut events = ledger.execute(Command::Reap, &ctx)?;
-        events.extend(ledger.execute(cmd, &ctx)?);
-        if events.is_empty() {
-            return Ok(events);
+        let target = cmd.task().cloned();
+        let needs_token = cmd.needs_token();
+        let failure = match ledger.execute(cmd, &ctx) {
+            Ok(more) => {
+                events.extend(more);
+                None
+            }
+            Err(e) => {
+                let expired_now = events.iter().any(|env| {
+                    matches!(&env.event, Event::LeaseExpired { task, .. } if Some(task) == target.as_ref())
+                });
+                Some(match target {
+                    Some(task) if needs_token && expired_now => MeshError::LeaseExpired(task),
+                    _ => e,
+                })
+            }
+        };
+        if !events.is_empty() {
+            let mut new_text = text;
+            if !new_text.is_empty() && !new_text.ends_with('\n') {
+                new_text.push('\n');
+            }
+            for env in &events {
+                new_text.push_str(&env.to_line()?);
+                new_text.push('\n');
+            }
+            write_atomic(&path, &new_text)?;
+            // The events are saved. A board error is not a command error. `doctor` reports it.
+            let _ = write_atomic(&self.dir.join(BOARD_FILE), &board::render(&ledger));
         }
-        let mut buf = String::new();
-        if !text.is_empty() && !text.ends_with('\n') {
-            buf.push('\n');
-        }
-        for env in &events {
-            buf.push_str(&env.to_line()?);
-            buf.push('\n');
-        }
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .map_err(|e| MeshError::io(&path, e))?;
-        file.write_all(buf.as_bytes())
-            .and_then(|()| file.sync_data())
-            .map_err(|e| MeshError::io(&path, e))?;
-        write_atomic(&self.dir.join(BOARD_FILE), &board::render(&ledger))?;
-        Ok(events)
+        failure.map_or(Ok((events, ledger)), Err)
     }
 
     /// Rewrites the board from the ledger.
@@ -293,9 +362,10 @@ impl Store {
     /// # Errors
     /// [`MeshError::Io`] if a file cannot be read.
     pub fn board_is_current(&self) -> Result<bool> {
-        let ledger = self.load()?.ledger;
+        let _guard = self.lock(false).ok();
+        let ledger = replay(&read_or_empty(&self.ledger_path())?).ledger;
         let board = read_or_empty(&self.dir.join(BOARD_FILE))?;
-        Ok(board == board::render(&ledger))
+        Ok(board.replace("\r\n", "\n") == board::render(&ledger))
     }
 }
 
@@ -347,7 +417,7 @@ mod tests {
         )
         .unwrap_or_else(|e| panic!("{e}"));
         let second = Store::init(&dir).unwrap_or_else(|e| panic!("{e}"));
-        assert!(second.created.is_empty());
+        assert_eq!(second.created.len(), 0);
         let text = std::fs::read_to_string(dir.join(REGISTRY_FILE)).unwrap_or_default();
         assert!(text.contains("max_active = 2"));
     }
@@ -382,7 +452,7 @@ mod tests {
         assert!(text.ends_with('\n'));
         assert!(store.board_is_current().unwrap_or(false));
         let r = store.load().unwrap_or_else(|e| panic!("{e}"));
-        assert!(r.issues.is_empty());
+        assert_eq!(r.issues.len(), 0);
         assert_eq!(r.envelopes.len(), 2);
     }
 
@@ -461,7 +531,7 @@ mod tests {
         let (_tmp, store) = mesh();
         std::fs::remove_file(store.dir().join(LEDGER_FILE)).unwrap_or_else(|e| panic!("{e}"));
         let r = store.load().unwrap_or_else(|e| panic!("{e}"));
-        assert!(r.ledger.is_empty());
+        assert_eq!(r.ledger.len(), 0);
         store.execute(1, add("a")).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(store.load().map_or(0, |r| r.ledger.len()), 1);
     }

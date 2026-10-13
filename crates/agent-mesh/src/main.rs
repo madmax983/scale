@@ -1,6 +1,6 @@
 //! The `mesh` command-line tool. See README.md.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,16 +15,25 @@ use agent_mesh::plan;
 use agent_mesh::scope;
 use agent_mesh::store::{Store, MESH_DIR};
 use agent_mesh::time::fmt_utc;
+use agent_mesh::MeshError;
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::json;
+
+/// Prints one line to stdout. A closed pipe (for example `mesh status | head`) is not an error.
+macro_rules! say {
+    ($($arg:tt)*) => {{
+        let _ = writeln!(std::io::stdout(), $($arg)*);
+    }};
+}
 
 /// Agent mesh: task ledger, leases, and scope checks for AI agents.
 #[derive(Parser)]
 #[command(name = "mesh", version)]
 struct Cli {
-    /// The mesh folder. Default: `.mesh` in this folder or a parent folder.
-    #[arg(long, global = true, env = "MESH_DIR")]
+    /// The mesh folder. Default: `MESH_DIR`, else `.mesh` in this folder or a parent folder
+    /// up to the repository root. `init` uses `./.mesh`.
+    #[arg(long, global = true)]
     dir: Option<PathBuf>,
     /// Print JSON.
     #[arg(long, global = true)]
@@ -37,7 +46,7 @@ struct Cli {
 enum Cmd {
     /// Make `.mesh/` with the default registry. Changes nothing if it exists.
     Init,
-    /// Claude Code `PreToolUse` hook. Reads JSON on stdin. Exit 2 blocks the tool.
+    /// Claude Code `PreToolUse` hook. Reads JSON on stdin. Prints a JSON decision. Exit 2 blocks.
     Hook,
     #[command(flatten)]
     Mesh(MeshCmd),
@@ -100,7 +109,7 @@ enum MeshCmd {
         /// A label for the worker instance.
         #[arg(long)]
         worker: Option<String>,
-        /// Lease time in seconds.
+        /// Lease time in seconds. Use the expected task time plus 50%.
         #[arg(long, default_value_t = DEFAULT_TTL)]
         ttl: u64,
     },
@@ -171,6 +180,14 @@ enum MeshCmd {
     },
     /// Expire overdue leases.
     Reap,
+    /// Mark a rejected or broken ledger line as checked. `doctor` prints the fingerprint.
+    Ack {
+        /// The line fingerprint (16 hex digits).
+        fingerprint: String,
+        /// What you did about the line.
+        #[arg(long)]
+        note: String,
+    },
     /// Exit 0 only if the token holds the live lease. Changes nothing.
     Fence {
         /// The task.
@@ -186,7 +203,7 @@ enum MeshCmd {
         /// The task.
         task: TaskId,
     },
-    /// Show events.
+    /// Show events. `!` marks an event that the ledger rejected.
     Log {
         /// Only events of this task.
         #[arg(long)]
@@ -209,9 +226,12 @@ enum MeshCmd {
         /// Also check the paths of this task.
         #[arg(long)]
         task: Option<TaskId>,
-        /// Compare with this git ref when no files are given.
-        #[arg(long, default_value = "HEAD", allow_hyphen_values = true)]
-        base: String,
+        /// The commit that the work started from. Needed when you give no files.
+        #[arg(long, allow_hyphen_values = true)]
+        base: Option<String>,
+        /// The git work tree to check. Default: the work tree of this folder.
+        #[arg(long)]
+        repo: Option<PathBuf>,
         /// Files to check. Default: git changes since `--base`.
         files: Vec<String>,
     },
@@ -224,6 +244,10 @@ enum MeshCmd {
 }
 
 fn main() -> ExitCode {
+    // The hook must never fail on arguments or environment: exit 2 would block the tool.
+    if std::env::args().nth(1).as_deref() == Some("hook") {
+        return hook_cmd();
+    }
     let cli = Cli::parse();
     match run(cli) {
         Ok(code) => code,
@@ -244,6 +268,15 @@ fn now() -> Result<u64> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
 }
 
+/// `--dir`, else a non-empty `MESH_DIR`.
+fn mesh_dir(flag: Option<PathBuf>) -> Option<PathBuf> {
+    flag.or_else(|| {
+        std::env::var_os("MESH_DIR")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    })
+}
+
 fn open(dir: Option<&Path>) -> Result<Store> {
     Ok(match dir {
         Some(d) => Store::open(d)?,
@@ -253,11 +286,11 @@ fn open(dir: Option<&Path>) -> Result<Store> {
 
 fn run(cli: Cli) -> Result<ExitCode> {
     let json = cli.json;
-    let dir = cli.dir.as_deref();
+    let dir = mesh_dir(cli.dir);
     match cli.cmd {
-        Cmd::Init => init(dir, json),
+        Cmd::Init => init(dir.as_deref(), json),
         Cmd::Hook => Ok(hook_cmd()),
-        Cmd::Mesh(cmd) => dispatch(&open(dir)?, cmd, json),
+        Cmd::Mesh(cmd) => dispatch(&open(dir.as_deref())?, cmd, json),
     }
 }
 
@@ -328,6 +361,7 @@ fn dispatch(store: &Store, cmd: MeshCmd, json: bool) -> Result<ExitCode> {
         MeshCmd::Retry { task } => write(Command::Retry { task }),
         MeshCmd::Cancel { task, reason } => write(Command::Cancel { task, reason }),
         MeshCmd::Reap => write(Command::Reap),
+        MeshCmd::Ack { fingerprint, note } => write(Command::Ack { fingerprint, note }),
         MeshCmd::Fence { task, token } => fence(store, &task, token, json),
         MeshCmd::Status => status(store, json),
         MeshCmd::Show { task } => show(store, &task, json),
@@ -337,14 +371,23 @@ fn dispatch(store: &Store, cmd: MeshCmd, json: bool) -> Result<ExitCode> {
             agent,
             task,
             base,
+            repo,
             files,
-        } => check_scope(store, &agent, task.as_ref(), &base, files, json),
+        } => check_scope(
+            store,
+            &agent,
+            task.as_ref(),
+            base.as_deref(),
+            repo.as_deref(),
+            files,
+            json,
+        ),
         MeshCmd::Doctor { strict } => doctor_cmd(store, strict, json),
     }
 }
 
 fn print_json(v: &impl serde::Serialize) -> Result<()> {
-    println!("{}", serde_json::to_string_pretty(v)?);
+    say!("{}", serde_json::to_string_pretty(v)?);
     Ok(())
 }
 
@@ -357,28 +400,30 @@ fn init(dir: Option<&Path>, json: bool) -> Result<ExitCode> {
     if json {
         print_json(&json!({ "dir": report.dir, "created": report.created }))?;
     } else if report.created.is_empty() {
-        println!("mesh exists at {}; nothing to do", report.dir.display());
+        say!("mesh exists at {}; nothing to do", report.dir.display());
     } else {
-        println!("created:");
+        say!("created:");
         for p in &report.created {
-            println!("  {}", p.display());
+            say!("  {}", p.display());
         }
     }
     Ok(ExitCode::SUCCESS)
 }
 
+/// Reads hook JSON on stdin. Bad input cannot name an agent, so the tool runs.
 fn hook_cmd() -> ExitCode {
     let mut text = String::new();
-    // Bad input cannot name an agent, so the hook lets the tool run.
     if std::io::stdin().read_to_string(&mut text).is_err() {
         return ExitCode::SUCCESS;
     }
     let Ok(input) = serde_json::from_str::<HookInput>(&text) else {
         return ExitCode::SUCCESS;
     };
-    match hook::decide(&input) {
+    let decision = hook::decide(&input);
+    match &decision {
         Decision::Allow => ExitCode::SUCCESS,
         Decision::Deny(why) => {
+            say!("{}", decision.to_hook_json());
             eprintln!("{why}");
             ExitCode::from(2)
         }
@@ -388,12 +433,14 @@ fn hook_cmd() -> ExitCode {
 fn write(store: &Store, cmd: Command, json: bool) -> Result<ExitCode> {
     let is_plan = matches!(cmd, Command::Plan(_));
     let is_reap = matches!(cmd, Command::Reap);
-    let events = store.execute(now()?, cmd)?;
+    let (events, ledger) = store.execute_report(now()?, cmd)?;
+    if !events.is_empty() && !store.board_is_current().unwrap_or(false) {
+        eprintln!("warning: the events are saved, but BOARD.md is stale; run `mesh board`");
+    }
     if json {
         print_json(&events)?;
         return Ok(ExitCode::SUCCESS);
     }
-    let ledger = store.load()?.ledger;
     if is_plan {
         let added: Vec<&str> = events
             .iter()
@@ -402,14 +449,14 @@ fn write(store: &Store, cmd: Command, json: bool) -> Result<ExitCode> {
                 _ => None,
             })
             .collect();
-        println!("added {} tasks: {}", added.len(), added.join(", "));
+        say!("added {} tasks: {}", added.len(), added.join(", "));
     } else {
         for env in &events {
-            println!("{}", describe(&ledger, env));
+            say!("{}", describe(&ledger, env));
         }
     }
     if is_reap && events.is_empty() {
-        println!("no overdue leases");
+        say!("no overdue leases");
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -444,14 +491,9 @@ fn describe(ledger: &Ledger, env: &Envelope) -> String {
             format!("{task} is submitted again ({})", budget(ledger, task))
         }
         Event::Canceled { task, .. } => format!("canceled {task}"),
+        Event::Acknowledged { fingerprint, .. } => format!("acknowledged line {fingerprint}"),
         Event::LeaseExpired { task, token } => {
-            let state = ledger
-                .task(task)
-                .map_or_else(String::new, |t| t.life.state().to_string());
-            format!(
-                "note: lease of {task} expired (token {token}); {}; state {state}",
-                budget(ledger, task)
-            )
+            format!("note: lease of {task} expired (token {token})")
         }
     }
 }
@@ -464,7 +506,7 @@ fn agents(store: &Store, json: bool) -> Result<ExitCode> {
     }
     for c in registry.cards() {
         let skills: Vec<&str> = c.skills.iter().map(Skill::as_str).collect();
-        println!(
+        say!(
             "{:<12} skills: {:<16} max_active: {}  writes: {}",
             c.id,
             skills.join(", "),
@@ -492,7 +534,7 @@ fn plan_cmd(store: &Store, file: &Path, dry_run: bool, json: bool) -> Result<Exi
     for s in &ordered {
         s.validate()?;
         if !registry.serves(&s.skill) {
-            return Err(agent_mesh::MeshError::UnservedSkill {
+            return Err(MeshError::UnservedSkill {
                 task: s.id.clone(),
                 skill: s.skill.clone(),
             }
@@ -503,7 +545,7 @@ fn plan_cmd(store: &Store, file: &Path, dry_run: bool, json: bool) -> Result<Exi
     if json {
         print_json(&ids)?;
     } else {
-        println!("plan ok: {} tasks in order: {}", ids.len(), ids.join(", "));
+        say!("plan ok: {} tasks in order: {}", ids.len(), ids.join(", "));
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -517,6 +559,9 @@ fn line(task: &Task) -> String {
 
 fn ready(store: &Store, agent: Option<&AgentId>, json: bool) -> Result<ExitCode> {
     let registry = store.registry()?;
+    if let Some(a) = agent.filter(|a| registry.get(a).is_none()) {
+        return Err(MeshError::UnknownAgent(a.clone()).into());
+    }
     let ledger = store.load()?.ledger;
     let tasks = ledger.ready_for(&registry, agent);
     if json {
@@ -526,10 +571,10 @@ fn ready(store: &Store, agent: Option<&AgentId>, json: bool) -> Result<ExitCode>
             .collect();
         print_json(&rows)?;
     } else if tasks.is_empty() {
-        println!("no ready tasks");
+        say!("no ready tasks");
     } else {
         for t in tasks {
-            println!("{}", line(t));
+            say!("{}", line(t));
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -541,7 +586,7 @@ fn fence(store: &Store, task: &TaskId, token: Token, json: bool) -> Result<ExitC
     if json {
         print_json(lease)?;
     } else {
-        println!(
+        say!(
             "token {token} holds {task} until {}",
             fmt_utc(lease.expires_at)
         );
@@ -579,7 +624,7 @@ fn status(store: &Store, json: bool) -> Result<ExitCode> {
         .iter()
         .map(|(g, n)| format!("{} {n}", g.title()))
         .collect();
-    println!("{} tasks: {}", ledger.len(), summary.join(", "));
+    say!("{} tasks: {}", ledger.len(), summary.join(", "));
     for group in Group::ALL {
         let tasks: Vec<&Task> = ledger
             .tasks()
@@ -588,11 +633,11 @@ fn status(store: &Store, json: bool) -> Result<ExitCode> {
         if tasks.is_empty() {
             continue;
         }
-        println!("{}:", group.title());
+        say!("{}:", group.title());
         for t in tasks {
             let overdue = t.life.lease().is_some_and(|l| l.expires_at <= now);
             let info = board::info(&ledger, t);
-            println!(
+            say!(
                 "{}{}{}",
                 line(t),
                 if info.is_empty() {
@@ -615,7 +660,7 @@ fn show(store: &Store, id: &TaskId, json: bool) -> Result<ExitCode> {
     let ledger = store.load()?.ledger;
     let task = ledger
         .task(id)
-        .ok_or_else(|| agent_mesh::MeshError::UnknownTask(id.clone()))?;
+        .ok_or_else(|| MeshError::UnknownTask(id.clone()))?;
     if json {
         print_json(&json!({
             "task": task,
@@ -632,38 +677,38 @@ fn show(store: &Store, id: &TaskId, json: bool) -> Result<ExitCode> {
         }
     };
     let deps: Vec<String> = task.spec.deps.iter().map(ToString::to_string).collect();
-    println!("task {}: {}", task.spec.id, task.spec.title);
-    println!(
+    say!("task {}: {}", task.spec.id, task.spec.title);
+    say!(
         "skill: {}  state: {}  group: {}",
         task.spec.skill,
         task.life.state(),
         board::group_of(&ledger, task).title()
     );
-    println!("deps: {}  paths: {}", list(&deps), list(&task.spec.paths));
-    println!(
+    say!("deps: {}  paths: {}", list(&deps), list(&task.spec.paths));
+    say!(
         "attempts: {}  failures: {}/{}",
         task.life.attempts(),
         task.life.failures(),
         task.life.max_failures()
     );
     match task.life.lease() {
-        Some(l) => println!(
+        Some(l) => say!(
             "lease: {} ({}), token {}, until {}",
             l.agent,
             l.worker,
             l.token,
             fmt_utc(l.expires_at)
         ),
-        None => println!("lease: -"),
+        None => say!("lease: -"),
     }
     if !task.spec.detail.is_empty() {
-        println!("detail:\n{}", task.spec.detail);
+        say!("detail:\n{}", task.spec.detail);
     }
     if !task.notes.is_empty() {
-        println!("notes:");
+        say!("notes:");
         for n in &task.notes {
             let kind = serde_json::to_value(n.kind)?;
-            println!(
+            say!(
                 "  #{} {} {} {}: {}",
                 n.seq,
                 fmt_utc(n.ts),
@@ -676,27 +721,42 @@ fn show(store: &Store, id: &TaskId, json: bool) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// One `log` row. `rejected` marks an event that the ledger did not apply.
+#[derive(serde::Serialize)]
+struct LogRow<'a> {
+    #[serde(flatten)]
+    env: &'a Envelope,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    rejected: bool,
+}
+
 fn log(store: &Store, task: Option<&TaskId>, limit: Option<usize>, json: bool) -> Result<ExitCode> {
     let replay = store.load()?;
-    let events: Vec<&Envelope> = replay
+    let rows: Vec<LogRow<'_>> = replay
         .envelopes
         .iter()
-        .filter(|e| task.is_none_or(|t| e.event.task() == t))
+        .enumerate()
+        .filter(|(_, e)| task.is_none_or(|t| e.event.task() == Some(t)))
+        .map(|(i, env)| LogRow {
+            env,
+            rejected: replay.rejected.contains(&i),
+        })
         .collect();
-    let skip = limit.map_or(0, |n| events.len().saturating_sub(n));
-    let events = &events[skip..];
+    let skip = limit.map_or(0, |n| rows.len().saturating_sub(n));
+    let rows = &rows[skip..];
     if json {
-        print_json(&events)?;
+        print_json(&rows)?;
         return Ok(ExitCode::SUCCESS);
     }
-    for e in events {
-        println!(
-            "#{} {} {:<12} {:<15} {}",
-            e.seq,
-            fmt_utc(e.ts),
-            e.actor,
-            e.event.name(),
-            e.event.task()
+    for r in rows {
+        say!(
+            "{}#{} {} {:<12} {:<15} {}",
+            if r.rejected { "!" } else { "" },
+            r.env.seq,
+            fmt_utc(r.env.ts),
+            r.env.actor,
+            r.env.event.name(),
+            r.env.event.task().map_or("-", TaskId::as_str)
         );
     }
     Ok(ExitCode::SUCCESS)
@@ -705,11 +765,11 @@ fn log(store: &Store, task: Option<&TaskId>, limit: Option<usize>, json: bool) -
 fn board_cmd(store: &Store, check: bool) -> Result<ExitCode> {
     if !check {
         store.write_board()?;
-        println!("wrote {}", store.dir().join("BOARD.md").display());
+        say!("wrote {}", store.dir().join("BOARD.md").display());
         return Ok(ExitCode::SUCCESS);
     }
     if store.board_is_current()? {
-        println!("board is current");
+        say!("board is current");
         Ok(ExitCode::SUCCESS)
     } else {
         eprintln!("error: the board is stale; run `mesh board`");
@@ -721,7 +781,8 @@ fn check_scope(
     store: &Store,
     agent: &AgentId,
     task: Option<&TaskId>,
-    base: &str,
+    base: Option<&str>,
+    repo: Option<&Path>,
     files: Vec<String>,
     json: bool,
 ) -> Result<ExitCode> {
@@ -731,28 +792,41 @@ fn check_scope(
             let ledger = store.load()?.ledger;
             let t = ledger
                 .task(id)
-                .ok_or_else(|| agent_mesh::MeshError::UnknownTask(id.clone()))?;
+                .ok_or_else(|| MeshError::UnknownTask(id.clone()))?;
             t.spec.paths.clone()
         }
         None => Vec::new(),
     };
-    // A worker in a git worktree checks its own changes, not the main checkout.
-    let cwd = std::env::current_dir()?;
-    let root = scope::git_root(&cwd).unwrap_or_else(|_| store.root().to_path_buf());
-    let files = if files.is_empty() {
-        scope::git_changed(&root, base)?
-    } else {
-        files
+    // A worker in a git worktree checks its own work tree, not the main checkout.
+    let start = match repo {
+        Some(r) => r.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let root = scope::git_root(&start).unwrap_or_else(|_| store.root().to_path_buf());
+    let files = match (files.is_empty(), base) {
+        (false, _) => files,
+        (true, Some(base)) => scope::git_changed(&root, base)?,
+        (true, None) => {
+            return Err(anyhow!(
+                "give --base <commit the work started from>, or the files to check"
+            ))
+        }
     };
     let violations = scope::check(&registry, agent, &paths, &files, &root)?;
     if json {
         print_json(&json!({ "agent": agent, "files": files.len(), "violations": violations }))?;
     } else if violations.is_empty() {
-        println!("ok: {} files in scope for {agent}", files.len());
+        say!(
+            "ok: {} in scope for {agent}",
+            plural(files.len(), "file", "files")
+        );
     } else {
-        println!("{} files outside the scope of {agent}:", violations.len());
+        say!(
+            "{} outside the scope of {agent}:",
+            plural(violations.len(), "file", "files")
+        );
         for v in &violations {
-            println!("  {}: {}", v.path, v.reason);
+            say!("  {}: {}", v.path, v.reason);
         }
     }
     Ok(if violations.is_empty() {
@@ -762,18 +836,22 @@ fn check_scope(
     })
 }
 
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
 fn doctor_cmd(store: &Store, strict: bool, json: bool) -> Result<ExitCode> {
     let report = doctor::run(store, now()?);
     if json {
         print_json(&report)?;
     } else {
         for f in &report.findings {
-            println!("{f}");
+            say!("{f}");
         }
-        println!(
-            "doctor: {} errors, {} warnings",
-            report.errors(),
-            report.warnings()
+        say!(
+            "doctor: {}, {}",
+            plural(report.errors(), "error", "errors"),
+            plural(report.warnings(), "warning", "warnings")
         );
     }
     Ok(if report.passes(strict) {

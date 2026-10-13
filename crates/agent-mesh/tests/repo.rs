@@ -77,6 +77,16 @@ fn settings_wire_the_pre_tool_use_hook() {
         wired,
         "PreToolUse hook for Edit|Write must call scripts/mesh-hook.sh"
     );
+    let command = entries
+        .iter()
+        .flat_map(|e| e["hooks"].as_array().cloned().unwrap_or_default())
+        .filter_map(|h| h["command"].as_str().map(str::to_string))
+        .find(|c| c.contains("mesh-hook"))
+        .unwrap_or_default();
+    assert!(
+        command.trim_end().ends_with("; exit 0"),
+        "a broken script must not block edits: {command}"
+    );
 }
 
 #[test]
@@ -104,7 +114,79 @@ fn coordinator_skill_and_scripts_exist() {
 
 #[test]
 fn ledger_merges_by_union() {
-    assert!(read(".gitattributes")
+    let attrs = read(".gitattributes");
+    assert!(attrs
         .lines()
-        .any(|l| l.trim() == ".mesh/ledger.jsonl merge=union"));
+        .any(|l| l.trim() == agent_mesh::doctor::UNION_RULE));
+}
+
+#[test]
+fn scripts_and_mesh_files_keep_lf_line_endings() {
+    let attrs = read(".gitattributes");
+    for rule in [
+        "scripts/mesh text eol=lf",
+        "*.sh text eol=lf",
+        ".mesh/ledger.jsonl text eol=lf merge=union",
+        ".mesh/BOARD.md text eol=lf merge=union",
+    ] {
+        assert!(attrs.lines().any(|l| l.trim() == rule), "missing: {rule}");
+    }
+}
+
+#[test]
+fn scripts_pin_the_target_dir() {
+    for script in ["scripts/mesh", "scripts/mesh-hook.sh", "scripts/mesh.ps1"] {
+        assert!(read(script).contains("CARGO_TARGET_DIR"), "{script}");
+    }
+}
+
+/// The settings command blocks through JSON, and a broken script never blocks.
+#[cfg(unix)]
+#[test]
+fn settings_hook_command_denies_with_json_and_never_blocks_by_accident() {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let v: serde_json::Value =
+        serde_json::from_str(&read(".claude/settings.json")).unwrap_or_else(|e| panic!("{e}"));
+    let command = v["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+    Store::init(&tmp.path().join(".mesh")).unwrap_or_else(|e| panic!("{e}"));
+    let input = serde_json::json!({
+        "tool_name": "Write", "agent_type": "builder", "cwd": tmp.path(),
+        "tool_input": { "file_path": "specs/x.md" }
+    });
+    let run = |project: &Path| {
+        let mut child = Command::new("bash")
+            .arg("-c")
+            .arg(&command)
+            .env("CLAUDE_PROJECT_DIR", project)
+            .env("MESH_BIN", env!("CARGO_BIN_EXE_mesh"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap_or_else(|e| panic!("{e}"));
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(input.to_string().as_bytes())
+                .unwrap_or_else(|e| panic!("{e}"));
+        }
+        child.wait_with_output().unwrap_or_else(|e| panic!("{e}"))
+    };
+    let out = run(&repo_root());
+    assert_eq!(out.status.code(), Some(0));
+    let decision: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    assert_eq!(decision["hookSpecificOutput"]["permissionDecision"], "deny");
+
+    // A CRLF copy of the script (a Windows checkout without eol=lf) must not block.
+    let broken = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+    std::fs::create_dir_all(broken.path().join("scripts")).unwrap_or_else(|e| panic!("{e}"));
+    let crlf = read("scripts/mesh-hook.sh").replace('\n', "\r\n");
+    std::fs::write(broken.path().join("scripts/mesh-hook.sh"), crlf)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(run(broken.path()).status.code(), Some(0));
 }
