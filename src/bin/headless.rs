@@ -466,6 +466,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "organs" => print_organ_ledger(world),
         "heritage" => print_heritage(world),
         "curio" => print_curio_ledger(world),
+        "rumors" => print_rumors(world),
         "provenance" => print_provenance(world),
         "identity" => print_identity(world),
         "artifacts" => print_artifacts(world),
@@ -2822,9 +2823,13 @@ fn print_stats(world: &mut World) {
             .get_resource::<ColonyIdentity>()
             .map_or(0, |i| i.traits.len())
     };
+    let rumors = {
+        use scale::layer1::social::rumor::known_rumor_count;
+        known_rumor_count(world)
+    };
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={}",
         tick,
         pops,
         avg_health,
@@ -2886,6 +2891,7 @@ fn print_stats(world: &mut World) {
         mentored,
         memories,
         identity,
+        rumors,
     );
 }
 
@@ -5839,6 +5845,11 @@ fn print_help() {
                     "Curio trade ledger: exports, credits, cultural loss (Spec 334)",
                 ),
                 (
+                    "rumors",
+                    "",
+                    "Rumor web: circulation, false-rumor believers, debunks, panics (Spec 343)",
+                ),
+                (
                     "provenance",
                     "",
                     "Material provenance: stamped buildings + inherited properties (Spec 336)",
@@ -7159,6 +7170,29 @@ fn print_curio_ledger(world: &mut World) {
             exported, credits, loss,
         ),
         Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Rumor web report (headless `rumors` command, Spec 343).
+fn print_rumors(world: &mut World) {
+    use scale::layer1::social::rumor::{
+        false_rumor_believer_count, known_rumor_count, RumorWebLedger,
+    };
+
+    let total = known_rumor_count(world);
+    let believers = false_rumor_believer_count(world);
+    let (exchanges, debunked, panics) = world
+        .get_resource::<RumorWebLedger>()
+        .map(|l| (l.total_exchanges, l.false_rumors_debunked, l.panics))
+        .unwrap_or_default();
+    print_dashboard_panel(
+        "RUMOR WEB",
+        &format!(
+            "Rumors in circulation: {}\nFalse-rumor believers: {}\nAdjacency exchanges: {}\nFalse rumors debunked by skeptics: {}\nPanic spikes: {}\n\nWord travels at walking speed here. Stressed pops invent\nscare stories; gossips carry them far; skeptics kill them.",
+            total, believers, exchanges, debunked, panics,
+        ),
+        Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
 }

@@ -172,6 +172,21 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Observation),
     );
 
+    // Spec 343: The Rumor Web — TTL decay, adjacency spread, panic reaction.
+    // Separate block: the rumor block above is at the tuple-arity limit.
+    schedule.add_systems(
+        (
+            crate::layer1::rumor::decay_rumors_system,
+            crate::layer1::rumor::spread_rumors_system
+                .after(crate::layer1::rumor::generate_rumor_system)
+                .after(crate::layer1::rumor::exchange_rumors_system),
+            crate::layer1::rumor::react_to_rumors_system
+                .after(crate::layer1::rumor::spread_rumors_system)
+                .before(crate::layer1::stress::check_stress_breakdown_system),
+        )
+            .in_set(Layer1SystemSet::Observation),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::unrest::identify_scapegoat_system

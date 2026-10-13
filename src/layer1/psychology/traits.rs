@@ -146,6 +146,10 @@ pub enum Trait {
     Courage,
     /// Arrived on the Ship of Fools (Spec 1375): demands luxury, produces nothing.
     Entitled,
+    /// Cannot keep a secret: carries word twice as far (Spec 343).
+    Gossip,
+    /// Picks apart tall tales: refuses to believe false rumors (Spec 343).
+    Skeptic,
 }
 
 impl Trait {
@@ -227,6 +231,8 @@ impl Trait {
             Self::Hacker => "Hacker",
             Self::Courage => "Courageous",
             Self::Entitled => "Entitled",
+            Self::Gossip => "Gossip",
+            Self::Skeptic => "Skeptic",
         }
     }
 }

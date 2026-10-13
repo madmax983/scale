@@ -309,6 +309,8 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(crate::layer1::economy::curio_trade::CurioTradeLedger::default());
     world.init_resource::<Events<crate::layer1::economy::curio_trade::TradeCompletedEvent>>();
     world.init_resource::<Events<crate::layer1::economy::curio_trade::CulturalLossEvent>>();
+    // Spec 343 The Rumor Web: adjacency-spread ledger.
+    world.init_resource::<crate::layer1::social::rumor::RumorWebLedger>();
     // Spec 341 Pop Memory: witness events, episode state, colony identity.
     world.init_resource::<Events<crate::layer1::memory::WitnessEvent>>();
     world.init_resource::<crate::layer1::memory::PopMemoryState>();
