@@ -81,6 +81,9 @@ pub const fn cell_to_mouse(cell: (u16, u16)) -> GameMouseEvent {
 /// game handling in every context (see the module report): the four
 /// arrows, Enter and Space (confirm/pause), Esc (back/cancel), Tab
 /// (switch row/view/building), and Backspace (cancel designation / edit).
+/// The command palette (Ctrl+K) joined later at the user's request: on a
+/// phone there is no keyboard for the chord, and the palette is the
+/// shell's front door to every pane and command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TouchButton {
     /// Arrow up.
@@ -101,11 +104,62 @@ pub enum TouchButton {
     Space,
     /// Backspace / cancel designation.
     Backspace,
+    /// Command palette (Ctrl+K).
+    Palette,
+}
+
+/// The DOM `KeyboardEvent` values a cluster button dispatches in the
+/// web shell: the `key` / `code` pair plus the modifier flags the
+/// synthetic event must carry (the `KeyboardEventInit` `ctrlKey` /
+/// `altKey` / `shiftKey` fields).
+///
+/// Most buttons are plain key presses. The palette button is the one
+/// exception: it must reproduce Ctrl+K exactly, because the DOM->game
+/// translation preserves modifiers (ratzilla `KeyEvent.ctrl` ->
+/// `GameKeyModifiers.ctrl`) and the palette opens on the chord.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DomKeyEventSpec {
+    /// `KeyboardEvent.key` — what a real keyboard reports for the key.
+    pub key: &'static str,
+    /// `KeyboardEvent.code` — the physical-key identifier.
+    pub code: &'static str,
+    /// Whether the Control modifier is held (`ctrlKey`).
+    pub ctrl: bool,
+    /// Whether the Alt modifier is held (`altKey`).
+    pub alt: bool,
+    /// Whether the Shift modifier is held (`shiftKey`).
+    pub shift: bool,
+}
+
+impl DomKeyEventSpec {
+    /// A modifier-free key press.
+    #[must_use]
+    pub const fn plain(key: &'static str, code: &'static str) -> Self {
+        Self {
+            key,
+            code,
+            ctrl: false,
+            alt: false,
+            shift: false,
+        }
+    }
+
+    /// A Ctrl+key chord with no other modifiers.
+    #[must_use]
+    pub const fn with_ctrl(key: &'static str, code: &'static str) -> Self {
+        Self {
+            key,
+            code,
+            ctrl: true,
+            alt: false,
+            shift: false,
+        }
+    }
 }
 
 impl TouchButton {
     /// Every cluster button, in on-screen layout order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Up,
         Self::Down,
         Self::Left,
@@ -115,6 +169,7 @@ impl TouchButton {
         Self::Tab,
         Self::Space,
         Self::Backspace,
+        Self::Palette,
     ];
 
     /// The game's own key event for this button — literally the value a
@@ -132,28 +187,42 @@ impl TouchButton {
             Self::Tab => GameKeyEvent::new(GameKeyCode::Tab),
             Self::Space => GameKeyEvent::new(GameKeyCode::Char(' ')),
             Self::Backspace => GameKeyEvent::new(GameKeyCode::Backspace),
+            // The palette chord: Ctrl+K. The modifiers are load-bearing —
+            // a bare Char('k') is ordinary gameplay input, and bare
+            // Char('p') would be adventurer possess, never the palette.
+            Self::Palette => GameKeyEvent::new(GameKeyCode::Char('k')).with_ctrl(),
         }
     }
 
-    /// The DOM `KeyboardEvent.key` / `.code` pair the web shell uses when
-    /// it dispatches a synthetic `keydown` on the document — the same
-    /// channel (`on_document_key_event` in `wasm_app.rs`) that physical
-    /// keys travel. These strings are what a real keyboard reports for
-    /// the same keys, so the ratzilla conversion downstream cannot tell
-    /// a cluster tap from a key press.
+    /// The DOM event spec for this button — the canonical table the
+    /// web shell mirrors when it dispatches a synthetic `keydown` on
+    /// the document (the same channel, `on_document_key_event` in
+    /// `wasm_app.rs`, that physical keys travel). Key/code are the
+    /// strings a real keyboard reports for the same press, so the
+    /// ratzilla conversion downstream cannot tell a cluster tap from a
+    /// key press; modifiers ride along for chords like Ctrl+K.
+    #[must_use]
+    pub const fn dom_event_spec(self) -> DomKeyEventSpec {
+        match self {
+            Self::Up => DomKeyEventSpec::plain("ArrowUp", "ArrowUp"),
+            Self::Down => DomKeyEventSpec::plain("ArrowDown", "ArrowDown"),
+            Self::Left => DomKeyEventSpec::plain("ArrowLeft", "ArrowLeft"),
+            Self::Right => DomKeyEventSpec::plain("ArrowRight", "ArrowRight"),
+            Self::Enter => DomKeyEventSpec::plain("Enter", "Enter"),
+            Self::Esc => DomKeyEventSpec::plain("Escape", "Escape"),
+            Self::Tab => DomKeyEventSpec::plain("Tab", "Tab"),
+            Self::Space => DomKeyEventSpec::plain(" ", "Space"),
+            Self::Backspace => DomKeyEventSpec::plain("Backspace", "Backspace"),
+            Self::Palette => DomKeyEventSpec::with_ctrl("k", "KeyK"),
+        }
+    }
+
+    /// The DOM `KeyboardEvent.key` / `.code` pair for this button —
+    /// the modifier-free view of [`TouchButton::dom_event_spec`].
     #[must_use]
     pub const fn dom_key(self) -> (&'static str, &'static str) {
-        match self {
-            Self::Up => ("ArrowUp", "ArrowUp"),
-            Self::Down => ("ArrowDown", "ArrowDown"),
-            Self::Left => ("ArrowLeft", "ArrowLeft"),
-            Self::Right => ("ArrowRight", "ArrowRight"),
-            Self::Enter => ("Enter", "Enter"),
-            Self::Esc => ("Escape", "Escape"),
-            Self::Tab => ("Tab", "Tab"),
-            Self::Space => (" ", "Space"),
-            Self::Backspace => ("Backspace", "Backspace"),
-        }
+        let spec = self.dom_event_spec();
+        (spec.key, spec.code)
     }
 
     /// Short on-screen label (also the button's accessible label).
@@ -169,6 +238,7 @@ impl TouchButton {
             Self::Tab => "Tab",
             Self::Space => "Space",
             Self::Backspace => "Backspace",
+            Self::Palette => "Palette",
         }
     }
 }
@@ -489,20 +559,34 @@ mod tests {
         // representation — GameKeyEvent/GameKeyCode, the exact values
         // the platform adapters produce for physical keys.
         let cases = [
-            (TouchButton::Up, GameKeyCode::Up),
-            (TouchButton::Down, GameKeyCode::Down),
-            (TouchButton::Left, GameKeyCode::Left),
-            (TouchButton::Right, GameKeyCode::Right),
-            (TouchButton::Enter, GameKeyCode::Enter),
-            (TouchButton::Esc, GameKeyCode::Esc),
-            (TouchButton::Tab, GameKeyCode::Tab),
-            (TouchButton::Space, GameKeyCode::Char(' ')),
-            (TouchButton::Backspace, GameKeyCode::Backspace),
+            (TouchButton::Up, GameKeyEvent::new(GameKeyCode::Up)),
+            (TouchButton::Down, GameKeyEvent::new(GameKeyCode::Down)),
+            (TouchButton::Left, GameKeyEvent::new(GameKeyCode::Left)),
+            (TouchButton::Right, GameKeyEvent::new(GameKeyCode::Right)),
+            (TouchButton::Enter, GameKeyEvent::new(GameKeyCode::Enter)),
+            (TouchButton::Esc, GameKeyEvent::new(GameKeyCode::Esc)),
+            (TouchButton::Tab, GameKeyEvent::new(GameKeyCode::Tab)),
+            (
+                TouchButton::Space,
+                GameKeyEvent::new(GameKeyCode::Char(' ')),
+            ),
+            (
+                TouchButton::Backspace,
+                GameKeyEvent::new(GameKeyCode::Backspace),
+            ),
+            // The palette is a Ctrl+K chord — the exact event the
+            // keyboard path produces (see
+            // `ctrl_k_opens_palette_without_toggling_gameplay_state` in
+            // ui::input). A bare 'k' here would possess, not palette.
+            (
+                TouchButton::Palette,
+                GameKeyEvent::new(GameKeyCode::Char('k')).with_ctrl(),
+            ),
         ];
-        for (button, code) in cases {
+        for (button, event) in cases {
             assert_eq!(
                 button.key_event(),
-                GameKeyEvent::new(code),
+                event,
                 "{button:?} must emit the physical key's GameKeyEvent"
             );
         }
@@ -516,6 +600,87 @@ mod tests {
         assert_eq!(TouchButton::Esc.dom_key(), ("Escape", "Escape"));
         assert_eq!(TouchButton::Tab.dom_key(), ("Tab", "Tab"));
         assert_eq!(TouchButton::Space.dom_key(), (" ", "Space"));
+        assert_eq!(TouchButton::Palette.dom_key(), ("k", "KeyK"));
+    }
+
+    #[test]
+    fn test_palette_dom_spec_carries_ctrl() {
+        // The synthetic DOM event for the palette button must carry
+        // ctrlKey: true — the DOM->GameKey translation preserves
+        // modifiers (ratzilla KeyEvent.ctrl -> GameKeyModifiers.ctrl),
+        // and ctrl is what makes route_root_input open the palette.
+        let spec = TouchButton::Palette.dom_event_spec();
+        assert_eq!(spec.key, "k");
+        assert_eq!(spec.code, "KeyK");
+        assert!(spec.ctrl, "palette button must dispatch Ctrl+K");
+        assert!(!spec.alt);
+        assert!(!spec.shift);
+        // No other cluster button carries modifiers.
+        for button in TouchButton::ALL {
+            if button == TouchButton::Palette {
+                continue;
+            }
+            let spec = button.dom_event_spec();
+            assert!(
+                !spec.ctrl && !spec.alt && !spec.shift,
+                "{button:?} must stay modifier-free"
+            );
+        }
+        // The spec never drifts from dom_key(): same key/code pair.
+        for button in TouchButton::ALL {
+            let spec = button.dom_event_spec();
+            assert_eq!((spec.key, spec.code), button.dom_key());
+        }
+    }
+
+    #[test]
+    fn test_palette_button_opens_command_palette() {
+        // End-to-end through the real root router: the palette button's
+        // GameKeyEvent (Char('k') + ctrl) opens the command palette and
+        // leaves gameplay state untouched — the touch mirror of
+        // `ctrl_k_opens_palette_without_toggling_gameplay_state`.
+        use crate::setup::{setup_world_with_config, SetupConfig};
+        use crate::shared::state::GameState;
+        use crate::shared::view_mode::ViewMode;
+        use crate::ui::input::{InputContext, InputContextStack};
+        use crate::ui::shell::{build_default_shell, ShellConfig};
+        use ratatui::{buffer::Buffer, layout::Rect};
+        use std::{cell::RefCell, rc::Rc};
+
+        let world = Rc::new(RefCell::new(setup_world_with_config(SetupConfig {
+            headless: true,
+            ..Default::default()
+        })));
+        {
+            let mut world_ref = world.borrow_mut();
+            world_ref.insert_resource(GameState::Running);
+            let mut stack = InputContextStack::default();
+            stack.push(InputContext::Normal);
+            world_ref.insert_resource(stack);
+            world_ref.insert_resource(ViewMode::Colony);
+            world_ref.insert_resource(crate::layer2::visibility::SystemVisibility::Full);
+        }
+        let config = world.borrow().resource::<ShellConfig>().clone();
+        let mut shell = build_default_shell(Rc::clone(&world), config);
+
+        crate::ui::input::route_root_input(&world, &mut shell, TouchButton::Palette.key_event());
+
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buffer = Buffer::empty(area);
+        shell.render(area, &mut buffer);
+        let mut text = String::new();
+        for cell in buffer.content() {
+            text.push_str(cell.symbol());
+        }
+        assert!(
+            text.contains("Command Palette"),
+            "palette button event must open the command palette"
+        );
+        assert_eq!(
+            *world.borrow().resource::<GameState>(),
+            GameState::Running,
+            "opening the palette must not toggle gameplay state"
+        );
     }
 
     #[test]

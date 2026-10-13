@@ -57,23 +57,27 @@
       // Every button dispatches the identical KeyboardEvent a physical
       // key produces, on the document — the same channel wasm_app's
       // on_document_key_event listens on. The canonical button->key
-      // table lives in Rust (src/ui/mobile.rs, TouchButton::dom_key)
-      // and is unit-tested there; this table mirrors it exactly.
+      // table lives in Rust (src/ui/mobile.rs, TouchButton::dom_event_spec)
+      // and is unit-tested there; this table mirrors it exactly. The
+      // third element of each entry is the Ctrl modifier — only the
+      // command-palette button sets it (Ctrl+K).
       (function () {
         var KEYS = {
-          up:        ["ArrowUp", "ArrowUp"],
-          down:      ["ArrowDown", "ArrowDown"],
-          left:      ["ArrowLeft", "ArrowLeft"],
-          right:     ["ArrowRight", "ArrowRight"],
-          enter:     ["Enter", "Enter"],
-          esc:       ["Escape", "Escape"],
-          tab:       ["Tab", "Tab"],
-          space:     [" ", "Space"],
-          backspace: ["Backspace", "Backspace"]
+          up:        ["ArrowUp", "ArrowUp", false],
+          down:      ["ArrowDown", "ArrowDown", false],
+          left:      ["ArrowLeft", "ArrowLeft", false],
+          right:     ["ArrowRight", "ArrowRight", false],
+          enter:     ["Enter", "Enter", false],
+          esc:       ["Escape", "Escape", false],
+          tab:       ["Tab", "Tab", false],
+          space:     [" ", "Space", false],
+          backspace: ["Backspace", "Backspace", false],
+          palette:   ["k", "KeyK", true]
         };
         function dispatchKey(pair) {
           document.dispatchEvent(new KeyboardEvent("keydown", {
-            key: pair[0], code: pair[1], bubbles: true, cancelable: true
+            key: pair[0], code: pair[1], ctrlKey: pair[2] === true,
+            bubbles: true, cancelable: true
           }));
         }
         function isTouchUi() {
@@ -128,7 +132,8 @@
           var actions = document.createElement("div");
           actions.className = "actions";
           actions.append(btn("enter", "Enter", "⏎ Enter"), btn("esc", "Escape", "Esc"), btn("tab", "Tab", "Tab"),
-                         btn("space", "Space", "Space"), btn("backspace", "Backspace", "⌫"));
+                         btn("space", "Space", "Space"), btn("backspace", "Backspace", "⌫"),
+                         btn("palette", "Command palette", "Palette"));
           var kb = document.createElement("button");
           kb.type = "button"; kb.textContent = "⌨ Text"; kb.setAttribute("aria-label", "Open keyboard");
           kb.addEventListener("pointerdown", function (ev) {
