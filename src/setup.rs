@@ -667,6 +667,9 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     );
     initial_naming_system(&mut world);
     initial_chronicle_event(&mut world);
+    // Field Guide onboarding: seed the new keeper's pointers alongside the
+    // founding entry (once per new colony; saves restore them verbatim).
+    crate::ui::help::seed_field_guide_entries(&mut world);
     add_start_scenario_intro_event(&mut world, scenario.id);
     world.insert_resource(AppliedStartScenario { id: scenario.id });
 

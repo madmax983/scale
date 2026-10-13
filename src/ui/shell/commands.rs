@@ -108,6 +108,12 @@ pub fn build_default_command_registry() -> CommandRegistry {
             action: ShellCommandAction::OpenPane("chronicle"),
         },
         ShellCommand {
+            id: "pane.field_guide",
+            label: "Open Field Guide",
+            domain: ShellCommandDomain::Gameplay,
+            action: ShellCommandAction::OpenPane("field-guide"),
+        },
+        ShellCommand {
             id: "pane.tech",
             label: "Open Tech Tree",
             domain: ShellCommandDomain::Gameplay,
@@ -163,4 +169,20 @@ pub fn build_default_command_registry() -> CommandRegistry {
             action: ShellCommandAction::SetSimulationSpeed(3),
         },
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_registry_contains_open_field_guide() {
+        let registry = build_default_command_registry();
+        let command = registry
+            .get_by_label("Open Field Guide")
+            .expect("field guide command should be registered");
+        assert_eq!(command.id, "pane.field_guide");
+        assert_eq!(command.action, ShellCommandAction::OpenPane("field-guide"));
+        assert_eq!(command.domain, ShellCommandDomain::Gameplay);
+    }
 }

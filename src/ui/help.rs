@@ -1,0 +1,701 @@
+//! Field Guide — onboarding notes for the newly landed keeper.
+//!
+//! The Field Guide is a shell pane (plugin type `field-guide`, palette
+//! command "Open Field Guide") that teaches a new player four things:
+//! what the map glyphs mean, what to do in the first ten minutes, which
+//! keys do what, and that the weird stuff is intentional.
+//!
+//! Content rules (do not break these when editing):
+//! * Every glyph in the legend comes from the map renderer's own
+//!   getters ([`crate::ui::map::get_terrain_char`] and friends), so the
+//!   legend can never drift from what actually renders.
+//! * Every key mentioned here is bound in [`crate::ui::input`] or the
+//!   shell runtime. If a binding does not exist, the guide does not
+//!   invent it — it teaches the command palette instead.
+//! * Numbers (starting stores, season timing) come from setup/balance
+//!   code, not from vibes.
+
+use bevy_ecs::prelude::*;
+use ratatui::{
+    layout::{Constraint, Direction, Layout},
+    prelude::*,
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+};
+
+use crate::layer1::{
+    AnomalyType, BuildingType, Chronicle, DesignationType, EventImportance, FaunaType, FloraType,
+    MaterialType, Needs, ResourceType, TerrainType,
+};
+use crate::ui::map::{
+    get_anomaly_char, get_building_char, get_designation_char, get_fauna_char, get_flora_char,
+    get_pop_display, get_resource_char, get_terrain_char, get_terrain_color,
+};
+
+/// Scroll state for the Field Guide pane.
+///
+/// Lives in the world (like `TechUiState`) so the shell plugin stays a
+/// thin adapter: rendering reads it, key events mutate it.
+#[derive(Resource, Default)]
+pub struct FieldGuideUiState {
+    /// Index of the first guide line shown at the top of the pane.
+    pub scroll: u16,
+}
+
+impl FieldGuideUiState {
+    /// Move the scroll offset by `delta` lines, clamped to `[0, max_scroll]`.
+    pub fn scroll_by(&mut self, delta: i32, max_scroll: u16) {
+        let next = i32::from(self.scroll) + delta;
+        self.scroll = u16::try_from(next.clamp(0, i32::from(max_scroll))).unwrap_or(0);
+    }
+
+    /// Jump back to the first line.
+    pub fn scroll_to_top(&mut self) {
+        self.scroll = 0;
+    }
+
+    /// Jump so the last line is visible.
+    pub fn scroll_to_bottom(&mut self, max_scroll: u16) {
+        self.scroll = max_scroll;
+    }
+}
+
+/// How far a PageUp/PageDown press moves the guide.
+pub const PAGE_SCROLL_LINES: i32 = 10;
+
+/// Marker text identifying the seeded guide entries in the Chronicle.
+///
+/// Used to keep seeding idempotent: if any chronicle event already
+/// mentions the Field Guide, the entries are not added again.
+const GUIDE_MARKER: &str = "Field Guide";
+
+/// The guide entries seeded into a new colony's Chronicle.
+///
+/// In the game's own voice: one pointer at the guide itself, one set of
+/// first orders, one promise that the weird stuff is coming. Added at
+/// tick 0 by world setup, right after the founding entry — see
+/// [`seed_field_guide_entries`].
+pub const GUIDE_CHRONICLE_ENTRIES: [(&str, EventImportance); 3] = [
+    (
+        "The last keeper left a Field Guide open on the console: what the map's glyphs mean, what to do first, and every key that matters. Ctrl+K — 'Open Field Guide'.",
+        EventImportance::Major,
+    ),
+    (
+        "First orders, per the guide: keep both potato farms staffed, watch Food in the Info pane, and raise Housing before winter asks its questions.",
+        EventImportance::Standard,
+    ),
+    (
+        "Three origins will make planetfall before the year turns. The Chronicle will name them as they arrive. It forgets nothing.",
+        EventImportance::Standard,
+    ),
+];
+
+/// Seed the Field Guide entries into the colony's Chronicle.
+///
+/// Called once by world setup for a NEW colony, alongside
+/// `initial_chronicle_event`. It cannot double-fire on save/load: the
+/// save snapshot stores the whole Chronicle and restore replaces the
+/// resource wholesale, so a loaded colony simply gets its original
+/// entries back. The marker check additionally makes repeated calls
+/// harmless.
+pub fn seed_field_guide_entries(world: &mut World) {
+    let mut chronicle = world.resource_mut::<Chronicle>();
+    if chronicle
+        .events
+        .iter()
+        .any(|event| event.text.contains(GUIDE_MARKER))
+    {
+        return;
+    }
+    for (text, importance) in GUIDE_CHRONICLE_ENTRIES {
+        chronicle.add_event(0, text.to_string(), importance);
+    }
+}
+
+/// Build the full Field Guide as styled lines.
+///
+/// Pure and world-free so it can be unit-tested directly. Wrapping to
+/// the pane width happens at render time.
+#[must_use]
+pub fn guide_lines() -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(body("Notes for the newly landed, left by the last keeper."));
+    lines.push(body(
+        "You keep this colony. Nobody is coming to explain — so it falls to these pages.",
+    ));
+    lines.push(blank());
+    legend_section(&mut lines);
+    first_minutes_section(&mut lines);
+    controls_section(&mut lines);
+    weird_stuff_section(&mut lines);
+    lines.push(blank());
+    lines.push(body(
+        "Good luck, keeper. Losing is a story the Chronicle tells very well — but not today.",
+    ));
+    lines
+}
+
+fn legend_section(lines: &mut Vec<Line<'static>>) {
+    lines.push(header("WHAT AM I LOOKING AT?"));
+    lines.push(body(
+        "The big pane is the colony map: one character per tile of world.",
+    ));
+    lines.push(body(
+        "Your colonists are the faces. Everything else is ground, shelter, supplies — or trouble.",
+    ));
+    lines.push(blank());
+    lines.push(subheader("— The ground —"));
+    for (terrain, label) in [
+        (TerrainType::Grass, "grass"),
+        (TerrainType::Dirt, "dirt"),
+        (TerrainType::Water, "water"),
+        (TerrainType::Tree, "tree — chop it (C) for wood"),
+        (TerrainType::Sapling, "sapling — a tree, eventually"),
+        (TerrainType::Shrub, "shrub"),
+        (TerrainType::Rock, "rock — mine it (M) for stone"),
+        (
+            TerrainType::DeepRock,
+            "deep rock — the mountain, unconvinced",
+        ),
+        (TerrainType::Path, "path — much walked-on ground"),
+        (TerrainType::Bridge, "bridge"),
+        (TerrainType::Crater, "crater — something fell here"),
+        (TerrainType::Ash, "ash — something burned here"),
+        (
+            TerrainType::MagmaRock,
+            "magma rock — hot. It hurts. Keep off",
+        ),
+        (
+            TerrainType::SporeBloom,
+            "spore-bloom — toxic. Admire from a distance",
+        ),
+        (
+            TerrainType::Artifact,
+            "ancient artifact — old, gold, worth a look",
+        ),
+        (TerrainType::Void, "the void — no ground, no air, no colony"),
+    ] {
+        lines.push(legend(
+            get_terrain_char(terrain),
+            get_terrain_color(terrain),
+            label,
+        ));
+    }
+    lines.push(blank());
+    lines.push(subheader("— The people —"));
+    let (happy, happy_color) = get_pop_display(&needs(1.0));
+    let (struggling, struggling_color) = get_pop_display(&needs(0.45));
+    let (starving, starving_color) = get_pop_display(&needs(0.1));
+    lines.push(legend(happy, happy_color, "colonist — fed and fine"));
+    lines.push(legend(
+        struggling,
+        struggling_color,
+        "colonist — struggling",
+    ));
+    lines.push(legend(
+        starving,
+        starving_color,
+        "colonist — starving. Hunger is the need that kills",
+    ));
+    lines.push(legend(
+        "V",
+        Color::Magenta,
+        "visitor — not yours; passing through",
+    ));
+    lines.push(legend(
+        "🎓",
+        Color::Yellow,
+        "mentor — teaching another colonist",
+    ));
+    lines.push(blank());
+    lines.push(subheader("— Shelter & work —"));
+    for (building, label) in [
+        (
+            BuildingType::Lander,
+            "the Lander — your ship, and first stockpile",
+        ),
+        (
+            BuildingType::Housing,
+            "housing — a real bed. Morale notices the difference",
+        ),
+        (
+            BuildingType::Farm,
+            "farm — grows food. (The tidy green ♣; spore-bloom is purple.)",
+        ),
+        (BuildingType::Stockpile, "stockpile — where hauling ends up"),
+        (
+            BuildingType::LifeSupport,
+            "life support — makes the shelter's air breathable. Guard it",
+        ),
+        (BuildingType::Well, "well — water in, colony alive"),
+        (BuildingType::Heater, "heater / solar panel"),
+        (BuildingType::Hospital, "hospital"),
+        (BuildingType::Generator, "generator"),
+        (BuildingType::TradeDepot, "trade depot"),
+        (
+            BuildingType::Grave,
+            "grave — someone the Chronicle remembers",
+        ),
+        (
+            BuildingType::Wall,
+            "wall — yes, the same glyph as rock. Context is everything",
+        ),
+    ] {
+        lines.push(legend(
+            get_building_char(building),
+            crate::ui::map::get_building_color(building, MaterialType::default()),
+            label,
+        ));
+    }
+    lines.push(blank());
+    lines.push(subheader("— On the ground —"));
+    lines.push(body(format!(
+        "  {} food    {} wood    {} stone",
+        get_resource_char(ResourceType::Food),
+        get_resource_char(ResourceType::Wood),
+        get_resource_char(ResourceType::Stone),
+    )));
+    lines.push(body(format!(
+        "  {} metal   {} planks   {} rations",
+        get_resource_char(ResourceType::Metal),
+        get_resource_char(ResourceType::Planks),
+        get_resource_char(ResourceType::Rations),
+    )));
+    lines.push(blank());
+    lines.push(subheader("— Marks & trouble —"));
+    lines.push(legend(
+        get_designation_char(DesignationType::Mine),
+        Color::Red,
+        "marked for mining — the mark warms from red to green as work goes",
+    ));
+    lines.push(legend(
+        get_designation_char(DesignationType::Chop),
+        Color::Red,
+        "marked for chopping",
+    ));
+    lines.push(legend(
+        get_designation_char(DesignationType::Demolish),
+        Color::Red,
+        "marked for demolition",
+    ));
+    lines.push(legend(
+        get_fauna_char(FaunaType::Wolf),
+        Color::Red,
+        "wolf — it is not a pet",
+    ));
+    lines.push(legend(
+        get_fauna_char(FaunaType::SpaceRat),
+        Color::Rgb(105, 105, 105),
+        "space rat",
+    ));
+    lines.push(legend(
+        get_flora_char(FloraType::XenoMoss),
+        Color::Rgb(0, 100, 0),
+        "xeno-moss — the planet, growing back",
+    ));
+    lines.push(legend(
+        get_anomaly_char(AnomalyType::Ruins),
+        Color::Cyan,
+        "ruins — old things, worth surveying",
+    ));
+    lines.push(legend(
+        get_anomaly_char(AnomalyType::Geode),
+        Color::Magenta,
+        "geode",
+    ));
+    lines.push(legend(
+        "^",
+        Color::Rgb(255, 100, 0),
+        "fire — self-explanatory, urgent",
+    ));
+    lines.push(body(
+        "Colors matter: the same letter in a different color is a different thing.",
+    ));
+    lines.push(body(
+        "Unsure about a tile? Click it — the Inspector pane names it.",
+    ));
+    lines.push(blank());
+}
+
+fn first_minutes_section(lines: &mut Vec<Line<'static>>) {
+    lines.push(header("YOUR FIRST TEN MINUTES"));
+    lines.push(body(
+        "You landed with 5 founders, 10 food, 15 wood, 5 stone, and 2 tools.",
+    ));
+    lines.push(body(
+        "Your shelter is already standing: metal walls, an airlock, the Lander, life support, a stockpile — and two potato farms.",
+    ));
+    lines.push(body(
+        "Potatoes, because they endure winter. Trust the potatoes.",
+    ));
+    lines.push(body(
+        "Ten food is a landing snack, not a supply line. Keep the farms staffed and watch Food in the Info pane — it is the number that decides whether this story is short.",
+    ));
+    lines.push(body(
+        "Faces tell the truth faster than numbers: a struggling face is a warning, a starving face is an alarm with legs.",
+    ));
+    lines.push(body(
+        "Build Housing early. 'Housing 0/5' in the Info pane means everyone sleeps rough, and morale keeps the receipts. Press B to build.",
+    ));
+    lines.push(body(
+        "Grow with designations: C chops trees for wood, M mines rock for stone. Enter marks one corner of a rectangle; Enter again marks the other.",
+    ));
+    lines.push(body(
+        "Winter is the last quarter of every year, and the first winter is the exam. Housing, heat, and a food buffer are the whole syllabus.",
+    ));
+    lines.push(blank());
+}
+
+fn controls_section(lines: &mut Vec<Line<'static>>) {
+    lines.push(header("CONTROLS"));
+    lines.push(control(
+        "Camera",
+        "WASD or arrow keys. Click a tile to select it; the Inspector explains it.",
+    ));
+    lines.push(control(
+        "Space",
+        "pause / resume.  1 · 2 · 3 — simulation speed.",
+    ));
+    lines.push(control(
+        "Ctrl+K",
+        "the command palette. Every pane, workspace, and command lives there, searchable. When in doubt, Ctrl+K.",
+    ));
+    lines.push(control(
+        "H or L",
+        "Chronicle pane.  T — Tech Tree (↑/↓ choose, Enter unlocks).",
+    ));
+    lines.push(control(
+        "B",
+        "build mode: WASD/arrows move the cursor, Tab cycles buildings, M cycles material, Enter or Space places, Esc leaves.",
+    ));
+    lines.push(control(
+        "M · C · X",
+        "designate mining / chopping / demolition: Enter anchors a corner, Enter again confirms the rectangle, Backspace cancels a mark, Esc leaves.",
+    ));
+    lines.push(control(
+        "Tab",
+        "Colony view ↔ System view, once the system beyond is revealed.",
+    ));
+    lines.push(control(
+        "P",
+        "possess the selected colonist and walk in their skin. WASD moves them. Esc lets go.",
+    ));
+    lines.push(control(
+        "Workspaces",
+        "Colony Ops, System Survey, Director — switch from the palette.",
+    ));
+    lines.push(control(
+        "Layout mode",
+        "palette: 'Enter Layout Mode'. Then: hjkl focus · Shift+HJKL move · [ ] resize · s/v split · d close · Enter interact · Esc back to play.",
+    ));
+    lines.push(control(
+        "Q",
+        "quit. Esc clears the selection; press it again to quit.",
+    ));
+    lines.push(control(
+        "This guide",
+        "Ctrl+K, then 'Open Field Guide'. ↑/↓ scrolls it while it is focused.",
+    ));
+    lines.push(blank());
+}
+
+fn weird_stuff_section(lines: &mut Vec<Line<'static>>) {
+    lines.push(header("THE WEIRD STUFF"));
+    lines.push(body(
+        "Origins — three arrive every run, staggered over the first year. The menu lets you pick one, or choose 'Surprise me.'",
+    ));
+    lines.push(body(
+        "A fallen sovereign. A corsair. A lawbound automaton. The landing roster is never quite sane, and that is the point.",
+    ));
+    lines.push(body(
+        "Possession — any colonist can be ridden (select them, press P). Origins are stranger from the inside.",
+    ));
+    lines.push(body(
+        "The Chronicle — the colony's memory: foundings, firsts, feuds, deaths, and rumors from the deep. If it happened, it is written there. Press H.",
+    ));
+    lines.push(body(
+        "And above it all, the System turns. Press Tab to look up — once the colony has earned the view.",
+    ));
+}
+
+/// Render the Field Guide into `area` (used by the shell pane plugin).
+pub fn render_field_guide(frame: &mut Frame, area: Rect, world: &World) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(area);
+
+    let lines = guide_lines();
+    // The bordered block eats the top and bottom rows of the content chunk.
+    let visible = chunks[0].height.saturating_sub(2);
+    let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    let max_scroll = total.saturating_sub(visible);
+    let scroll = world
+        .get_resource::<FieldGuideUiState>()
+        .map_or(0, |state| state.scroll)
+        .min(max_scroll);
+
+    let block = Block::default()
+        .title(" Field Guide ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().bg(Color::Black));
+    frame.render_widget(Clear, chunks[0]);
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+    frame.render_widget(paragraph, chunks[0]);
+
+    let footer = Paragraph::new(Line::from(Span::styled(
+        " ↑/↓ scroll · PgUp/PgDn page · lost? Ctrl+K opens every command ",
+        Style::default().fg(Color::DarkGray),
+    )));
+    frame.render_widget(footer, chunks[1]);
+}
+
+/// A colonist whose worst need is `worst` (drives the pop legend glyphs).
+fn needs(worst: f32) -> Needs {
+    Needs {
+        hunger: worst,
+        rest: 1.0,
+        leisure: 1.0,
+        hygiene: 1.0,
+    }
+}
+
+fn header(text: &str) -> Line<'static> {
+    Line::from(Span::styled(
+        text.to_string(),
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
+fn subheader(text: &str) -> Line<'static> {
+    Line::from(Span::styled(
+        text.to_string(),
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    ))
+}
+
+fn body(text: impl Into<String>) -> Line<'static> {
+    Line::from(text.into())
+}
+
+fn control(key: &str, description: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{key:<12}"),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(description.to_string()),
+    ])
+}
+
+fn legend(glyph: &str, color: Color, label: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(glyph.to_string(), Style::default().fg(color)),
+        Span::raw(format!("  {label}")),
+    ])
+}
+
+fn blank() -> Line<'static> {
+    Line::from("")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn all_text() -> String {
+        guide_lines()
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn guide_covers_all_four_sections() {
+        let text = all_text();
+        assert!(
+            text.contains("WHAT AM I LOOKING AT?"),
+            "legend section missing"
+        );
+        assert!(
+            text.contains("YOUR FIRST TEN MINUTES"),
+            "first-minutes section missing"
+        );
+        assert!(text.contains("CONTROLS"), "controls section missing");
+        assert!(
+            text.contains("THE WEIRD STUFF"),
+            "weird-stuff section missing"
+        );
+    }
+
+    #[test]
+    fn guide_legend_uses_renderer_glyphs() {
+        let text = all_text();
+        // The legend is built from the renderer's own getters; if any of
+        // these go missing, the guide no longer teaches the real map.
+        assert!(
+            text.contains(get_terrain_char(TerrainType::Tree)),
+            "tree glyph missing"
+        );
+        assert!(
+            text.contains(get_terrain_char(TerrainType::Water)),
+            "water glyph missing"
+        );
+        assert!(
+            text.contains(get_terrain_char(TerrainType::Rock)),
+            "rock glyph missing"
+        );
+        assert!(
+            text.contains(get_building_char(BuildingType::Housing)),
+            "housing glyph missing"
+        );
+        assert!(
+            text.contains(get_building_char(BuildingType::LifeSupport)),
+            "life support glyph missing"
+        );
+        assert!(
+            text.contains(get_pop_display(&needs(1.0)).0),
+            "happy pop glyph missing"
+        );
+        assert!(
+            text.contains(get_pop_display(&needs(0.1)).0),
+            "starving pop glyph missing"
+        );
+        assert!(
+            text.contains(get_designation_char(DesignationType::Mine)),
+            "mine designation glyph missing"
+        );
+        assert!(
+            text.contains(get_resource_char(ResourceType::Food)),
+            "food item glyph missing"
+        );
+        assert!(
+            text.contains(get_fauna_char(FaunaType::Wolf)),
+            "wolf glyph missing"
+        );
+    }
+
+    #[test]
+    fn guide_teaches_palette_and_real_bindings() {
+        let text = all_text();
+        assert!(
+            text.contains("Ctrl+K"),
+            "guide must teach the command palette"
+        );
+        assert!(
+            text.contains("Open Field Guide"),
+            "guide must name its own palette command"
+        );
+        assert!(text.contains("possess"), "guide must teach possession");
+    }
+
+    #[test]
+    fn render_field_guide_paints_title_and_sections() {
+        let world = World::new();
+        let backend = TestBackend::new(90, 34);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_field_guide(frame, frame.area(), &world))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for cell in buffer.content() {
+            text.push_str(cell.symbol());
+        }
+        assert!(text.contains("Field Guide"), "pane title should render");
+        assert!(
+            text.contains("WHAT AM I LOOKING AT?"),
+            "first section should be visible without scrolling"
+        );
+        assert!(text.contains("Ctrl+K"), "footer hint should render");
+    }
+
+    #[test]
+    fn scroll_offsets_clamp_to_bounds() {
+        let mut state = FieldGuideUiState::default();
+        state.scroll_by(-5, 40);
+        assert_eq!(state.scroll, 0, "scroll must not go below zero");
+        state.scroll_by(12, 40);
+        assert_eq!(state.scroll, 12);
+        state.scroll_by(100, 40);
+        assert_eq!(state.scroll, 40, "scroll must clamp at max_scroll");
+        state.scroll_to_top();
+        assert_eq!(state.scroll, 0);
+        state.scroll_to_bottom(40);
+        assert_eq!(state.scroll, 40);
+    }
+
+    #[test]
+    fn seed_adds_guide_entries_exactly_once() {
+        let mut world = World::new();
+        world.insert_resource(Chronicle::default());
+
+        seed_field_guide_entries(&mut world);
+        seed_field_guide_entries(&mut world);
+
+        let chronicle = world.resource::<Chronicle>();
+        assert_eq!(
+            chronicle.events.len(),
+            GUIDE_CHRONICLE_ENTRIES.len(),
+            "seeding twice must not duplicate the guide entries"
+        );
+        assert!(
+            chronicle.events[0].text.contains("Field Guide"),
+            "first seeded entry should point at the guide"
+        );
+        assert_eq!(chronicle.events[0].importance, EventImportance::Major);
+    }
+
+    #[test]
+    fn fresh_setup_world_carries_guide_entries() {
+        let world = crate::setup::setup_world_with_config(crate::setup::SetupConfig {
+            headless: true,
+            ..Default::default()
+        });
+        let chronicle = world.resource::<Chronicle>();
+        let guide_entries = chronicle
+            .events
+            .iter()
+            .filter(|event| event.text.contains("Field Guide"))
+            .count();
+        assert_eq!(
+            guide_entries, 1,
+            "exactly one entry should name the Field Guide"
+        );
+        assert!(
+            chronicle
+                .events
+                .iter()
+                .any(|event| event.text.contains("First orders, per the guide")),
+            "first-orders entry should be seeded"
+        );
+        assert!(
+            chronicle
+                .events
+                .iter()
+                .any(|event| event.text.contains("Three origins will make planetfall")),
+            "origins entry should be seeded"
+        );
+    }
+}

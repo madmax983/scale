@@ -13,6 +13,7 @@ use std::{cell::RefCell, rc::Rc};
 
 mod chronicle;
 mod colony_map;
+mod field_guide;
 mod inspector;
 mod log_plugin;
 #[cfg(feature = "nova")]
@@ -24,6 +25,7 @@ mod tech;
 
 pub use chronicle::ChroniclePlugin;
 pub use colony_map::ColonyMapPlugin;
+pub use field_guide::FieldGuidePlugin;
 pub use inspector::InspectorPlugin;
 pub use log_plugin::LogPlugin;
 #[cfg(feature = "nova")]
@@ -38,6 +40,7 @@ pub const SYSTEM_MAP_PLUGIN_TYPE: &str = "system-map";
 pub const INSPECTOR_PLUGIN_TYPE: &str = "inspector";
 pub const STATUS_PLUGIN_TYPE: &str = "status";
 pub const CHRONICLE_PLUGIN_TYPE: &str = "chronicle";
+pub const FIELD_GUIDE_PLUGIN_TYPE: &str = "field-guide";
 pub const LOG_PLUGIN_TYPE: &str = "log";
 pub const TECH_PLUGIN_TYPE: &str = "tech";
 pub const REIGN_SKY_PLUGIN_TYPE: &str = "reign-sky";
@@ -70,6 +73,11 @@ pub fn register_default_plugins(registry: &mut Registry, world: SharedWorld) {
     let chronicle_world = Rc::clone(&world);
     registry.register_plugin_type(CHRONICLE_PLUGIN_TYPE, move || {
         ChroniclePlugin::new(Rc::clone(&chronicle_world))
+    });
+
+    let field_guide_world = Rc::clone(&world);
+    registry.register_plugin_type(FIELD_GUIDE_PLUGIN_TYPE, move || {
+        FieldGuidePlugin::new(Rc::clone(&field_guide_world))
     });
 
     let tech_world = Rc::clone(&world);
@@ -123,6 +131,11 @@ pub(crate) fn register_default_plugins_with_runtime(
     let chronicle_world = Rc::clone(&world);
     runtime.register_plugin_type(CHRONICLE_PLUGIN_TYPE, move || {
         ChroniclePlugin::new(Rc::clone(&chronicle_world))
+    });
+
+    let field_guide_world = Rc::clone(&world);
+    runtime.register_plugin_type(FIELD_GUIDE_PLUGIN_TYPE, move || {
+        FieldGuidePlugin::new(Rc::clone(&field_guide_world))
     });
 
     let tech_world = Rc::clone(&world);
@@ -187,10 +200,10 @@ mod tests {
     #[cfg(feature = "nova")]
     use super::ORAL_TRADITION_PLUGIN_TYPE;
     use super::{
-        register_default_plugins, ChroniclePlugin, ReignSkyPlugin, SharedWorld, StatusPlugin,
-        TechPlugin, CHRONICLE_PLUGIN_TYPE, COLONY_MAP_PLUGIN_TYPE, INSPECTOR_PLUGIN_TYPE,
-        LOG_PLUGIN_TYPE, REIGN_SKY_PLUGIN_TYPE, STATUS_PLUGIN_TYPE, SYSTEM_MAP_PLUGIN_TYPE,
-        TECH_PLUGIN_TYPE,
+        register_default_plugins, ChroniclePlugin, FieldGuidePlugin, ReignSkyPlugin, SharedWorld,
+        StatusPlugin, TechPlugin, CHRONICLE_PLUGIN_TYPE, COLONY_MAP_PLUGIN_TYPE,
+        FIELD_GUIDE_PLUGIN_TYPE, INSPECTOR_PLUGIN_TYPE, LOG_PLUGIN_TYPE, REIGN_SKY_PLUGIN_TYPE,
+        STATUS_PLUGIN_TYPE, SYSTEM_MAP_PLUGIN_TYPE, TECH_PLUGIN_TYPE,
     };
     use crate::prelude::{setup_world_with_config, SetupConfig};
     use ratatui::{buffer::Buffer, layout::Rect};
@@ -215,6 +228,7 @@ mod tests {
             TECH_PLUGIN_TYPE,
             LOG_PLUGIN_TYPE,
             REIGN_SKY_PLUGIN_TYPE,
+            FIELD_GUIDE_PLUGIN_TYPE,
         ]);
         #[cfg(feature = "nova")]
         expected.insert(ORAL_TRADITION_PLUGIN_TYPE);
@@ -273,6 +287,31 @@ mod tests {
         assert!(
             text.contains("Chronicle"),
             "chronicle pane should render as a normal pane without overlay gating"
+        );
+    }
+
+    #[test]
+    fn field_guide_plugin_renders_guide_content() {
+        let world = test_world();
+
+        let mut plugin = FieldGuidePlugin::new(Rc::clone(&world));
+        let area = Rect::new(0, 0, 90, 34);
+        let mut buffer = Buffer::empty(area);
+
+        plugin.render(area, &mut buffer, true);
+
+        let text = buffer_text(&buffer);
+        assert!(
+            text.contains("Field Guide"),
+            "field guide pane should render its title"
+        );
+        assert!(
+            text.contains("WHAT AM I LOOKING AT?"),
+            "field guide pane should render the legend section"
+        );
+        assert!(
+            text.contains("Ctrl+K"),
+            "field guide pane should teach the command palette"
         );
     }
 

@@ -25,6 +25,8 @@
 
 /// Chronicle overlay rendering.
 pub mod chronicle;
+/// Field Guide (onboarding) rendering.
+pub mod help;
 /// Entity inspector panel.
 pub mod inspector;
 /// Map rendering logic.

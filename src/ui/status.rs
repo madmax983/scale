@@ -147,6 +147,14 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, world: &World) {
         .spans
         .extend(crate::ui::reign_sky::build_reign_spans(world));
 
+    // One quiet signpost for new keepers: the palette holds every command.
+    // Appended only when the whole bar still fits — on narrow terminals the
+    // hint yields silently instead of truncating real colony state.
+    let hint = Span::styled("  ·  Ctrl+K: commands", Style::default().fg(Color::Gray));
+    if status.width() + hint.width() <= usize::from(area.width) {
+        status.spans.push(hint);
+    }
+
     let status = truncate_line(status, area.width);
 
     let bar = Paragraph::new(status).style(Style::default().bg(Color::DarkGray).fg(Color::White));
