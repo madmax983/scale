@@ -1551,6 +1551,20 @@ pub fn apply_snapshot(world: &mut World, snap: &SaveSnapshot) -> Result<LoadRepo
                 stockpile.waste_bonus = waste;
             }
         }
+        // Faithful restore: a component the snapshot says was ABSENT must
+        // not be invented by spawn_building's per-type defaults.
+        if b.health.is_none() {
+            world.entity_mut(entity).remove::<Health>();
+        }
+        if b.farm.is_none() {
+            world.entity_mut(entity).remove::<Farm>();
+        }
+        if b.housing.is_none() {
+            world.entity_mut(entity).remove::<Housing>();
+        }
+        if b.stockpile.is_none() {
+            world.entity_mut(entity).remove::<Stockpile>();
+        }
     }
 
     // Pops: full PopBundle (seeded deterministically from the snapshot),
@@ -1594,7 +1608,13 @@ pub fn apply_snapshot(world: &mut World, snap: &SaveSnapshot) -> Result<LoadRepo
         if let Some(credits) = p.wallet_credits {
             bundle.wallet = Wallet { credits };
         }
-        if !p.skills.is_empty() {
+        // Unconditional (even when empty): the bundle's random seed must
+        // never leak through. A pop saved with NO traits/skills/memories
+        // must restore with none — guarding on is_empty() here was the
+        // persistence round-trip flake (an empty-traits pop regained
+        // random bundle traits on load, flipping the canonical digest
+        // on roughly 40% of live-colony runs).
+        {
             let mut xp = HashMap::new();
             for (name, value) in &p.skills {
                 if let Some(skill) = parse_skill_type(name) {
@@ -1603,7 +1623,7 @@ pub fn apply_snapshot(world: &mut World, snap: &SaveSnapshot) -> Result<LoadRepo
             }
             bundle.skills = Skills { xp };
         }
-        if !p.traits.is_empty() {
+        {
             let mut set = std::collections::HashSet::new();
             for name in &p.traits {
                 if let Some(t) = parse_iter::<Trait>(name) {
@@ -1635,7 +1655,7 @@ pub fn apply_snapshot(world: &mut World, snap: &SaveSnapshot) -> Result<LoadRepo
                 availability_weight: availability,
             };
         }
-        if !p.memories.is_empty() {
+        {
             let items: Vec<ActiveMemory> = p
                 .memories
                 .iter()
@@ -1651,6 +1671,31 @@ pub fn apply_snapshot(world: &mut World, snap: &SaveSnapshot) -> Result<LoadRepo
             bundle.memories = Memories { items };
         }
         let entity = world.spawn(bundle).id();
+        // Faithful restore for absent components: PopBundle always carries
+        // Health/Needs/Morale/Wallet/Age/PopAction/UtilityWeights (some
+        // randomized), so a field captured as None must REMOVE the
+        // bundle's component instead of letting invented values through.
+        if p.health.is_none() {
+            world.entity_mut(entity).remove::<Health>();
+        }
+        if p.needs.is_none() {
+            world.entity_mut(entity).remove::<Needs>();
+        }
+        if p.morale_value.is_none() {
+            world.entity_mut(entity).remove::<Morale>();
+        }
+        if p.wallet_credits.is_none() {
+            world.entity_mut(entity).remove::<Wallet>();
+        }
+        if p.age.is_none() {
+            world.entity_mut(entity).remove::<Age>();
+        }
+        if p.action.is_none() {
+            world.entity_mut(entity).remove::<PopAction>();
+        }
+        if p.weights.is_none() {
+            world.entity_mut(entity).remove::<UtilityWeights>();
+        }
         remap.insert(p.old_bits, entity);
         new_pop_ids.push(entity);
         report.pops += 1;
@@ -1988,6 +2033,9 @@ pub fn snapshot_digest(snap: &SaveSnapshot) -> String {
         }
     }
     if let Some(buildings) = value.get("buildings").and_then(|v| v.as_array()) {
+        // Same occurrence disambiguation as pops: two buildings of the same
+        // type on the same tile must not collide onto one key.
+        let mut groups: BTreeMap<String, Vec<(String, u64)>> = BTreeMap::new();
         for b in buildings {
             let ty = b
                 .get("building_type")
@@ -1999,7 +2047,16 @@ pub fn snapshot_digest(snap: &SaveSnapshot) -> String {
                 .get("old_bits")
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            key_of.insert(bits, format!("bld:{ty}:{x}:{y}"));
+            groups
+                .entry(format!("bld:{ty}:{x}:{y}"))
+                .or_default()
+                .push((ref_free(b, false), bits));
+        }
+        for (base, mut members) in groups {
+            members.sort();
+            for (occ, (_, bits)) in members.into_iter().enumerate() {
+                key_of.insert(bits, format!("{base}:{occ}"));
+            }
         }
     }
     let key_json = |bits: u64| -> serde_json::Value {
@@ -2033,6 +2090,10 @@ pub fn snapshot_digest(snap: &SaveSnapshot) -> String {
                                 }
                             }
                         }
+                        // Capture sorts affinities by RAW entity bits, whose
+                        // order a load legitimately reshuffles; the canonical
+                        // form sorts by the replacement content key instead.
+                        arr.sort_by_key(|rel| serde_json::to_string(rel).unwrap_or_default());
                     }
                 }
                 if let Some(mt) = obj.get_mut("movement_target") {
@@ -2062,6 +2123,8 @@ pub fn snapshot_digest(snap: &SaveSnapshot) -> String {
                                     *w = key_json(target);
                                 }
                             }
+                            workers
+                                .sort_by_key(|w| serde_json::to_string(w).unwrap_or_default());
                         }
                     }
                 }
@@ -2073,12 +2136,38 @@ pub fn snapshot_digest(snap: &SaveSnapshot) -> String {
                                     *r = key_json(target);
                                 }
                             }
+                            residents
+                                .sort_by_key(|r| serde_json::to_string(r).unwrap_or_default());
                         }
                     }
                 }
             }
         }
         buildings.sort_by_key(|b| serde_json::to_string(b).unwrap_or_default());
+    }
+    if let Some(items) = value.get_mut("items").and_then(|v| v.as_array_mut()) {
+        // ItemSave.item_ref is a raw entity reference (Corpse/MemoryCore
+        // payloads): canonicalize it like every other cross-reference and
+        // sort records by content. Previously items entered the digest
+        // with raw bits, so any corpse/memory-core item flipped the
+        // digest on every load.
+        for item in items.iter_mut() {
+            if let Some(obj) = item.as_object_mut() {
+                if let Some(bits) = obj
+                    .get("item_ref")
+                    .and_then(serde_json::Value::as_u64)
+                {
+                    obj.insert("item_ref".to_string(), key_json(bits));
+                }
+            }
+        }
+        items.sort_by_key(|i| serde_json::to_string(i).unwrap_or_default());
+    }
+    if let Some(designations) = value
+        .get_mut("designations")
+        .and_then(|v| v.as_array_mut())
+    {
+        designations.sort_by_key(|d| serde_json::to_string(d).unwrap_or_default());
     }
     let json = serde_json::to_string(&value).unwrap_or_default();
     use std::collections::hash_map::DefaultHasher;
@@ -2482,5 +2571,105 @@ mod tests {
         assert_eq!(world.resource::<SimulationTime>().tick, 350);
         let continued = capture_snapshot(&mut world, 42);
         assert!(!continued.pops.is_empty());
+    }
+
+    #[test]
+    fn test_save_load_round_trip_empty_and_absent_fields() {
+        // Regression for the round-trip flake: a pop saved with EMPTY
+        // traits/skills/memories and ABSENT optional components must
+        // restore exactly so — the random PopBundle seed and spawn
+        // defaults must not leak invented values into the recapture.
+        let snap = SaveSnapshot {
+            format_version: CURRENT_SAVE_VERSION,
+            tick: 7,
+            saved_at_unix: 42,
+            colony_name: "Test Colony".to_string(),
+            world_seed: 7,
+            scenario: None,
+            origin_choice: None,
+            global_rng_reseed: None,
+            resources: ColonyResourcesSave::from(&ColonyResources::default()),
+            chronicle: Vec::new(),
+            tech: TechSave {
+                entries: Vec::new(),
+                total_capacity: 0.0,
+                used_capacity: 0.0,
+            },
+            season: "Spring".to_string(),
+            day_night: DayNightSave {
+                time_of_day: "Day".to_string(),
+                day_count: 0,
+                ticks_per_day: 250,
+            },
+            weather: WeatherSave {
+                current: "Clear".to_string(),
+                duration_remaining: 100,
+            },
+            terrain: TerrainSave {
+                width: 0,
+                height: 0,
+                tiles: Vec::new(),
+            },
+            fertility: None,
+            pops: vec![PopSave {
+                old_bits: 4242,
+                name: "Solo".to_string(),
+                x: 3,
+                y: 4,
+                health: None,
+                needs: None,
+                morale_value: None,
+                morale_modifiers: Vec::new(),
+                wallet_credits: None,
+                skills: Vec::new(),
+                traits: Vec::new(),
+                age: None,
+                action: None,
+                weights: None,
+                memories: Vec::new(),
+                job: None,
+                relationships: Vec::new(),
+                movement_target: None,
+            }],
+            buildings: vec![BuildingSave {
+                old_bits: 4343,
+                building_type: "Wall".to_string(),
+                x: 1,
+                y: 1,
+                material: Some("Wood".to_string()),
+                health: None,
+                farm: None,
+                housing: None,
+                stockpile: None,
+            }],
+            items: vec![ItemSave {
+                item_type: "Corpse".to_string(),
+                x: 3,
+                y: 4,
+                item_ref: Some(4242),
+                curio_name: None,
+            }],
+            designations: vec![DesignationSave {
+                designation_type: "Mine".to_string(),
+                x: 5,
+                y: 5,
+            }],
+        };
+        let digest_before = snapshot_digest(&snap);
+        let mut world = bare_world(0, 0.0);
+        let report = apply_snapshot(&mut world, &snap).unwrap();
+        assert_eq!(report.pops, 1);
+        assert_eq!(report.buildings, 1);
+        assert_eq!(report.items, 1);
+        let after = capture_snapshot(&mut world, 42);
+        assert_eq!(after.pops.len(), 1);
+        assert!(after.pops[0].traits.is_empty(), "empty traits must stay empty, got {:?}", after.pops[0].traits);
+        assert!(after.pops[0].health.is_none(), "absent Health must stay absent");
+        assert!(after.pops[0].age.is_none(), "absent Age must stay absent");
+        assert_eq!(
+            snapshot_digest(&after),
+            digest_before,
+            "snapshot with empty/absent fields must round-trip exactly"
+        );
     }
 }
