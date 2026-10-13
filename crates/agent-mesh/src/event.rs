@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{MeshError, Result};
 use crate::ids::{AgentId, Skill, TaskId, Token};
+use crate::scope::validate_pattern;
 
 /// Default failure budget of a task.
 pub const DEFAULT_MAX_FAILURES: u32 = 3;
@@ -35,8 +36,18 @@ pub fn validate_text(
     required: bool,
     one_line: bool,
 ) -> Result<()> {
-    let _ = (field, text, max, required, one_line);
-    todo!("RED")
+    if required && text.trim().is_empty() {
+        return Err(MeshError::EmptyText(field));
+    }
+    let len = text.chars().count();
+    if len > max {
+        return Err(MeshError::TextTooLong { field, len, max });
+    }
+    let bad = |c: char| c.is_control() && (one_line || !matches!(c, '\n' | '\t'));
+    if text.chars().any(bad) {
+        return Err(MeshError::ControlChars(field));
+    }
+    Ok(())
 }
 
 /// The definition of a task. Plan files use the same fields.
@@ -83,7 +94,21 @@ impl TaskSpec {
     /// # Errors
     /// The first [`MeshError`] found.
     pub fn validate(&self) -> Result<()> {
-        todo!("RED")
+        validate_text("title", &self.title, MAX_TITLE, true, true)?;
+        validate_text("detail", &self.detail, MAX_TEXT, false, false)?;
+        if !(1..=MAX_MAX_FAILURES).contains(&self.max_failures) {
+            return Err(MeshError::InvalidBudget {
+                got: self.max_failures,
+                max: MAX_MAX_FAILURES,
+            });
+        }
+        if self.paths.len() > MAX_PATHS {
+            return Err(MeshError::InvalidPattern {
+                pattern: format!("{} patterns", self.paths.len()),
+                reason: format!("use at most {MAX_PATHS} patterns"),
+            });
+        }
+        self.paths.iter().try_for_each(|p| validate_pattern(p))
     }
 }
 
@@ -228,7 +253,7 @@ impl Envelope {
     /// # Errors
     /// [`MeshError::Ledger`] if encoding fails.
     pub fn to_line(&self) -> Result<String> {
-        todo!("RED")
+        serde_json::to_string(self).map_err(|e| MeshError::Ledger(e.to_string()))
     }
 
     /// Decodes one JSON line.
@@ -236,8 +261,7 @@ impl Envelope {
     /// # Errors
     /// [`MeshError::Ledger`] if the line is not a valid envelope.
     pub fn from_line(line: &str) -> Result<Self> {
-        let _ = line;
-        todo!("RED")
+        serde_json::from_str(line).map_err(|e| MeshError::Ledger(e.to_string()))
     }
 }
 
@@ -284,13 +308,22 @@ mod tests {
 
         let mut bad = ok.clone();
         bad.max_failures = 0;
-        assert!(matches!(bad.validate(), Err(MeshError::InvalidBudget { .. })));
+        assert!(matches!(
+            bad.validate(),
+            Err(MeshError::InvalidBudget { .. })
+        ));
         bad.max_failures = MAX_MAX_FAILURES + 1;
-        assert!(matches!(bad.validate(), Err(MeshError::InvalidBudget { .. })));
+        assert!(matches!(
+            bad.validate(),
+            Err(MeshError::InvalidBudget { .. })
+        ));
 
         let mut bad = ok.clone();
         bad.paths = vec!["src/../specs/**".into()];
-        assert!(matches!(bad.validate(), Err(MeshError::InvalidPattern { .. })));
+        assert!(matches!(
+            bad.validate(),
+            Err(MeshError::InvalidPattern { .. })
+        ));
 
         let mut bad = ok;
         bad.paths = vec!["x".into(); MAX_PATHS + 1];
@@ -320,7 +353,10 @@ mod tests {
 
     #[test]
     fn from_line_rejects_garbage_and_bad_ids() {
-        assert!(matches!(Envelope::from_line("{"), Err(MeshError::Ledger(_))));
+        assert!(matches!(
+            Envelope::from_line("{"),
+            Err(MeshError::Ledger(_))
+        ));
         let bad_id = r#"{"seq":1,"ts":1,"actor":"x","event":{"type":"retried","task":"../x"}}"#;
         assert!(Envelope::from_line(bad_id).is_err());
     }

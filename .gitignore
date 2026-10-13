@@ -12,7 +12,10 @@ tarpaulin-report.html
 /target/criterion
 
 # IDE
-.claude
+.claude/*
+!.claude/agents/
+!.claude/skills/
+!.claude/settings.json
 .vscode/
 .idea/
 

@@ -12,6 +12,11 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::ids::AgentId;
+use crate::registry::Registry;
+use crate::scope::{classify, PathClass, MESH_MANAGED};
+use crate::store::{MESH_DIR, REGISTRY_FILE};
+
 /// Tools that change files.
 pub const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
@@ -44,15 +49,74 @@ pub enum Decision {
 /// Finds the nearest folder at or above `path` that has `.mesh/registry.toml`.
 #[must_use]
 pub fn find_mesh_root(path: &Path) -> Option<PathBuf> {
-    let _ = path;
-    todo!("RED")
+    path.ancestors()
+        .find(|a| a.join(MESH_DIR).join(REGISTRY_FILE).is_file())
+        .map(Path::to_path_buf)
 }
 
 /// Decides whether the tool call can run.
 #[must_use]
 pub fn decide(input: &HookInput) -> Decision {
-    let _ = input;
-    todo!("RED")
+    if !EDIT_TOOLS.contains(&input.tool_name.as_str()) {
+        return Decision::Allow;
+    }
+    let Some(agent) = input.agent_type.as_deref() else {
+        return Decision::Allow;
+    };
+    let file = ["file_path", "notebook_path"]
+        .iter()
+        .find_map(|k| input.tool_input.get(*k).and_then(serde_json::Value::as_str))
+        .filter(|f| !f.is_empty());
+    let Some(file) = file else {
+        return Decision::Allow;
+    };
+    let path = Path::new(file);
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        let base = input.cwd.as_deref().map_or_else(
+            || std::env::current_dir().unwrap_or_default(),
+            PathBuf::from,
+        );
+        base.join(path)
+    };
+    let Some(root) = find_mesh_root(&abs) else {
+        return Decision::Allow;
+    };
+    let registry = std::fs::read_to_string(root.join(MESH_DIR).join(REGISTRY_FILE))
+        .map_err(|e| e.to_string())
+        .and_then(|text| Registry::parse(&text).map_err(|e| e.to_string()));
+    let registry = match registry {
+        Ok(r) => r,
+        Err(e) => {
+            return Decision::Deny(format!(
+                "mesh: the registry is broken ({e}); run `scripts/mesh doctor` and fix it"
+            ))
+        }
+    };
+    let Some((id, scope)) = AgentId::new(agent)
+        .ok()
+        .and_then(|id| registry.scope(&id).cloned().map(|s| (id, s)))
+    else {
+        return Decision::Allow;
+    };
+    match classify(&abs.to_string_lossy(), &root) {
+        PathClass::Inside(rel) if MESH_MANAGED.contains(&rel.as_str()) || scope.is_match(&rel) => {
+            Decision::Allow
+        }
+        PathClass::Inside(rel) => Decision::Deny(format!(
+            "mesh: role `{id}` may not write `{rel}`. Allowed paths: {}. Report this to the coordinator.",
+            if scope.patterns().is_empty() {
+                "none (read only)".to_string()
+            } else {
+                scope.patterns().join(", ")
+            }
+        )),
+        PathClass::Outside => Decision::Allow,
+        PathClass::Invalid(why) => {
+            Decision::Deny(format!("mesh: role `{id}` cannot write `{file}`: {why}"))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -79,9 +143,18 @@ mod tests {
     fn main_session_and_other_tools_pass() {
         let tmp = repo();
         let root = tmp.path();
-        assert_eq!(decide(&input("Edit", None, "specs/1.md", root)), Decision::Allow);
-        assert_eq!(decide(&input("Read", Some("builder"), "specs/1.md", root)), Decision::Allow);
-        assert_eq!(decide(&input("Edit", Some("general-purpose"), "specs/1.md", root)), Decision::Allow);
+        assert_eq!(
+            decide(&input("Edit", None, "specs/1.md", root)),
+            Decision::Allow
+        );
+        assert_eq!(
+            decide(&input("Read", Some("builder"), "specs/1.md", root)),
+            Decision::Allow
+        );
+        assert_eq!(
+            decide(&input("Edit", Some("general-purpose"), "specs/1.md", root)),
+            Decision::Allow
+        );
     }
 
     #[test]
@@ -89,9 +162,18 @@ mod tests {
         let tmp = repo();
         let root = tmp.path();
         let abs = root.join("src/lib.rs").display().to_string();
-        assert_eq!(decide(&input("Write", Some("builder"), &abs, root)), Decision::Allow);
-        assert_eq!(decide(&input("Edit", Some("builder"), "src/lib.rs", root)), Decision::Allow);
-        assert_eq!(decide(&input("Edit", Some("reviewer"), ".mesh/BOARD.md", root)), Decision::Allow);
+        assert_eq!(
+            decide(&input("Write", Some("builder"), &abs, root)),
+            Decision::Allow
+        );
+        assert_eq!(
+            decide(&input("Edit", Some("builder"), "src/lib.rs", root)),
+            Decision::Allow
+        );
+        assert_eq!(
+            decide(&input("Edit", Some("reviewer"), ".mesh/BOARD.md", root)),
+            Decision::Allow
+        );
     }
 
     #[test]
@@ -105,8 +187,14 @@ mod tests {
             }
             Decision::Allow => panic!("builder must not write specs"),
         }
-        assert!(matches!(decide(&input("Write", Some("reviewer"), "src/lib.rs", root)), Decision::Deny(_)));
-        assert!(matches!(decide(&input("Edit", Some("builder"), "src/../specs/x.md", root)), Decision::Deny(_)));
+        assert!(matches!(
+            decide(&input("Write", Some("reviewer"), "src/lib.rs", root)),
+            Decision::Deny(_)
+        ));
+        assert!(matches!(
+            decide(&input("Edit", Some("builder"), "src/../specs/x.md", root)),
+            Decision::Deny(_)
+        ));
     }
 
     #[test]
@@ -121,7 +209,10 @@ mod tests {
     #[test]
     fn outside_a_mesh_repo_passes() {
         let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(decide(&input("Edit", Some("builder"), "specs/x.md", tmp.path())), Decision::Allow);
+        assert_eq!(
+            decide(&input("Edit", Some("builder"), "specs/x.md", tmp.path())),
+            Decision::Allow
+        );
         assert_eq!(decide(&HookInput::default()), Decision::Allow);
     }
 
@@ -129,9 +220,16 @@ mod tests {
     fn broken_registry_blocks_roles() {
         let tmp = repo();
         let root = tmp.path();
-        std::fs::write(root.join(".mesh/registry.toml"), "broken [").unwrap_or_else(|e| panic!("{e}"));
-        assert!(matches!(decide(&input("Edit", Some("builder"), "src/lib.rs", root)), Decision::Deny(_)));
-        assert_eq!(decide(&input("Edit", None, "src/lib.rs", root)), Decision::Allow);
+        std::fs::write(root.join(".mesh/registry.toml"), "broken [")
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert!(matches!(
+            decide(&input("Edit", Some("builder"), "src/lib.rs", root)),
+            Decision::Deny(_)
+        ));
+        assert_eq!(
+            decide(&input("Edit", None, "src/lib.rs", root)),
+            Decision::Allow
+        );
     }
 
     #[test]

@@ -14,8 +14,17 @@ pub const MAX_ID_LEN: usize = 64;
 /// and the first character is `a-z` or `0-9`.
 #[must_use]
 pub fn is_valid_id(s: &str) -> bool {
-    let _ = s;
-    todo!("RED")
+    let b = s.as_bytes();
+    let body =
+        |c: &u8| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'_' | b'-');
+    match b.first() {
+        Some(first) => {
+            b.len() <= MAX_ID_LEN
+                && (first.is_ascii_lowercase() || first.is_ascii_digit())
+                && b.iter().all(body)
+        }
+        None => false,
+    }
 }
 
 macro_rules! id_type {
@@ -101,8 +110,11 @@ impl fmt::Display for Token {
 impl FromStr for Token {
     type Err = MeshError;
     fn from_str(s: &str) -> Result<Self, MeshError> {
-        let _ = s;
-        todo!("RED")
+        s.parse::<u64>()
+            .ok()
+            .filter(|n| *n > 0)
+            .map(Self)
+            .ok_or_else(|| MeshError::InvalidToken(s.to_string()))
     }
 }
 
@@ -112,14 +124,32 @@ mod tests {
 
     #[test]
     fn accepts_valid_ids() {
-        for s in ["a", "0", "spec-1370-build", "lore-master", "a.b_c-d", &"x".repeat(64)] {
+        for s in [
+            "a",
+            "0",
+            "spec-1370-build",
+            "lore-master",
+            "a.b_c-d",
+            &"x".repeat(64),
+        ] {
             assert!(is_valid_id(s), "{s}");
         }
     }
 
     #[test]
     fn rejects_invalid_ids() {
-        for s in ["", "-a", ".a", "_a", "A", "a b", "a/b", "a\n", "é", &"x".repeat(65)] {
+        for s in [
+            "",
+            "-a",
+            ".a",
+            "_a",
+            "A",
+            "a b",
+            "a/b",
+            "a\n",
+            "é",
+            &"x".repeat(65),
+        ] {
             assert!(!is_valid_id(s), "{s:?}");
         }
     }

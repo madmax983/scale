@@ -1,0 +1,2 @@
+# Agent mesh: keep both sides of a merge. Replay reports conflicts.
+.mesh/ledger.jsonl merge=union

@@ -16,7 +16,11 @@ fn tid(s: &str) -> TaskId {
 }
 
 fn add(id: &str) -> Command {
-    Command::Add(TaskSpec::new(tid(id), "T", Skill::new("build").unwrap_or_else(|e| panic!("{e}"))))
+    Command::Add(TaskSpec::new(
+        tid(id),
+        "T",
+        Skill::new("build").unwrap_or_else(|e| panic!("{e}")),
+    ))
 }
 
 fn setup() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -29,7 +33,9 @@ fn setup() -> (tempfile::TempDir, std::path::PathBuf) {
 #[test]
 fn threads_racing_for_one_task_produce_one_winner() {
     let (_tmp, dir) = setup();
-    Store::open(&dir).and_then(|s| s.execute(1, add("a"))).unwrap_or_else(|e| panic!("{e}"));
+    Store::open(&dir)
+        .and_then(|s| s.execute(1, add("a")))
+        .unwrap_or_else(|e| panic!("{e}"));
     let n = 12;
     let barrier = Arc::new(Barrier::new(n));
     let handles: Vec<_> = (0..n)
@@ -53,9 +59,15 @@ fn threads_racing_for_one_task_produce_one_winner() {
             })
         })
         .collect();
-    let wins = handles.into_iter().map(|h| h.join().unwrap_or(false)).filter(|w| *w).count();
+    let wins = handles
+        .into_iter()
+        .map(|h| h.join().unwrap_or(false))
+        .filter(|w| *w)
+        .count();
     assert_eq!(wins, 1);
-    let r = Store::open(&dir).and_then(|s| s.load()).unwrap_or_else(|e| panic!("{e}"));
+    let r = Store::open(&dir)
+        .and_then(|s| s.load())
+        .unwrap_or_else(|e| panic!("{e}"));
     assert!(r.issues.is_empty());
     assert_eq!(r.envelopes.len(), 2);
 }
@@ -71,7 +83,9 @@ fn parallel_writers_lose_no_events() {
             thread::spawn(move || {
                 let store = Store::open(&dir).unwrap_or_else(|e| panic!("{e}"));
                 for i in 0..per {
-                    store.execute(1, add(&format!("t{t}-{i}"))).unwrap_or_else(|e| panic!("{e}"));
+                    store
+                        .execute(1, add(&format!("t{t}-{i}")))
+                        .unwrap_or_else(|e| panic!("{e}"));
                 }
             })
         })
@@ -79,12 +93,17 @@ fn parallel_writers_lose_no_events() {
     for h in handles {
         h.join().unwrap_or_else(|_| panic!("thread panicked"));
     }
-    let r = Store::open(&dir).and_then(|s| s.load()).unwrap_or_else(|e| panic!("{e}"));
+    let r = Store::open(&dir)
+        .and_then(|s| s.load())
+        .unwrap_or_else(|e| panic!("{e}"));
     assert!(r.issues.is_empty(), "{:?}", r.issues);
     assert_eq!(r.ledger.len(), threads * per);
     let seqs: BTreeSet<u64> = r.envelopes.iter().map(|e| e.seq).collect();
     assert_eq!(seqs.len(), threads * per, "sequence numbers are unique");
-    assert_eq!(seqs.iter().next_back().copied(), Some((threads * per) as u64));
+    assert_eq!(
+        seqs.iter().next_back().copied(),
+        Some((threads * per) as u64)
+    );
 }
 
 fn run(root: &Path, args: &[&str]) -> std::process::Child {
@@ -102,11 +121,19 @@ fn run(root: &Path, args: &[&str]) -> std::process::Child {
 #[test]
 fn processes_racing_for_one_task_produce_one_winner() {
     let (tmp, dir) = setup();
-    Store::open(&dir).and_then(|s| s.execute(1, add("a"))).unwrap_or_else(|e| panic!("{e}"));
-    let children: Vec<_> = (0..8).map(|_| run(tmp.path(), &["claim", "a", "--agent", "builder"])).collect();
+    Store::open(&dir)
+        .and_then(|s| s.execute(1, add("a")))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let children: Vec<_> = (0..8)
+        .map(|_| run(tmp.path(), &["claim", "a", "--agent", "builder"]))
+        .collect();
     let wins = children
         .into_iter()
-        .map(|c| c.wait_with_output().map(|o| o.status.success()).unwrap_or(false))
+        .map(|c| {
+            c.wait_with_output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
         .filter(|w| *w)
         .count();
     assert_eq!(wins, 1);

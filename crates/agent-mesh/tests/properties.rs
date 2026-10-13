@@ -46,11 +46,19 @@ fn op() -> impl Strategy<Value = Op> {
 
 /// Six tasks. Each task may depend on earlier tasks only, so the input is a DAG.
 fn tasks() -> impl Strategy<Value = Vec<TaskSpec>> {
-    prop::collection::vec((0..3usize, 1..4u32, prop::collection::vec(any::<bool>(), 6)), 6).prop_map(|rows| {
+    prop::collection::vec(
+        (0..3usize, 1..4u32, prop::collection::vec(any::<bool>(), 6)),
+        6,
+    )
+    .prop_map(|rows| {
         rows.into_iter()
             .enumerate()
             .map(|(i, (skill, budget, dep_bits))| {
-                let mut s = TaskSpec::new(tid(i), format!("Task {i}"), Skill::new(SKILLS[skill]).unwrap_or_else(|e| panic!("{e}")));
+                let mut s = TaskSpec::new(
+                    tid(i),
+                    format!("Task {i}"),
+                    Skill::new(SKILLS[skill]).unwrap_or_else(|e| panic!("{e}")),
+                );
                 s.max_failures = budget;
                 s.deps = (0..i).filter(|j| dep_bits[*j]).map(tid).collect();
                 s
@@ -68,7 +76,10 @@ fn aid(i: usize) -> AgentId {
 }
 
 fn token_for(l: &Ledger, t: usize, stale: bool) -> Token {
-    let current = l.task(&tid(t)).and_then(|x| x.life.lease()).map_or(Token(1), |x| x.token);
+    let current = l
+        .task(&tid(t))
+        .and_then(|x| x.life.lease())
+        .map_or(Token(1), |x| x.token);
     if stale {
         Token(current.0 + 1000)
     } else {
@@ -78,26 +89,65 @@ fn token_for(l: &Ledger, t: usize, stale: bool) -> Token {
 
 fn command(l: &Ledger, op: &Op) -> Option<Command> {
     Some(match *op {
-        Op::Claim(t, a) => Command::Claim { task: Some(tid(t)), agent: aid(a), worker: None, ttl: 60 },
-        Op::ClaimNext(a) => Command::Claim { task: None, agent: aid(a), worker: None, ttl: 60 },
-        Op::Heartbeat(t, s) => Command::Heartbeat { task: tid(t), token: token_for(l, t, s), ttl: 60 },
+        Op::Claim(t, a) => Command::Claim {
+            task: Some(tid(t)),
+            agent: aid(a),
+            worker: None,
+            ttl: 60,
+        },
+        Op::ClaimNext(a) => Command::Claim {
+            task: None,
+            agent: aid(a),
+            worker: None,
+            ttl: 60,
+        },
+        Op::Heartbeat(t, s) => Command::Heartbeat {
+            task: tid(t),
+            token: token_for(l, t, s),
+            ttl: 60,
+        },
         Op::Complete(t, s, empty) => Command::Complete {
             task: tid(t),
             token: token_for(l, t, s),
-            evidence: if empty { String::new() } else { "tests pass".into() },
+            evidence: if empty {
+                String::new()
+            } else {
+                "tests pass".into()
+            },
         },
-        Op::Fail(t, s) => Command::Fail { task: tid(t), token: token_for(l, t, s), reason: "broken".into() },
-        Op::Ask(t, s) => Command::Ask { task: tid(t), token: token_for(l, t, s), question: "why?".into() },
-        Op::Answer(t) => Command::Answer { task: tid(t), text: "because".into() },
+        Op::Fail(t, s) => Command::Fail {
+            task: tid(t),
+            token: token_for(l, t, s),
+            reason: "broken".into(),
+        },
+        Op::Ask(t, s) => Command::Ask {
+            task: tid(t),
+            token: token_for(l, t, s),
+            question: "why?".into(),
+        },
+        Op::Answer(t) => Command::Answer {
+            task: tid(t),
+            text: "because".into(),
+        },
         Op::Retry(t) => Command::Retry { task: tid(t) },
-        Op::Cancel(t) => Command::Cancel { task: tid(t), reason: "stop".into() },
+        Op::Cancel(t) => Command::Cancel {
+            task: tid(t),
+            reason: "stop".into(),
+        },
         Op::Reap => Command::Reap,
         Op::Wait(_) => return None,
     })
 }
 
 /// Checks I1-I9 for one accepted step.
-fn check_step(before: &Ledger, after: &Ledger, events: &[Envelope], now: u64, max_token: &mut u64, reg: &Registry) {
+fn check_step(
+    before: &Ledger,
+    after: &Ledger,
+    events: &[Envelope],
+    now: u64,
+    max_token: &mut u64,
+    reg: &Registry,
+) {
     for t in after.tasks() {
         // I1 and I5 (state part).
         assert!(t.life.invariant_holds(), "I1/I5 broken: {t:?}");
@@ -110,7 +160,11 @@ fn check_step(before: &Ledger, after: &Ledger, events: &[Envelope], now: u64, ma
         }
         // I8: completed tasks have evidence.
         if t.life.state() == State::Completed {
-            assert!(t.last_note(NoteKind::Evidence).is_some_and(|e| !e.trim().is_empty()), "I8 broken");
+            assert!(
+                t.last_note(NoteKind::Evidence)
+                    .is_some_and(|e| !e.trim().is_empty()),
+                "I8 broken"
+            );
         }
         // I2: terminal tasks do not change.
         if let Some(old) = before.task(&t.spec.id) {
@@ -119,15 +173,24 @@ fn check_step(before: &Ledger, after: &Ledger, events: &[Envelope], now: u64, ma
             }
             // I5: failed exits only by retry inside the budget, or cancel.
             if old.life.state() == State::Failed && t.life.state() != State::Failed {
-                let retried = events.iter().any(|e| matches!(&e.event, Event::Retried { task } if task == &t.spec.id));
+                let retried = events
+                    .iter()
+                    .any(|e| matches!(&e.event, Event::Retried { task } if task == &t.spec.id));
                 let canceled = t.life.state() == State::Canceled;
-                assert!(canceled || (retried && old.life.failures() < old.life.max_failures()), "I5 exit broken");
+                assert!(
+                    canceled || (retried && old.life.failures() < old.life.max_failures()),
+                    "I5 exit broken"
+                );
             }
         }
     }
     // I9: WIP limit per role.
     for c in reg.cards() {
-        assert!(after.active_count(&c.id) <= c.max_active as usize, "I9 broken for {}", c.id);
+        assert!(
+            after.active_count(&c.id) <= c.max_active as usize,
+            "I9 broken for {}",
+            c.id
+        );
     }
     for e in events {
         match &e.event {
@@ -137,7 +200,11 @@ fn check_step(before: &Ledger, after: &Ledger, events: &[Envelope], now: u64, ma
                 *max_token = token.0;
                 let spec = &before.task(task).unwrap_or_else(|| panic!("task")).spec;
                 for d in &spec.deps {
-                    assert_eq!(before.task(d).map(|x| x.life.state()), Some(State::Completed), "I6 broken");
+                    assert_eq!(
+                        before.task(d).map(|x| x.life.state()),
+                        Some(State::Completed),
+                        "I6 broken"
+                    );
                 }
             }
             // I4: worker writes need the live lease with the same token.
@@ -145,7 +212,10 @@ fn check_step(before: &Ledger, after: &Ledger, events: &[Envelope], now: u64, ma
             | Event::Completed { task, token, .. }
             | Event::Failed { task, token, .. }
             | Event::InputRequested { task, token, .. } => {
-                let lease = before.task(task).and_then(|x| x.life.lease()).unwrap_or_else(|| panic!("I4: no lease"));
+                let lease = before
+                    .task(task)
+                    .and_then(|x| x.life.lease())
+                    .unwrap_or_else(|| panic!("I4: no lease"));
                 assert_eq!(lease.token, *token, "I4 token");
                 assert!(now < lease.expires_at, "I4 expiry");
             }
@@ -183,7 +253,6 @@ proptest! {
         // Replay of the accepted events gives the same ledger.
         let mut copy = Ledger::new();
         for env in &log {
-            copy.observe(env);
             prop_assert!(copy.apply(env).is_ok());
         }
         prop_assert_eq!(copy, ledger);

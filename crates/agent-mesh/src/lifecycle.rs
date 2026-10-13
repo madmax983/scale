@@ -41,15 +41,13 @@ impl State {
     /// `true` for states that accept no transition.
     #[must_use]
     pub const fn is_terminal(self) -> bool {
-        let _ = self;
-        panic!("RED")
+        matches!(self, Self::Completed | Self::Canceled)
     }
 
     /// `true` for states that must keep budget for one more failure.
     #[must_use]
     pub const fn is_active(self) -> bool {
-        let _ = self;
-        panic!("RED")
+        matches!(self, Self::Submitted | Self::Working | Self::InputRequired)
     }
 
     /// The A2A name of the state.
@@ -162,8 +160,14 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the task is not working, the token is stale, or the lease expired.
     pub fn holds(&self, token: Token, now: u64) -> Result<&Lease, Rejection> {
-        let _ = (token, now);
-        todo!("RED")
+        match (self.state, &self.lease) {
+            (State::Working, Some(lease)) if lease.token != token => Err(Rejection::StaleToken),
+            (State::Working, Some(lease)) if now >= lease.expires_at => {
+                Err(Rejection::LeaseExpired)
+            }
+            (State::Working, Some(lease)) => Ok(lease),
+            (state, _) => Err(Rejection::WrongState(state)),
+        }
     }
 
     /// `submitted` -> `working`. The ledger gives a fresh token (I3).
@@ -171,8 +175,16 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the task is not submitted or the lease has no time.
     pub fn claim(&mut self, lease: Lease) -> Result<(), Rejection> {
-        let _ = lease;
-        todo!("RED")
+        if self.state != State::Submitted {
+            return Err(Rejection::WrongState(self.state));
+        }
+        if lease.expires_at <= lease.claimed_at {
+            return Err(Rejection::InvalidLease);
+        }
+        self.state = State::Working;
+        self.lease = Some(lease);
+        self.attempts = self.attempts.saturating_add(1);
+        Ok(())
     }
 
     /// Extends the live lease to `expires_at`.
@@ -180,8 +192,14 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the caller does not hold the live lease.
     pub fn heartbeat(&mut self, token: Token, now: u64, expires_at: u64) -> Result<(), Rejection> {
-        let _ = (token, now, expires_at);
-        todo!("RED")
+        self.holds(token, now)?;
+        if expires_at <= now {
+            return Err(Rejection::InvalidLease);
+        }
+        if let Some(lease) = self.lease.as_mut() {
+            lease.expires_at = expires_at;
+        }
+        Ok(())
     }
 
     /// `working` -> `completed`.
@@ -189,8 +207,9 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the caller does not hold the live lease.
     pub fn complete(&mut self, token: Token, now: u64) -> Result<(), Rejection> {
-        let _ = (token, now);
-        todo!("RED")
+        self.holds(token, now)?;
+        self.finish(State::Completed);
+        Ok(())
     }
 
     /// `working` -> `failed`. Counts one failure.
@@ -198,8 +217,10 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the caller does not hold the live lease.
     pub fn fail(&mut self, token: Token, now: u64) -> Result<(), Rejection> {
-        let _ = (token, now);
-        todo!("RED")
+        self.holds(token, now)?;
+        self.failures = self.failures.saturating_add(1);
+        self.finish(State::Failed);
+        Ok(())
     }
 
     /// `working` -> `input-required`. Releases the lease.
@@ -207,8 +228,9 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the caller does not hold the live lease.
     pub fn ask(&mut self, token: Token, now: u64) -> Result<(), Rejection> {
-        let _ = (token, now);
-        todo!("RED")
+        self.holds(token, now)?;
+        self.finish(State::InputRequired);
+        Ok(())
     }
 
     /// `input-required` -> `submitted`.
@@ -216,7 +238,11 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the task does not wait for input.
     pub fn answer(&mut self) -> Result<(), Rejection> {
-        todo!("RED")
+        if self.state != State::InputRequired {
+            return Err(Rejection::WrongState(self.state));
+        }
+        self.finish(State::Submitted);
+        Ok(())
     }
 
     /// `failed` -> `submitted`, while budget is left (I5).
@@ -224,7 +250,14 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the task is not failed or the budget is used.
     pub fn retry(&mut self) -> Result<(), Rejection> {
-        todo!("RED")
+        if self.state != State::Failed {
+            return Err(Rejection::WrongState(self.state));
+        }
+        if self.failures >= self.max_failures {
+            return Err(Rejection::BudgetExhausted);
+        }
+        self.finish(State::Submitted);
+        Ok(())
     }
 
     /// Any non-terminal state -> `canceled`.
@@ -232,7 +265,11 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the task is terminal (I2).
     pub fn cancel(&mut self) -> Result<(), Rejection> {
-        todo!("RED")
+        if self.state.is_terminal() {
+            return Err(Rejection::WrongState(self.state));
+        }
+        self.finish(State::Canceled);
+        Ok(())
     }
 
     /// Ends an overdue lease. Counts one failure. The task goes to `submitted`,
@@ -241,14 +278,35 @@ impl Lifecycle {
     /// # Errors
     /// A [`Rejection`] if the task is not working or the lease is still live.
     pub fn expire(&mut self, now: u64) -> Result<(), Rejection> {
-        let _ = now;
-        todo!("RED")
+        match (self.state, &self.lease) {
+            (State::Working, Some(lease)) if now < lease.expires_at => Err(Rejection::LeaseLive),
+            (State::Working, Some(_)) => {
+                self.failures = self.failures.saturating_add(1);
+                let next = if self.failures < self.max_failures {
+                    State::Submitted
+                } else {
+                    State::Failed
+                };
+                self.finish(next);
+                Ok(())
+            }
+            (state, _) => Err(Rejection::WrongState(state)),
+        }
     }
 
     /// `true` if invariants I1 and I5 hold.
     #[must_use]
     pub fn invariant_holds(&self) -> bool {
-        todo!("RED")
+        (self.state == State::Working) == self.lease.is_some()
+            && self.max_failures >= 1
+            && self.failures <= self.max_failures
+            && (!self.state.is_active() || self.failures < self.max_failures)
+    }
+
+    /// Moves to `state` and drops the lease.
+    fn finish(&mut self, state: State) {
+        self.state = state;
+        self.lease = None;
     }
 }
 
@@ -314,7 +372,10 @@ mod tests {
         assert_eq!(l.heartbeat(Token(3), 120, 500), Ok(()));
         assert_eq!(l.lease().map(|x| x.expires_at), Some(500));
         assert_eq!(l.heartbeat(Token(2), 130, 600), Err(Rejection::StaleToken));
-        assert_eq!(l.heartbeat(Token(3), 130, 130), Err(Rejection::InvalidLease));
+        assert_eq!(
+            l.heartbeat(Token(3), 130, 130),
+            Err(Rejection::InvalidLease)
+        );
     }
 
     #[test]

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Runs the agent mesh CLI. Builds it when the source is newer than the binary.
+# Usage: scripts/mesh <command> [args]. See crates/agent-mesh/README.md.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+crate="$root/crates/agent-mesh"
+bin="$crate/target/release/mesh"
+if [[ ! -x "$bin" || -n "$(find "$crate/src" "$crate/Cargo.toml" -newer "$bin" -print -quit)" ]]; then
+  cargo build --quiet --release --manifest-path "$crate/Cargo.toml" >&2
+fi
+export MESH_DIR="${MESH_DIR:-$root/.mesh}"
+exec "$bin" "$@"

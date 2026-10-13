@@ -39,7 +39,9 @@ impl Repo {
     }
 
     fn mesh(&self, now: u64, args: &[&str]) -> Output {
-        self.cmd(now, args).output().unwrap_or_else(|e| panic!("{e}"))
+        self.cmd(now, args)
+            .output()
+            .unwrap_or_else(|e| panic!("{e}"))
     }
 
     fn ok(&self, now: u64, args: &[&str]) -> String {
@@ -87,7 +89,14 @@ impl Repo {
     fn git(&self, args: &[&str]) {
         let st = Command::new("git")
             .current_dir(self.root())
-            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
             .args(args)
             .output()
             .unwrap_or_else(|e| panic!("{e}"));
@@ -130,7 +139,15 @@ fn no_mesh_gives_a_clear_error() {
 fn agents_lists_the_roles() {
     let repo = Repo::new();
     let out = repo.ok(1, &["agents"]);
-    for id in ["designer", "lore-master", "architect", "builder", "integrator", "codex", "reviewer"] {
+    for id in [
+        "designer",
+        "lore-master",
+        "architect",
+        "builder",
+        "integrator",
+        "codex",
+        "reviewer",
+    ] {
         assert!(out.contains(id), "{id}");
     }
     let v = repo.json(1, &["agents"]);
@@ -140,15 +157,34 @@ fn agents_lists_the_roles() {
 #[test]
 fn full_task_flow() {
     let repo = Repo::new();
-    repo.ok(10, &["add", "--id", "a", "--title", "Build A", "--skill", "build", "--path", "src/**"]);
-    repo.ok(10, &["add", "--id", "b", "--title", "Review A", "--skill", "review", "--dep", "a"]);
-    let err = repo.fail(10, &["add", "--id", "a", "--title", "Again", "--skill", "build"]);
+    repo.ok(
+        10,
+        &[
+            "add", "--id", "a", "--title", "Build A", "--skill", "build", "--path", "src/**",
+        ],
+    );
+    repo.ok(
+        10,
+        &[
+            "add", "--id", "b", "--title", "Review A", "--skill", "review", "--dep", "a",
+        ],
+    );
+    let err = repo.fail(
+        10,
+        &["add", "--id", "a", "--title", "Again", "--skill", "build"],
+    );
     assert!(err.contains("already exists"), "{err}");
 
     let ready = repo.ok(11, &["ready"]);
-    assert!(ready.contains('a') && !ready.contains("Review A"), "{ready}");
+    assert!(
+        ready.contains('a') && !ready.contains("Review A"),
+        "{ready}"
+    );
 
-    let claim = repo.ok(12, &["claim", "a", "--agent", "builder", "--worker", "sub-1"]);
+    let claim = repo.ok(
+        12,
+        &["claim", "a", "--agent", "builder", "--worker", "sub-1"],
+    );
     let token = token_of(&claim);
     assert!(claim.contains("Mesh-Task: a"), "{claim}");
     assert!(claim.contains(&format!("Mesh-Token: {token}")), "{claim}");
@@ -159,7 +195,17 @@ fn full_task_flow() {
     assert!(err.contains("stale token"), "{err}");
 
     repo.ok(14, &["heartbeat", "a", "--token", &token, "--ttl", "600"]);
-    repo.ok(15, &["complete", "a", "--token", &token, "--evidence", "cargo test: 12 passed"]);
+    repo.ok(
+        15,
+        &[
+            "complete",
+            "a",
+            "--token",
+            &token,
+            "--evidence",
+            "cargo test: 12 passed",
+        ],
+    );
 
     let ready = repo.ok(16, &["ready", "--agent", "reviewer"]);
     assert!(ready.contains("Review A"), "{ready}");
@@ -168,15 +214,26 @@ fn full_task_flow() {
     let show = repo.ok(16, &["show", "a"]);
     assert!(show.contains("cargo test: 12 passed"), "{show}");
     let log = repo.ok(16, &["log"]);
-    assert_eq!(log.lines().filter(|l| l.starts_with('#')).count(), 5, "{log}");
+    assert_eq!(
+        log.lines().filter(|l| l.starts_with('#')).count(),
+        5,
+        "{log}"
+    );
     let log_a = repo.ok(16, &["log", "--task", "a", "--limit", "2"]);
-    assert_eq!(log_a.lines().filter(|l| l.starts_with('#')).count(), 2, "{log_a}");
+    assert_eq!(
+        log_a.lines().filter(|l| l.starts_with('#')).count(),
+        2,
+        "{log_a}"
+    );
 }
 
 #[test]
 fn json_outputs() {
     let repo = Repo::new();
-    let added = repo.json(10, &["add", "--id", "a", "--title", "A", "--skill", "build"]);
+    let added = repo.json(
+        10,
+        &["add", "--id", "a", "--title", "A", "--skill", "build"],
+    );
     assert_eq!(added[0]["event"]["type"], "task_added");
     let claimed = repo.json(11, &["claim", "--next", "--agent", "builder"]);
     assert_eq!(claimed[0]["event"]["token"], 1);
@@ -194,7 +251,20 @@ fn json_outputs() {
 #[test]
 fn leases_expire_and_fence_checks_the_token() {
     let repo = Repo::new();
-    repo.ok(100, &["add", "--id", "a", "--title", "A", "--skill", "build", "--max-failures", "2"]);
+    repo.ok(
+        100,
+        &[
+            "add",
+            "--id",
+            "a",
+            "--title",
+            "A",
+            "--skill",
+            "build",
+            "--max-failures",
+            "2",
+        ],
+    );
     let token = token_of(&repo.ok(100, &["claim", "a", "--agent", "builder", "--ttl", "10"]));
     repo.ok(105, &["fence", "a", "--token", &token]);
     let err = repo.fail(105, &["fence", "a", "--token", "42"]);
@@ -208,7 +278,10 @@ fn leases_expire_and_fence_checks_the_token() {
     assert!(repo.ok(201, &["ready"]).contains("A"));
     // The second expiry uses the budget: the task fails.
     repo.ok(300, &["claim", "a", "--agent", "builder", "--ttl", "10"]);
-    let out = repo.ok(400, &["add", "--id", "b", "--title", "B", "--skill", "build"]);
+    let out = repo.ok(
+        400,
+        &["add", "--id", "b", "--title", "B", "--skill", "build"],
+    );
     assert!(out.contains("lease of a expired"), "{out}");
     assert!(repo.ok(401, &["show", "a"]).contains("failed"));
 }
@@ -218,7 +291,10 @@ fn ask_answer_fail_retry_cancel() {
     let repo = Repo::new();
     repo.ok(1, &["add", "--id", "a", "--title", "A", "--skill", "build"]);
     let t = token_of(&repo.ok(2, &["claim", "a", "--agent", "builder"]));
-    repo.ok(3, &["ask", "a", "--token", &t, "--question", "Which module?"]);
+    repo.ok(
+        3,
+        &["ask", "a", "--token", &t, "--question", "Which module?"],
+    );
     assert!(repo.ok(3, &["status"]).contains("Which module?"));
     repo.ok(4, &["answer", "a", "--text", "layer1"]);
     let t = token_of(&repo.ok(5, &["claim", "a", "--agent", "builder"]));
@@ -268,13 +344,59 @@ fn board_check_detects_drift() {
 #[test]
 fn check_scope_with_files() {
     let repo = Repo::new();
-    repo.ok(1, &["check-scope", "--agent", "builder", "src/lib.rs", "tests/a.rs"]);
-    let out = repo.mesh(1, &["check-scope", "--agent", "builder", "src/lib.rs", "specs/1.md", "src/../specs/2.md"]);
+    repo.ok(
+        1,
+        &[
+            "check-scope",
+            "--agent",
+            "builder",
+            "src/lib.rs",
+            "tests/a.rs",
+        ],
+    );
+    let out = repo.mesh(
+        1,
+        &[
+            "check-scope",
+            "--agent",
+            "builder",
+            "src/lib.rs",
+            "specs/1.md",
+            "src/../specs/2.md",
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     let stdout = text(&out.stdout);
-    assert!(stdout.contains("specs/1.md") && stdout.contains("src/../specs/2.md"), "{stdout}");
-    repo.ok(1, &["add", "--id", "a", "--title", "A", "--skill", "build", "--path", "src/ui/**"]);
-    let out = repo.mesh(1, &["check-scope", "--agent", "builder", "--task", "a", "src/ui/x.rs", "src/layer1/y.rs"]);
+    assert!(
+        stdout.contains("specs/1.md") && stdout.contains("src/../specs/2.md"),
+        "{stdout}"
+    );
+    repo.ok(
+        1,
+        &[
+            "add",
+            "--id",
+            "a",
+            "--title",
+            "A",
+            "--skill",
+            "build",
+            "--path",
+            "src/ui/**",
+        ],
+    );
+    let out = repo.mesh(
+        1,
+        &[
+            "check-scope",
+            "--agent",
+            "builder",
+            "--task",
+            "a",
+            "src/ui/x.rs",
+            "src/layer1/y.rs",
+        ],
+    );
     assert_eq!(out.status.code(), Some(1));
     assert!(text(&out.stdout).contains("src/layer1/y.rs"));
     let v = repo.json(1, &["check-scope", "--agent", "reviewer", ".mesh/BOARD.md"]);
@@ -295,7 +417,10 @@ fn check_scope_reads_git_changes() {
     let stdout = text(&out.stdout);
     assert!(stdout.contains("src/lib.rs"), "{stdout}");
     assert!(!stdout.contains("specs/new.md"), "{stdout}");
-    let err = repo.fail(1, &["check-scope", "--agent", "architect", "--base", "--evil"]);
+    let err = repo.fail(
+        1,
+        &["check-scope", "--agent", "architect", "--base", "--evil"],
+    );
     assert!(err.contains("git"), "{err}");
 }
 
@@ -311,7 +436,9 @@ fn hook_blocks_out_of_scope_edits() {
             .spawn()
             .unwrap_or_else(|e| panic!("{e}"));
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(input.to_string().as_bytes()).unwrap_or_else(|e| panic!("{e}"));
+            stdin
+                .write_all(input.to_string().as_bytes())
+                .unwrap_or_else(|e| panic!("{e}"));
         }
         child.wait_with_output().unwrap_or_else(|e| panic!("{e}"))
     };
@@ -375,7 +502,10 @@ fn dir_flag_and_env_select_the_mesh() {
 #[test]
 fn bad_input_is_rejected() {
     let repo = Repo::new();
-    let out = repo.mesh(1, &["add", "--id", "Bad Id", "--title", "x", "--skill", "build"]);
+    let out = repo.mesh(
+        1,
+        &["add", "--id", "Bad Id", "--title", "x", "--skill", "build"],
+    );
     assert_eq!(out.status.code(), Some(2), "clap rejects invalid ids");
     let out = repo.mesh(1, &["claim", "--agent", "builder"]);
     assert_eq!(out.status.code(), Some(2), "claim needs a task or --next");

@@ -9,7 +9,9 @@ use crate::lifecycle::State;
 #[derive(Debug, thiserror::Error)]
 pub enum MeshError {
     /// The text is not a valid id.
-    #[error("invalid id `{0}`: use 1-64 characters a-z, 0-9, '.', '_', '-'; start with a-z or 0-9")]
+    #[error(
+        "invalid id `{0}`: use 1-64 characters a-z, 0-9, '.', '_', '-'; start with a-z or 0-9"
+    )]
     InvalidId(String),
     /// The text is not a valid token.
     #[error("invalid token `{0}`: use a positive integer")]
