@@ -476,6 +476,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "heritage" => print_heritage(world),
         "curio" => print_curio_ledger(world),
         "rumors" => print_rumors(world),
+        "contagion" => print_contagion(world),
         "season" => print_season(world),
         "save" => handle_save_command(world, &parts),
         "load" => handle_load_command(world, &parts),
@@ -3043,6 +3044,12 @@ fn print_stats(world: &mut World) {
         known_rumor_count(world)
     };
 
+    // Spec 346: pops currently carrying a contagion-sourced mood modifier.
+    let contagion = {
+        use scale::layer1::social::emotional_contagion::contagion_affected_count;
+        contagion_affected_count(world)
+    };
+
     // Short season name for STATS; the full summary is the `season` command.
     let season_name = world
         .get_resource::<scale::layer1::seasons::SeasonState>()
@@ -3058,7 +3065,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} season={} quirks={} saves={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={}",
         tick,
         pops,
         avg_health,
@@ -3121,6 +3128,7 @@ fn print_stats(world: &mut World) {
         memories,
         identity,
         rumors,
+        contagion,
         season_name,
         quirks_label,
         saves_count,
@@ -6088,6 +6096,11 @@ fn print_help() {
                     "Rumor web: circulation, false-rumor believers, debunks, panics (Spec 343)",
                 ),
                 (
+                    "contagion",
+                    "",
+                    "Emotional contagion: live sources by emotion, affected pops, spread ledger (Spec 346)",
+                ),
+                (
                     "season",
                     "",
                     "Seasonal rhythms: season, ambient temp, food/growth/movement modifiers (Spec 344)",
@@ -7543,6 +7556,29 @@ fn print_rumors(world: &mut World) {
         &format!(
             "Rumors in circulation: {}\nFalse-rumor believers: {}\nAdjacency exchanges: {}\nFalse rumors debunked by skeptics: {}\nPanic spikes: {}\n\nWord travels at walking speed here. Stressed pops invent\nscare stories; gossips carry them far; skeptics kill them.",
             total, believers, exchanges, debunked, panics,
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Emotional contagion report (headless `contagion` command, Spec 346).
+fn print_contagion(world: &mut World) {
+    use scale::layer1::social::emotional_contagion::{
+        contagion_affected_count, contagion_source_counts, ContagionLedger,
+    };
+
+    let (terror, joy, rage) = contagion_source_counts(world);
+    let affected = contagion_affected_count(world);
+    let (spreads, peak) = world
+        .get_resource::<ContagionLedger>()
+        .map(|l| (l.total_spreads, l.peak_affected))
+        .unwrap_or_default();
+    print_dashboard_panel(
+        "EMOTIONAL CONTAGION",
+        &format!(
+            "Terror sources: {}\nJoy sources: {}\nRage sources: {}\nPops carrying a contagion mood: {}\nTotal spreads: {}\nPeak simultaneously affected: {}\n\nExtreme feelings radiate a few tiles. The crowd's loudest\nemotion wins: one temporary mood, refreshed — never stacked.\nPanicked pops radiate Terror; contagion itself never panics\nanyone (that is the panic system's call, Spec 1371).",
+            terror, joy, rage, affected, spreads, peak,
         ),
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),

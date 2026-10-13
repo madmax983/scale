@@ -5,8 +5,14 @@ use scale::layer1::social::emotional_contagion::{
 };
 use scale::layer1::social::morale::Morale;
 
+// Spec 346 adaptation: the original draft of this test used the sketch
+// API (ContagionType::Terror, radius: f32, Morale on a 0-100 scale). The
+// real Morale component is clamped to 0.0-1.0 by update_morale_cache_system
+// and Spec 346 names the low extreme Terror, so the values/variant below
+// are the same three assertions on the real scale.
+
 #[test]
-fn test_emotional_contagion_triggers_panic() {
+fn test_emotional_contagion_triggers_terror() {
     let mut app = App::new();
     app.add_plugins(bevy::MinimalPlugins);
     app.add_systems(bevy::app::Update, trigger_emotional_contagion_system);
@@ -14,7 +20,7 @@ fn test_emotional_contagion_triggers_panic() {
     let pop = app
         .world_mut()
         .spawn(Morale {
-            value: 10.0,
+            value: 0.10,
             ..Default::default()
         })
         .id();
@@ -25,7 +31,7 @@ fn test_emotional_contagion_triggers_panic() {
         .world()
         .get::<EmotionalContagion>(pop)
         .expect("Should add EmotionalContagion");
-    assert_eq!(contagion.contagion_type, ContagionType::Panic);
+    assert_eq!(contagion.contagion_type, ContagionType::Terror);
 }
 
 #[test]
@@ -37,7 +43,7 @@ fn test_emotional_contagion_triggers_joy() {
     let pop = app
         .world_mut()
         .spawn(Morale {
-            value: 90.0,
+            value: 0.90,
             ..Default::default()
         })
         .id();
@@ -61,13 +67,13 @@ fn test_emotional_contagion_removed_when_recovered() {
         .world_mut()
         .spawn((
             Morale {
-                value: 50.0,
+                value: 0.50,
                 ..Default::default()
             },
             EmotionalContagion {
-                contagion_type: ContagionType::Panic,
-                radius: 5.0,
-                strength: -15.0,
+                contagion_type: ContagionType::Terror,
+                radius: 5,
+                strength: -0.15,
             },
         ))
         .id();
