@@ -1,0 +1,9 @@
+:8080 {
+	root * /srv
+	encode zstd gzip
+	file_server
+
+	# Trunk fingerprints these filenames, so they can be cached forever.
+	@hashed path *.wasm *.js *.css
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+}

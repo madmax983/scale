@@ -1,0 +1,13 @@
+# Keep the build context to what `trunk build` needs.
+# lore/ must stay: src/shared/narrative.rs embeds it via include_str!.
+/target
+/dist
+.git
+.github
+.jules
+/specs
+/design
+/docs
+/prompts
+/e2e
+/tests

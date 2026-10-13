@@ -3,9 +3,13 @@
   <head>
     <meta charset="utf-8">
     <title>SCALE WASM</title>
-    <link data-trunk rel="rust" data-bin="wasm_app" />
+    <!-- wasm-opt must be told about the WASM features rustc enables by default,
+         or it rejects the module (e.g. memory.copy needs bulk-memory). -->
+    <link data-trunk rel="rust" data-bin="wasm_app"
+          data-wasm-opt-params="--enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types" />
   </head>
-  <body>
-    <canvas id="canvas"></canvas>
-  </body>
+  <!-- Keep <body> empty: ratzilla's DomBackend sizes its cell grid from the
+       body's rect and only falls back to the window size when body has none.
+       Any content here shrinks the grid and the first draw indexes past it. -->
+  <body></body>
 </html>
