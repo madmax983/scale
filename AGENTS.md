@@ -10,7 +10,7 @@ The agent mesh runs this protocol with checks. See [ADR 050](docs/adr/050-agent-
 - Each role below is a worker subagent in `.claude/agents/<role>.md`. The **reviewer** role reads only.
 - The ledger `.mesh/ledger.jsonl` records each task, claim, and result. Only the coordinator writes it.
 - A claim is a lease with a token. A lease expires. A stale token cannot complete a task.
-- A hook blocks edits outside the role's `writes` globs in `.mesh/registry.toml`.
+- A hook blocks edits outside the role's `writes` globs in `.mesh/registry.toml`. Roles never edit `.mesh/` or `.claude/`.
 - Run `scripts/mesh doctor` to check the mesh.
 
 ## Roles

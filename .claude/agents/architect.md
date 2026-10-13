@@ -9,8 +9,8 @@ Role guide: `prompts/ARCHITECT.md`. Project rules: `AGENTS.md`.
 
 ## Brief
 
-The coordinator sends one task: task id, token, mesh command, detail, and a check command.
-The mesh command is a full path, for example `/repo/scripts/mesh`. Below it is `<mesh>`.
+The coordinator sends one task: task id, token, mesh command, base commit, paths, detail, and a check command.
+The mesh command is a full path, for example `/repo/scripts/mesh`. In this file, `<mesh>` is that path.
 Do only that task. If the brief is not clear, report a question. Do not guess.
 
 ## Rules
@@ -22,10 +22,13 @@ Do only that task. If the brief is not clear, report a question. Do not guess.
 
 ## Mesh rules
 
-1. Change only the paths of role `architect` in `.mesh/registry.toml`. A hook blocks other edits.
-2. Do not run mesh write commands (`claim`, `complete`, `fail`, `ask`). The coordinator writes the ledger.
-3. Before you report, run `<mesh> check-scope --agent architect`. Fix each violation.
-4. Run `<mesh> fence <task> --token <token>`. If it fails, stop. Report "lease lost".
+1. Change only the files in `Paths` of the brief. The hook blocks paths outside the scope of role `architect`.
+2. Run only these mesh commands: `fence`, `check-scope`, `show`, `status`. The coordinator writes the ledger.
+3. Use `prompts/ARCHITECT.md` for its craft rules only. Do not claim tasks, edit `design/IN_PROGRESS.md`, pull, or push. The coordinator does these steps.
+4. Before you commit, run `<mesh> fence <task> --token <token>`. If it fails, stop. Report "lease lost".
+5. Run `<mesh> check-scope --agent architect --task <task> --base <base>`. Fix each violation in a file that you changed.
+6. If a violation is in a file that you did not change, report it. Do not change that file.
+7. Add the trailers `Mesh-Task: <task>` and `Mesh-Token: <token>` to each commit.
 
 ## Check
 

@@ -5,7 +5,7 @@ Date: 2026-10-13. Status: accepted. ADR: [050](../adr/050-agent-mesh.md).
 ## 1. Goal
 
 Make a small agent mesh for the AI agents that build SCALE.
-The main chat assistant is the **coordinator**. It plans the work and sends tasks to **worker** subagents.
+The main chat session is the **coordinator**. It plans the work and sends tasks to **worker** subagents.
 The mesh records each task, each claim, and each result in the git repository.
 
 ## 2. Glossary
@@ -151,6 +151,7 @@ flowchart LR
 
 ```mermaid
 stateDiagram-v2
+    state "input-required" as input_required
     [*] --> submitted: add / plan
     submitted --> working: claim (new token)
     working --> working: heartbeat (same token)
@@ -180,11 +181,12 @@ sequenceDiagram
     loop until all tasks are terminal
         C->>M: ready
         C->>M: claim T --agent builder
-        M-->>C: token 7
+        M-->>C: token 7-9f3a2b1c
         C->>W: brief (task, token, scope, check command)
         W-->>C: report (commit, evidence)
-        C->>M: check-scope --agent builder
-        C->>M: complete T --token 7 --evidence "..."
+        C->>M: check-scope --agent builder --base B
+        C->>M: fence T --token 7-9f3a2b1c
+        C->>M: complete T --token 7-9f3a2b1c --evidence "..."
     end
     C->>M: doctor
 ```
@@ -207,7 +209,7 @@ sequenceDiagram
 | I2 | `completed` and `canceled` accept no transition. | Verus | proptest |
 | I3 | Each claim gets a token larger than every earlier token. | Verus | proptest |
 | I4 | Worker writes need the current token and a live lease. | Verus | proptest |
-| I5 | `failures <= max_failures`. `failed` leaves only by `retry` inside the budget. | Verus | proptest |
+| I5 | `failures <= max_failures`. `failed` leaves only by `retry` inside the budget, or by `cancel`. | Verus | proptest |
 | I6 | A claim needs all dependencies `completed`. | — | proptest |
 | I7 | The dependency graph has no cycle. | — | proptest |
 | I8 | A `completed` task has evidence. | — | proptest |
@@ -215,35 +217,51 @@ sequenceDiagram
 
 ## 8. Acceptance criteria
 
-| AC | Criterion |
-|---|---|
-| AC-1 | `mesh init` makes the registry with 7 roles and an empty ledger. A second run changes nothing. |
-| AC-2 | The registry loader rejects duplicate ids, bad ids, empty skills, bad globs, and `max_active = 0`. |
-| AC-3 | Each role has `.claude/agents/<id>.md` with the same `name`. `doctor` fails when one is missing. |
-| AC-4 | `add` and `plan` check id format, unique ids, known dependencies, and served skills. `plan` is atomic and rejects cycles with the path. |
-| AC-5 | The ready set is derived. A task with a `failed` or `canceled` dependency is shown as blocked. |
-| AC-6 | `claim` gives one lease. The token is larger than all earlier tokens. A second claim fails. |
-| AC-7 | `claim` checks the skill, the WIP limit, and readiness. `claim --next` takes the first ready task for the role. |
-| AC-8 | `heartbeat`, `complete`, `fail`, and `ask` fail with a stale token. `fence` exits 0 only for the current token. |
-| AC-9 | `complete` needs non-empty evidence. |
-| AC-10 | Overdue leases expire on `reap` and before each write. The task goes to `submitted`, or to `failed` when the budget is used. |
-| AC-11 | `fail` sets `failed`. `retry` works only while `failures < max_failures`. |
-| AC-12 | `ask` stores the question and releases the lease. `answer` stores the answer and sets `submitted`. |
-| AC-13 | `cancel` works from each non-terminal state. Terminal states reject all transitions. |
-| AC-14 | The ledger is append-only JSONL. Replay gives the same state. Bad lines and conflicts are reported. Parallel writers never make two winners or lose events. |
-| AC-15 | `status`, `show`, `ready`, and `log` print text, and JSON with `--json`. |
-| AC-16 | Each write updates `.mesh/BOARD.md`. `board --check` finds drift. |
-| AC-17 | `check-scope` reports files outside the role globs and the task paths. It rejects `..`. With no files, it reads git changes. |
-| AC-18 | `mesh hook` blocks (exit 2) an edit by a role outside its scope. It allows the main session. `.claude/settings.json` connects it. |
-| AC-19 | `doctor` checks the registry, role files, ledger, board, overdue leases, blocked tasks, served skills, and `.gitattributes`. |
-| AC-20 | `.claude/skills/mesh-coordinator/SKILL.md` gives the loop, the brief template, and the stop rules. |
-| AC-21 | The Verus model proves I1–I5 with 0 errors. CI runs Verus. |
-| AC-22 | Property tests check I1–I9 on random command sequences. |
-| AC-23 | `fmt`, `clippy` (pedantic, nursery, `-D warnings`), and tests pass. Line coverage is 85% or more. No `unwrap` in production code. |
-| AC-24 | A CI workflow runs fmt, clippy, tests, coverage, `doctor`, and Verus for mesh changes. |
-| AC-25 | ADR 050, an architecture section with Mermaid, this plan, a crate README, and an AGENTS.md section exist. They are short and use ASD-STE100. |
-| AC-26 | The game build does not change. The Docker context excludes the mesh folders. |
+| AC | Criterion | Evidence |
+|---|---|---|
+| AC-1 | `mesh init` makes the registry with 7 roles and an empty ledger. A second run changes nothing. | `cli::init_creates_the_mesh_once`, `store::init_is_idempotent`, `cli::agents_lists_the_roles`; `.mesh/` in the repo. |
+| AC-2 | The registry loader rejects duplicate ids, bad ids, empty skills, bad globs, and `max_active = 0`. | `registry::rejects_bad_registries`. |
+| AC-3 | Each role has `.claude/agents/<id>.md` with the same `name`. `doctor` fails when one is missing. | `repo::each_role_has_a_claude_agent_file`, `doctor::missing_or_wrong_agent_file_is_an_error`. |
+| AC-4 | `add` and `plan` check id format, unique ids, known dependencies, and served skills. `plan` is atomic and rejects cycles with the path. | `ledger::add_rejects_duplicates_unknown_deps_and_unserved_skills`, `ledger::plan_is_atomic`, `plan::*`, `properties::plans_are_rejected_exactly_when_they_have_a_cycle`, `cli::plan_files_are_checked_and_atomic`, `cli::plan_dry_run_checks_skills`. |
+| AC-5 | The ready set is derived. A task with a `failed` or `canceled` dependency is shown as blocked. | `ledger::readiness_is_derived_from_dependencies`, `ledger::blocked_when_a_dependency_failed_or_was_canceled`, `review::c8_blocking_is_transitive`. |
+| AC-6 | `claim` gives one lease. The token is larger than all earlier tokens. A second claim fails. | `ledger::tokens_increase_across_tasks`, `concurrency::*_produce_one_winner`, `review::tokens_stay_unique_after_a_rollback`, `review::c1_*`; property I3. |
+| AC-7 | `claim` checks the skill, the WIP limit, and readiness. `claim --next` takes the first ready task for the role. | `ledger::claim_checks_agent_skill_wip_and_ttl`, `ledger::claim_next_*`. |
+| AC-8 | `heartbeat`, `complete`, `fail`, and `ask` fail with a stale token. `fence` exits 0 only for the current token. | `ledger::worker_commands_need_the_current_token`, `lifecycle::worker_ops_reject_stale_token_and_expired_lease`, `cli::leases_expire_and_fence_checks_the_token`; Verus `lemma_fencing`, `lemma_stale_token_rejected`. |
+| AC-9 | `complete` needs non-empty evidence. | `ledger::worker_commands_need_the_current_token` (empty evidence); property I8. |
+| AC-10 | Overdue leases expire on `reap` and before each write. The task goes to `submitted`, or to `failed` when the budget is used. | `ledger::expired_lease_rejects_worker_writes_until_reaped`, `store::writes_expire_overdue_leases_first`, `review::c6_expired_worker_write_reports_expiry_and_keeps_the_reap`. |
+| AC-11 | `fail` sets `failed`. `retry` works only while `failures < max_failures`. | `ledger::fail_retry_and_budget`, `lifecycle::fail_then_retry_within_budget`; Verus `lemma_failed_exits`, `lemma_budget_exhausted`; property I5. |
+| AC-12 | `ask` stores the question and releases the lease. `answer` stores the answer and sets `submitted`. | `ledger::ask_and_answer`, `lifecycle::ask_releases_lease_and_answer_resubmits`, `cli::ask_answer_fail_retry_cancel`. |
+| AC-13 | `cancel` works from each non-terminal state. Terminal states reject all transitions. | `lifecycle::cancel_from_each_non_terminal_state`, `lifecycle::terminal_states_reject_everything`; Verus `lemma_terminal_absorbing`; property I2. |
+| AC-14 | The ledger is append-only JSONL. Replay gives the same state. Bad lines and conflicts are reported. Parallel writers never make two winners or lose events. | `store::replay_reports_corrupt_lines_and_conflicts`, `properties::replay_skips_a_garbage_line`, JSONL round trip in `properties::invariants_hold_for_random_sequences`, `concurrency::*`, `review::d11_ack_hides_a_reviewed_conflict`. |
+| AC-15 | `status`, `show`, `ready`, and `log` print text, and JSON with `--json`. | `cli::json_outputs`, `cli::full_task_flow`, `review::c10_log_marks_rejected_events_and_ack_clears_doctor`. |
+| AC-16 | Each write updates `.mesh/BOARD.md`. `board --check` finds drift. | `store::execute_appends_lines_and_updates_the_board`, `cli::board_check_detects_drift`, `review::c4_board_check_ignores_crlf`, `review::c5_board_write_failure_does_not_fail_the_command`. |
+| AC-17 | `check-scope` reports files outside the role globs and the task paths. It rejects `..`. With no files, it reads git changes. | `scope::*`, `cli::check_scope_*`, `review::s1_*`. |
+| AC-18 | `mesh hook` blocks (exit 2) an edit by a role outside its scope. It allows the main session. `.claude/settings.json` connects it. | `hook::*`, `cli::hook_blocks_out_of_scope_edits`, `review::s2`–`s12`, `repo::settings_hook_command_denies_with_json_and_never_blocks_by_accident`. |
+| AC-19 | `doctor` checks the registry, role files, ledger, board, overdue leases, blocked tasks, served skills, and `.gitattributes`. | `doctor::*`, `cli::doctor_reports_and_passes`, `review::doctor_warns_on_*`, `repo::repo_mesh_has_no_doctor_errors`. |
+| AC-20 | `.claude/skills/mesh-coordinator/SKILL.md` gives the loop, the brief template, and the stop rules. | `.claude/skills/mesh-coordinator/SKILL.md`, `repo::coordinator_skill_and_scripts_exist`; the review round ran through the mesh (5 tasks, all completed). |
+| AC-21 | The Verus model proves I1–I5 with 0 errors. CI runs Verus. | Local Verus: 14 verified, 0 errors; a false lemma fails. CI job `Verus proof of the task lifecycle` passed. |
+| AC-22 | Property tests check I1–I9 on random command sequences. | `properties.rs`: I1–I9 per step, 256 cases; `generator_reaches_all_paths`. |
+| AC-23 | `fmt`, `clippy` (pedantic, nursery, `-D warnings`), and tests pass. Line coverage is 85% or more. No `unwrap` in production code. | `cargo fmt --check`; clippy clean on Rust 1.97 and 1.99; 145 tests pass; line coverage 94.50%; no `unwrap`/`panic` outside tests. |
+| AC-24 | A CI workflow runs fmt, clippy, tests, coverage, `doctor`, and Verus for mesh changes. | `.github/workflows/agent-mesh.yml` (fmt, clippy, tests + coverage, doctor, Verus). |
+| AC-25 | ADR 050, an architecture section with Mermaid, this plan, a crate README, and an AGENTS.md section exist. They are short and use ASD-STE100. | ADR 050, `docs/architecture.md` section, this plan, crate README, AGENTS.md section; docs review applied. |
+| AC-26 | The game build does not change. The Docker context excludes the mesh folders. | `cargo check --features native` on the game passes; root `Cargo.toml`, `Cargo.lock`, `src/` unchanged; `.dockerignore` excludes the mesh folders. |
 
-## 9. Out of scope
+
+## 9. Review round
+
+Five reviewer agents checked the change: correctness, concurrency, security, docs/UX, and tests/CI.
+The review ran through the mesh itself: one plan, five claims, five completions.
+The main fixes:
+
+- Tokens get a random nonce. A rollback or a merge cannot make a stale token valid again.
+- `check-scope` diffs from the fork point of `--base`, lists both paths of a rename, and can check another work tree.
+- The hook blocks role edits of `.mesh/` and `.claude/`, resolves symlinks, ignores nested registries, and prints a JSON decision. A broken script never blocks.
+- `.gitattributes` keeps LF line endings for scripts and mesh files (Windows checkouts).
+- Ledger writes replace the file atomically. A failed command still saves its lease expiries.
+- `mesh ack` clears a reviewed merge conflict. `log` marks rejected lines. `doctor` reports merges and WIP overruns.
+- CI pins Rust 1.99.0 and a stable Verus release. `doctor` in CI fails on errors only.
+- Tests: mutation testing found 12 surviving mutants. New tests kill them. The property generator now reaches every path.
+
+## 10. Out of scope
 
 B17 (generated game boards), B18, B19, B20, B21, B22, and B23. Future work can add them.
