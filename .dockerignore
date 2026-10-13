@@ -11,3 +11,8 @@
 /prompts
 /e2e
 /tests
+# Agent mesh tooling is not part of the game build.
+/crates
+/.mesh
+/.claude
+/scripts

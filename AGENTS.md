@@ -2,6 +2,17 @@
 
 This repository is developed by AI agents coordinating through git state. No external orchestration—the repo IS the shared brain.
 
+## Agent Mesh
+
+The agent mesh runs this protocol with checks. See [ADR 050](docs/adr/050-agent-mesh.md) and `crates/agent-mesh/README.md`.
+
+- The **coordinator** is the main chat session. It follows `.claude/skills/mesh-coordinator/SKILL.md`.
+- Each role below is a worker subagent in `.claude/agents/<role>.md`. The **reviewer** role reads only.
+- The ledger `.mesh/ledger.jsonl` records each task, claim, and result. Only the coordinator writes it.
+- A claim is a lease with a token. A lease expires. A stale token cannot complete a task.
+- A hook blocks edits outside the role's `writes` globs in `.mesh/registry.toml`.
+- Run `scripts/mesh doctor` to check the mesh.
+
 ## Roles
 
 ### 🎲 Designer

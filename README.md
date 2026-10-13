@@ -279,6 +279,8 @@ See **[CI-SETUP.md](CI-SETUP.md)** for full CI/CD documentation.
 
 This project is built by AI agents coordinating through git. See **[AGENTS.md](AGENTS.md)** for the protocol.
 
+The **agent mesh** (`scripts/mesh`) records tasks, leases, and results, and enforces role scopes. See **[crates/agent-mesh/README.md](crates/agent-mesh/README.md)**.
+
 See **[docs/guides/EXTENDING.md](docs/guides/EXTENDING.md)** for a guide on adding new buildings.
 
 ## Contributing

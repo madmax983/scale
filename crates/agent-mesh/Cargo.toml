@@ -1,0 +1,42 @@
+[package]
+name = "agent-mesh"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+description = "Agent mesh for the SCALE AI agents: task ledger, leases, fencing, scope checks."
+license = "MIT"
+publish = false
+
+# Standalone: the game crate does not build this tool. See docs/adr/050-agent-mesh.md.
+[workspace]
+
+[lib]
+name = "agent_mesh"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mesh"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+globset = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "1"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
