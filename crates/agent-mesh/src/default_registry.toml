@@ -2,6 +2,7 @@
 # Each id must match `.claude/agents/<id>.md`. Run `mesh doctor` after a change.
 # skills: task skills the role can do. writes: path globs the role may change.
 # max_active: the most working tasks for the role at one time.
+# Read-only roles can run more workers. Writing roles stay small.
 version = 1
 
 [[agent]]
@@ -68,4 +69,4 @@ id = "reviewer"
 description = "Reviews one change. Reads only. Reports findings."
 skills = ["review"]
 writes = []
-max_active = 3
+max_active = 5
