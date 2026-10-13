@@ -49,7 +49,10 @@ use bevy_ecs::prelude::*;
 use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement, Table};
 use crossterm::style::Stylize;
 use scale::layer1::biography::Biography;
-use scale::layer1::construction::{ConstructionProgress, GreatWork, OperationalGreatWork};
+use scale::layer1::construction::{
+    ConstructionProgress, ContributeToGreatWorkEvent, GreatWork, GreatWorkKind,
+    OperationalGreatWork,
+};
 use scale::layer1::dreams::Dream;
 #[cfg(feature = "nova")]
 use scale::layer1::oral_tradition::{OralTradition, StoryGenre};
@@ -513,6 +516,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "terrain" => handle_terrain_command(world, &parts),
         "buildings" => print_buildings(world),
         "great_works" | "gw" => print_great_works(world),
+        "greatwork" => handle_greatwork_command(world, &parts),
+        "contribute" => handle_contribute_command(world, &parts),
         "bio" => handle_bio_command(world, &parts),
         "chronicle" | "c" | "history" => print_chronicle(world),
         #[cfg(feature = "nova")]
@@ -3058,6 +3063,9 @@ fn print_stats(world: &mut World) {
     // Spec 345: canonical quirk names for STATS; full panel is `quirks`.
     let quirks_label = scale::layer1::quirks::quirks_summary(world);
 
+    // Spec 347: Great Works completion label for STATS.
+    let works_label = scale::layer1::construction::great_works_status_label(world);
+
     // Spec 1382: number of saves visible to the file backend.
     let saves_count = FileSaveStore::default_dir()
         .list()
@@ -3065,7 +3073,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={}",
         tick,
         pops,
         avg_health,
@@ -3132,6 +3140,7 @@ fn print_stats(world: &mut World) {
         season_name,
         quirks_label,
         saves_count,
+        works_label,
     );
 }
 
@@ -4973,7 +4982,7 @@ fn handle_give_command(world: &mut World, parts: &[&str]) {
         _ => {
             print_dashboard_panel(
                 "ERROR",
-                "Usage: give <food|wood|stone|metal|tools|fuel> <amount>",
+                "Usage: give <food|wood|stone|metal|tools|fuel|blocks|planks> <amount>",
                 Some(comfy_table::Color::Red),
                 Some(comfy_table::Attribute::Bold),
             );
@@ -4988,6 +4997,10 @@ fn handle_give_command(world: &mut World, parts: &[&str]) {
         "metal" => resources.metal += amount,
         "tools" => resources.tools += amount,
         "fuel" => resources.fuel += amount,
+        // Spec 347: refined construction materials, so Great Work
+        // stages can be funded in headless playtests.
+        "blocks" => resources.blocks += amount,
+        "planks" => resources.planks += amount,
         _ => {
             print_dashboard_panel(
                 "ERROR",
@@ -5479,6 +5492,87 @@ fn get_tile_info(world: &mut World, x: i32, y: i32) {
     print_dashboard_table(&format!("Tile Info: ({x}, {y})"), table);
 }
 
+
+/// Spec 347: `greatwork start <skyhook|aegis|spire>` begins a catalog
+/// Great Work; `greatwork` alone lists them.
+fn handle_greatwork_command(world: &mut World, parts: &[&str]) {
+    match parts.get(1).map(|s| s.to_lowercase()).as_deref() {
+        Some("start") => {
+            let Some(kind) = parts.get(2).and_then(|s| GreatWorkKind::parse(s)) else {
+                print_dashboard_panel(
+                    "ERROR",
+                    "Usage: greatwork start <skyhook|aegis|spire>",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return;
+            };
+            // One active instance per kind: refuse duplicates.
+            let already = {
+                let mut query = world.query::<&GreatWork>();
+                query.iter(world).any(|w| w.kind == Some(kind))
+            };
+            if already {
+                print_dashboard_panel(
+                    "GREAT WORK",
+                    &format!("{} is already underway or complete.", kind.name()),
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return;
+            }
+            let total: f32 = kind.stages().iter().map(|s| s.amount).sum();
+            scale::layer1::construction::spawn_great_work_kind(world, kind);
+            print_dashboard_panel(
+                "GREAT WORK BEGUN",
+                &format!(
+                    "{}: {} stages, {:.0} resources in total. Fund it with `contribute [amount]`.",
+                    kind.name(),
+                    kind.stages().len(),
+                    total
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("contribute") => handle_contribute_command(world, parts),
+        _ => print_great_works(world),
+    }
+}
+
+/// Spec 347: `contribute [amount]` applies stockpile resources to the
+/// active Great Work's current stage (never creates resources: the
+/// amount actually applied is capped by the real stockpile).
+fn handle_contribute_command(world: &mut World, parts: &[&str]) {
+    // `contribute 500` (parts[1]) or `greatwork contribute 500` (parts[2]).
+    let amount_arg = if parts.first().is_some_and(|p| *p == "greatwork") {
+        parts.get(2)
+    } else {
+        parts.get(1)
+    };
+    let amount = amount_arg
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(f32::MAX);
+    let Some(work) = scale::layer1::construction::first_active_great_work(world) else {
+        print_dashboard_panel(
+            "GREAT WORK",
+            "No active Great Work to fund. Start one: greatwork start <skyhook|aegis|spire>",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    world
+        .resource_mut::<bevy_ecs::event::Events<ContributeToGreatWorkEvent>>()
+        .send(ContributeToGreatWorkEvent { work, amount });
+    print_dashboard_panel(
+        "GREAT WORK",
+        "Contribution sent to the stockpile crews — it lands on the next tick. Run `tick 1` then `greatworks`.",
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 fn print_great_works(world: &mut World) {
     let mut count = 0;
     let mut table = Table::new();
@@ -5507,11 +5601,22 @@ fn print_great_works(world: &mut World) {
         let phase_str = if is_operational {
             "Completed".to_string()
         } else {
-            format!("{} / {}", work.current_phase + 1, work.phase_costs.len())
+            format!("{} / {}", work.current_phase + 1, work.stage_count())
         };
 
         let progress_str = if is_operational {
             "Operational".to_string()
+        } else if let Some(stage) = work.current_stage_def() {
+            // Spec 347: resource-funded stage progress.
+            let pct = if stage.amount > 0.0 {
+                (work.stage_applied / stage.amount) * 100.0
+            } else {
+                0.0
+            };
+            format!(
+                "{:?} {:.0} / {:.0} ({:.0}%)",
+                stage.resource, work.stage_applied, stage.amount, pct
+            )
         } else if let Some(prog) = progress {
             let pct = if prog.total_work_required > 0.0 {
                 (prog.current_work / prog.total_work_required) * 100.0
@@ -5951,6 +6056,16 @@ fn print_help() {
                 ("buildings", "", "List all buildings with positions"),
                 ("designations", "d", "List all active designations"),
                 ("great_works", "gw", "List all Great Works projects"),
+                (
+                    "greatwork start <skyhook|aegis|spire>",
+                    "",
+                    "Spec 347: begin a Great Work (multi-stage, stockpile-funded)",
+                ),
+                (
+                    "contribute [amount]",
+                    "",
+                    "Spec 347: apply stockpile resources to the active Great Work's current stage",
+                ),
                 ("chronicle", "c, history", "Show colony history events"),
                 #[cfg(feature = "nova")]
                 (

@@ -115,6 +115,15 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Execution),
     );
+    // Spec 347 Great Works: the tuple above is at Bevy's system-tuple
+    // arity limit, so the contribution + benefit systems register apart.
+    schedule.add_systems(
+        (
+            crate::layer1::construction::apply_resources_to_great_work,
+            crate::layer1::construction::great_work_awe_system,
+        )
+            .in_set(Layer1SystemSet::Execution),
+    );
 
     // UI state sync for adventurer possession: updates
     // `UiState::suppress_global_ui` and the input context stack from the same

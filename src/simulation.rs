@@ -348,6 +348,8 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::disasters::deorbit::DeorbitEvent>>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitState>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitDirector>();
+    // Spec 347 Great Works: contribution events (first-tick Events pattern).
+    world.init_resource::<Events<crate::layer1::construction::ContributeToGreatWorkEvent>>();
     // Spec 342 The Void Between: incident event + ledger.
     world.init_resource::<Events<crate::layer2::void_between::ShipIncidentEvent>>();
     world.init_resource::<crate::layer2::void_between::VoidLedger>();

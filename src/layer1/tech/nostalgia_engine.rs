@@ -65,6 +65,9 @@ mod tests {
                 name: "Nostalgia Engine".to_string(),
                 current_phase: 1,
                 phase_costs: vec![],
+                stages: vec![],
+                stage_applied: 0.0,
+                kind: None,
             },
             OperationalGreatWork,
             PowerConsumer {

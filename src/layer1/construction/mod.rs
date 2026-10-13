@@ -14,7 +14,7 @@ pub struct ConstructionCost {
     pub amount: u32,
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Default)]
 pub struct ConstructionProgress {
     pub total_work_required: f32,
     pub current_work: f32,
