@@ -544,6 +544,35 @@ fn render_base_terrain(ctx: &MapRenderContext<'_>, world_x: i32, world_y: i32) -
     Span::styled(text, Style::default().fg(color))
 }
 
+/// Returns the viewport to actually render with, centering the world
+/// inside `area` on every axis where the whole world fits.
+///
+/// The camera [`Viewport`] anchors the world's top-left corner to the
+/// area's top-left corner. On panes larger than the world (wide
+/// browser windows, large terminals) that leaves the world hugging
+/// the top-left with a black void beside it. When the world fits on
+/// an axis, this shifts the viewport negative by half the slack so
+/// the world renders centered on that axis instead. When the world
+/// is larger than the area on an axis, the camera viewport is kept
+/// unchanged on that axis, preserving the existing pan behavior.
+#[must_use]
+pub fn centered_viewport(viewport: &Viewport, terrain: &TerrainGrid, area: Rect) -> Viewport {
+    let mut centered = *viewport;
+    if let Ok(world_w) = i32::try_from(terrain.width) {
+        let slack = i32::from(area.width) - world_w;
+        if slack > 0 {
+            centered.x = -(slack / 2);
+        }
+    }
+    if let Ok(world_h) = i32::try_from(terrain.height) {
+        let slack = i32::from(area.height) - world_h;
+        if slack > 0 {
+            centered.y = -(slack / 2);
+        }
+    }
+    centered
+}
+
 /// Render terrain grid, buildings, and pops to the given frame area with viewport offset.
 pub fn render_map_layer(frame: &mut Frame, ctx: MapRenderContext<'_>) {
     let area = ctx.area;
@@ -584,9 +613,13 @@ pub fn render_map(frame: &mut Frame, area: Rect, world: &World) {
         .get_resource::<crate::layer1::map::ScreenShake>()
         .map_or((0, 0), |s| s.offset);
 
+    // Center the world in the pane on any axis where it fits whole;
+    // screen shake still applies on top of the (possibly centered)
+    // viewport.
+    let centered = centered_viewport(viewport, terrain, inner);
     let effective_viewport = Viewport {
-        x: viewport.x + shake_offset.0,
-        y: viewport.y + shake_offset.1,
+        x: centered.x + shake_offset.0,
+        y: centered.y + shake_offset.1,
     };
 
     // Build mode cursor info
@@ -644,7 +677,8 @@ pub fn render_terrain(
     viewport: &Viewport,
     season: Option<crate::layer1::seasons::Season>,
 ) {
-    let spans = build_terrain_spans(area, terrain, viewport, season);
+    let viewport = centered_viewport(viewport, terrain, area);
+    let spans = build_terrain_spans(area, terrain, &viewport, season);
     let paragraph = Paragraph::new(spans);
     frame.render_widget(paragraph, area);
 }
@@ -984,7 +1018,7 @@ pub const fn get_resource_color(resource: ResourceType) -> Color {
         ResourceType::HyperValuable => Color::Rgb(255, 215, 0),
         ResourceType::BiologicalWaste => Color::Rgb(100, 100, 0),
         ResourceType::NutrientPaste => Color::Rgb(200, 200, 200), // Gold
-        ResourceType::Organs => Color::Rgb(220, 20, 60), // Crimson
+        ResourceType::Organs => Color::Rgb(220, 20, 60),          // Crimson
     }
 }
 
@@ -1084,5 +1118,115 @@ pub const fn get_flora_color(flora: FloraType) -> Color {
         FloraType::FireWeed => Color::Rgb(255, 100, 0), // Orange-red
         FloraType::Ironwood => Color::Rgb(100, 100, 100), // Grey
         FloraType::Lumiflora => Color::Rgb(255, 182, 193), // Light Pink
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::Terminal;
+
+    /// Builds a minimal world with a `world_w` x `world_h` all-grass
+    /// terrain and a single water tile at (`marker_x`, `marker_y`).
+    fn map_test_world(world_w: usize, world_h: usize, marker_x: usize, marker_y: usize) -> World {
+        let mut world = World::new();
+        let mut terrain = TerrainGrid {
+            width: world_w,
+            height: world_h,
+            tiles: vec![TerrainType::Grass; world_w * world_h],
+        };
+        terrain.set(marker_x, marker_y, TerrainType::Water);
+        world.insert_resource(terrain);
+        world.insert_resource(crate::layer1::water::WaterGrid::new(world_w, world_h));
+        world.insert_resource(Viewport::default());
+        world.insert_resource(BuildMode::default());
+        world.insert_resource(DesignationMode::default());
+        world.insert_resource(RenderCache::default());
+        world.insert_resource(WallTime(0.0));
+        world
+    }
+
+    fn render_map_to_buffer(world: &World, width: u16, height: u16) -> Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render_map(f, f.area(), world)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn find_symbol(buffer: &Buffer, symbol: &str) -> Option<(u16, u16)> {
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                if buffer.cell((x, y)).map(|c| c.symbol()) == Some(symbol) {
+                    return Some((x, y));
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn render_map_centers_world_in_oversized_pane() {
+        // 10x8 world in a 42x22 pane: inner area is 40x20, so the
+        // world should sit centered with margins of (40-10)/2 = 15
+        // and (20-8)/2 = 6 inside the border.
+        let world = map_test_world(10, 8, 0, 0);
+        let buffer = render_map_to_buffer(&world, 42, 22);
+        assert_eq!(
+            find_symbol(&buffer, "~"),
+            Some((1 + 15, 1 + 6)),
+            "world tile (0,0) should render centered in the pane"
+        );
+    }
+
+    #[test]
+    fn render_map_small_pane_keeps_camera_anchor() {
+        // Pane smaller than the world: the camera viewport must keep
+        // anchoring the view exactly as before (no centering).
+        let mut world = map_test_world(10, 8, 3, 2);
+        world.insert_resource(Viewport { x: 3, y: 2 });
+        let buffer = render_map_to_buffer(&world, 6, 5);
+        assert_eq!(
+            find_symbol(&buffer, "~"),
+            Some((1, 1)),
+            "world tile under the camera should render at the inner origin"
+        );
+    }
+
+    fn terrain_of(width: usize, height: usize) -> TerrainGrid {
+        TerrainGrid {
+            width,
+            height,
+            tiles: vec![TerrainType::Grass; width * height],
+        }
+    }
+
+    #[test]
+    fn centered_viewport_centers_world_that_fits() {
+        let terrain = terrain_of(10, 8);
+        let area = Rect::new(0, 0, 30, 20);
+        let result = centered_viewport(&Viewport { x: 5, y: 5 }, &terrain, area);
+        // Slack is 20 horizontally and 12 vertically; half of each
+        // becomes a negative offset so the world renders centered.
+        assert_eq!((result.x, result.y), (-10, -6));
+    }
+
+    #[test]
+    fn centered_viewport_keeps_camera_when_world_is_larger() {
+        let terrain = terrain_of(100, 80);
+        let area = Rect::new(0, 0, 30, 20);
+        let result = centered_viewport(&Viewport { x: 5, y: 5 }, &terrain, area);
+        assert_eq!((result.x, result.y), (5, 5));
+    }
+
+    #[test]
+    fn centered_viewport_centers_per_axis() {
+        // Fits horizontally (10 < 30) but not vertically (80 > 20):
+        // only the x axis is centered.
+        let terrain = terrain_of(10, 80);
+        let area = Rect::new(0, 0, 30, 20);
+        let result = centered_viewport(&Viewport { x: 5, y: 7 }, &terrain, area);
+        assert_eq!((result.x, result.y), (-10, 7));
     }
 }

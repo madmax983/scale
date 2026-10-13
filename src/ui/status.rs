@@ -1,5 +1,8 @@
 use bevy_ecs::prelude::*;
-use ratatui::{prelude::*, widgets::Paragraph};
+use ratatui::{
+    prelude::*,
+    widgets::{Block, Paragraph},
+};
 
 use crate::layer1::admin::AdminStats;
 use crate::layer1::seasons::{Season, SeasonState};
@@ -158,7 +161,21 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, world: &World) {
     let status = truncate_line(status, area.width);
 
     let bar = Paragraph::new(status).style(Style::default().bg(Color::DarkGray).fg(Color::White));
-    frame.render_widget(bar, area);
+
+    // The bar is one line tall, but callers may hand it a taller area:
+    // the shell's status pane is several rows. Flooding the whole area
+    // with the bar's background leaves a gray slab under the game, so
+    // spare rows are painted with the game's background color and the
+    // bar itself is confined to the first row.
+    if area.height > 1 {
+        let spare = Rect::new(area.x, area.y + 1, area.width, area.height - 1);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(Color::Black)),
+            spare,
+        );
+    }
+    let bar_area = Rect::new(area.x, area.y, area.width, area.height.min(1));
+    frame.render_widget(bar, bar_area);
 }
 
 /// Constructs the styled `Line` for the status bar.
@@ -834,5 +851,62 @@ mod tests {
         let result = truncate_line(line, 10);
         let text: String = result.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text, "Hello Wor\u{2026}");
+    }
+
+    #[test]
+    fn test_status_bar_stays_one_line_in_tall_area() {
+        use crate::layer1::{ColonyPolicies, ColonyResources, NamedLocations, Viewport};
+        use crate::shared::state::GameState;
+        use crate::shared::time::SimulationTime;
+        use ratatui::backend::TestBackend;
+        use ratatui::style::Color;
+        use ratatui::Terminal;
+
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        world.insert_resource(GameState::Running);
+        world.insert_resource(BuildMode::default());
+        world.insert_resource(DesignationMode::default());
+        world.insert_resource(Viewport::default());
+        world.insert_resource(NamedLocations::default());
+        world.insert_resource(ColonyResources::default());
+        world.insert_resource(ColonyPolicies::default());
+
+        // The shell's status pane can be several rows tall; the bar
+        // itself is a single line and must not flood the spare rows
+        // with its DarkGray background.
+        let backend = TestBackend::new(80, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                render_status_bar(f, f.area(), &world);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let row_text = |y: u16| -> String {
+            (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).map_or(" ", |c| c.symbol()))
+                .collect()
+        };
+        assert!(
+            row_text(0).contains("Day 0"),
+            "bar text should be on the first row: {:?}",
+            row_text(0)
+        );
+        assert_eq!(
+            buffer.cell((79, 0)).map(|c| c.bg),
+            Some(Color::DarkGray),
+            "the bar's own row keeps its DarkGray background across the full width"
+        );
+        for y in 1..buffer.area.height {
+            for x in 0..buffer.area.width {
+                assert_ne!(
+                    buffer.cell((x, y)).map(|c| c.bg),
+                    Some(Color::DarkGray),
+                    "spare row {y} must not be flooded with the bar background"
+                );
+            }
+        }
     }
 }
