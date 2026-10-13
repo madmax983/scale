@@ -43,11 +43,17 @@ pub fn validate_text(
     if len > max {
         return Err(MeshError::TextTooLong { field, len, max });
     }
-    let bad = |c: char| c.is_control() && (one_line || !matches!(c, '\n' | '\t'));
+    let bad = |c: char| is_bidi(c) || (c.is_control() && (one_line || !matches!(c, '\n' | '\t')));
     if text.chars().any(bad) {
         return Err(MeshError::ControlChars(field));
     }
     Ok(())
+}
+
+/// `true` for characters that change the text direction. They can hide text in a terminal.
+#[must_use]
+pub const fn is_bidi(c: char) -> bool {
+    matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 /// The definition of a task. Plan files use the same fields.
@@ -189,6 +195,13 @@ pub enum Event {
         /// Why.
         reason: String,
     },
+    /// The coordinator checked a rejected or broken ledger line. Doctor stops reporting it.
+    Acknowledged {
+        /// The fingerprint of the line (see `store::fingerprint`).
+        fingerprint: String,
+        /// What the coordinator did about it.
+        note: String,
+    },
     /// An overdue lease ended.
     LeaseExpired {
         /// The task.
@@ -199,10 +212,11 @@ pub enum Event {
 }
 
 impl Event {
-    /// The task of the event.
+    /// The task of the event. `Acknowledged` has no task.
     #[must_use]
-    pub const fn task(&self) -> &TaskId {
-        match self {
+    pub const fn task(&self) -> Option<&TaskId> {
+        Some(match self {
+            Self::Acknowledged { .. } => return None,
             Self::TaskAdded { task } => &task.id,
             Self::Claimed { task, .. }
             | Self::Heartbeat { task, .. }
@@ -213,7 +227,7 @@ impl Event {
             | Self::Retried { task }
             | Self::Canceled { task, .. }
             | Self::LeaseExpired { task, .. } => task,
-        }
+        })
     }
 
     /// The short name of the event.
@@ -230,6 +244,7 @@ impl Event {
             Self::Retried { .. } => "retried",
             Self::Canceled { .. } => "canceled",
             Self::LeaseExpired { .. } => "lease_expired",
+            Self::Acknowledged { .. } => "acknowledged",
         }
     }
 }
@@ -237,7 +252,8 @@ impl Event {
 /// An event with its sequence number, time, and actor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Envelope {
-    /// Sequence number. Larger than all earlier numbers in the file.
+    /// Sequence number. Each writer makes it larger than all earlier numbers.
+    /// A git merge of two ledgers can repeat numbers; `doctor` reports that.
     pub seq: u64,
     /// Time (Unix seconds).
     pub ts: u64,
@@ -338,7 +354,7 @@ mod tests {
             actor: "builder".into(),
             event: Event::Completed {
                 task: tid("t1"),
-                token: Token(2),
+                token: Token::new(2, 0),
                 evidence: "cargo test: 10 passed\ncommit abc".into(),
             },
         };
@@ -347,7 +363,7 @@ mod tests {
         assert!(line.contains("\"type\":\"completed\""));
         let back = Envelope::from_line(&line).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(back, env);
-        assert_eq!(back.event.task().as_str(), "t1");
+        assert_eq!(back.event.task().map(TaskId::as_str), Some("t1"));
         assert_eq!(back.event.name(), "completed");
     }
 

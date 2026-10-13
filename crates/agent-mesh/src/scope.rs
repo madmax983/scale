@@ -13,6 +13,15 @@ use crate::registry::Registry;
 /// Files that the mesh CLI writes. Every role may change them.
 pub const MESH_MANAGED: [&str; 2] = [".mesh/ledger.jsonl", ".mesh/BOARD.md"];
 
+/// The folder of coordinator plan files. `check-scope` does not count them.
+pub const PLANS_DIR: &str = ".mesh/plans/";
+
+/// `true` for files that the coordinator writes, not a worker.
+#[must_use]
+pub fn is_coordinator_file(rel: &str) -> bool {
+    MESH_MANAGED.contains(&rel) || rel.starts_with(PLANS_DIR)
+}
+
 /// Longest path pattern.
 pub const MAX_PATTERN: usize = 256;
 
@@ -66,6 +75,11 @@ pub fn validate_pattern(pattern: &str) -> Result<()> {
         Some("the pattern is empty")
     } else if pattern.len() > MAX_PATTERN {
         Some("the pattern is too long")
+    } else if pattern
+        .chars()
+        .any(|c| c.is_control() || crate::event::is_bidi(c))
+    {
+        Some("the pattern has a control character")
     } else if pattern.starts_with('/') || pattern.contains('\\') {
         Some("use a path relative to the repository root, with '/'")
     } else if pattern.split('/').any(|part| part == "..") {
@@ -169,7 +183,7 @@ pub fn check(
     let mut out = Vec::new();
     for file in sorted {
         let reason = match classify(file, root) {
-            PathClass::Inside(rel) if MESH_MANAGED.contains(&rel.as_str()) => None,
+            PathClass::Inside(rel) if is_coordinator_file(&rel) => None,
             PathClass::Inside(rel) if !scope.is_match(&rel) => {
                 Some(format!("role `{agent}` may not write `{rel}`"))
             }
@@ -190,7 +204,8 @@ pub fn check(
     Ok(out)
 }
 
-/// Lists files changed since `base` (tracked changes and untracked files).
+/// Lists files changed since the fork point of `base` and `HEAD`: commits, staged and
+/// unstaged changes, and untracked files. A rename lists both paths.
 ///
 /// # Errors
 /// [`MeshError::Git`] if `base` starts with `-` or git fails.
@@ -200,7 +215,13 @@ pub fn git_changed(root: &Path, base: &str) -> Result<Vec<String>> {
             "invalid base `{base}`; use a branch, tag, or commit"
         )));
     }
-    let diff = run_git(root, &["diff", "--name-only", "-z", base, "--"])?;
+    // Committed work since the fork point, plus staged and unstaged changes.
+    let head = run_git(root, &["merge-base", base, "HEAD"])
+        .map_or_else(|_| base.to_string(), |m| m.trim().to_string());
+    let diff = run_git(
+        root,
+        &["diff", "--name-only", "--no-renames", "-z", &head, "--"],
+    )?;
     let untracked = run_git(root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
     let mut files: Vec<String> = diff
         .split('\0')
@@ -231,7 +252,14 @@ fn run_git(root: &Path, args: &[&str]) -> Result<String> {
         .map_err(|e| MeshError::Git(format!("cannot run git: {e}")))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        return Err(MeshError::Git(err.trim().to_string()));
+        let first = err.lines().next().unwrap_or_default().trim();
+        if first.contains("not a git repository") {
+            return Err(MeshError::Git(format!(
+                "{} is not a git work tree; give the files to check",
+                root.display()
+            )));
+        }
+        return Err(MeshError::Git(first.to_string()));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }

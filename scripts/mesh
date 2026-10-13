@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 # Runs the agent mesh CLI. Builds it when the source is newer than the binary.
 # Usage: scripts/mesh <command> [args]. See crates/agent-mesh/README.md.
+# In a git worktree it uses the main checkout: its ledger and its binary.
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+common="$(git -C "$here" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+root="$here"
+if [[ "$common" == */.git && -d "$(dirname "$common")/crates/agent-mesh" ]]; then
+  root="$(dirname "$common")"
+fi
 crate="$root/crates/agent-mesh"
-bin="$crate/target/release/mesh"
+export CARGO_TARGET_DIR="$crate/target"
+bin="$CARGO_TARGET_DIR/release/mesh"
 if [[ ! -x "$bin" || -n "$(find "$crate/src" "$crate/Cargo.toml" -newer "$bin" -print -quit)" ]]; then
   cargo build --quiet --release --manifest-path "$crate/Cargo.toml" >&2
 fi
-export MESH_DIR="${MESH_DIR:-$root/.mesh}"
+if [[ -z "${MESH_DIR:-}" ]]; then
+  export MESH_DIR="$root/.mesh"
+fi
 exec "$bin" "$@"

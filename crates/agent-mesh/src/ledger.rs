@@ -1,12 +1,12 @@
 //! The ledger: task state rebuilt from events, and the commands that make events.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
 use crate::error::{MeshError, Result};
 use crate::event::{validate_text, Envelope, Event, TaskSpec, MAX_TEXT, MAX_WORKER};
-use crate::ids::{AgentId, TaskId, Token};
+use crate::ids::{fresh_nonce, is_valid_id, AgentId, TaskId, Token};
 use crate::lifecycle::{Lease, Lifecycle, Rejection, State};
 use crate::plan;
 use crate::registry::Registry;
@@ -15,8 +15,8 @@ use crate::registry::Registry;
 pub const COORDINATOR: &str = "coordinator";
 /// The actor name of automatic events (lease expiry).
 pub const SYSTEM: &str = "mesh";
-/// Default lease time in seconds.
-pub const DEFAULT_TTL: u64 = 1_800;
+/// Default lease time in seconds (3 hours: a 1-2 hour task plus margin).
+pub const DEFAULT_TTL: u64 = 10_800;
 /// Longest lease time in seconds.
 pub const MAX_TTL: u64 = 86_400;
 
@@ -169,6 +169,40 @@ pub enum Command {
     },
     /// Expire all overdue leases.
     Reap,
+    /// Mark a rejected or broken ledger line as checked.
+    Ack {
+        /// The line fingerprint that `doctor` printed.
+        fingerprint: String,
+        /// What the coordinator did about it.
+        note: String,
+    },
+}
+
+impl Command {
+    /// The task of the command, if it has one.
+    #[must_use]
+    pub const fn task(&self) -> Option<&TaskId> {
+        match self {
+            Self::Claim { task, .. } => task.as_ref(),
+            Self::Heartbeat { task, .. }
+            | Self::Complete { task, .. }
+            | Self::Fail { task, .. }
+            | Self::Ask { task, .. }
+            | Self::Answer { task, .. }
+            | Self::Retry { task }
+            | Self::Cancel { task, .. } => Some(task),
+            Self::Add(_) | Self::Plan(_) | Self::Reap | Self::Ack { .. } => None,
+        }
+    }
+
+    /// `true` for commands that need the lease token.
+    #[must_use]
+    pub const fn needs_token(&self) -> bool {
+        matches!(
+            self,
+            Self::Heartbeat { .. } | Self::Complete { .. } | Self::Fail { .. } | Self::Ask { .. }
+        )
+    }
 }
 
 /// The context of a command.
@@ -187,6 +221,7 @@ pub struct Ledger {
     order: Vec<TaskId>,
     next_seq: u64,
     next_token: u64,
+    acks: BTreeSet<String>,
 }
 
 impl Default for Ledger {
@@ -204,7 +239,14 @@ impl Ledger {
             order: Vec::new(),
             next_seq: 1,
             next_token: 1,
+            acks: BTreeSet::new(),
         }
+    }
+
+    /// `true` if the coordinator acknowledged the line with this fingerprint.
+    #[must_use]
+    pub fn is_acked(&self, fingerprint: &str) -> bool {
+        self.acks.contains(fingerprint)
     }
 
     /// Records the sequence number and token of a parsed envelope, valid or not.
@@ -212,7 +254,7 @@ impl Ledger {
     pub fn observe(&mut self, env: &Envelope) {
         self.next_seq = self.next_seq.max(env.seq.saturating_add(1));
         if let Event::Claimed { token, .. } = &env.event {
-            self.next_token = self.next_token.max(token.0.saturating_add(1));
+            self.next_token = self.next_token.max(token.n.saturating_add(1));
         }
     }
 
@@ -222,7 +264,25 @@ impl Ledger {
     /// The [`MeshError`] that tells why the event is not valid.
     pub fn apply(&mut self, env: &Envelope) -> Result<()> {
         let ts = env.ts;
+        if !is_valid_id(&env.actor) {
+            return Err(MeshError::Ledger(format!(
+                "event {} has an invalid actor {:?}",
+                env.seq, env.actor
+            )));
+        }
+        if env.seq == u64::MAX {
+            return Err(MeshError::Exhausted("sequence"));
+        }
         match &env.event {
+            Event::Acknowledged { fingerprint, note } => {
+                validate_text("note", note, MAX_TEXT, true, false)?;
+                if fingerprint.len() != 16 || !fingerprint.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return Err(MeshError::Ledger(format!(
+                        "invalid fingerprint {fingerprint:?}: use the 16 hex digits that `mesh doctor` printed"
+                    )));
+                }
+                self.acks.insert(fingerprint.to_ascii_lowercase());
+            }
             Event::TaskAdded { task } => self.add_task(task, ts)?,
             Event::Claimed { .. } => self.apply_claim(env)?,
             Event::Heartbeat {
@@ -273,7 +333,7 @@ impl Ledger {
             }
             Event::LeaseExpired { task, token } => self.apply_expiry(env, task, *token)?,
         }
-        if let Some(t) = self.tasks.get_mut(env.event.task()) {
+        if let Some(t) = env.event.task().and_then(|id| self.tasks.get_mut(id)) {
             t.updated_at = ts;
         }
         self.observe(env);
@@ -291,7 +351,10 @@ impl Ledger {
         else {
             return Err(MeshError::Ledger("apply_claim needs a claim event".into()));
         };
-        if token.0 < self.next_token {
+        if token.n == u64::MAX {
+            return Err(MeshError::Exhausted("token"));
+        }
+        if token.n < self.next_token {
             return Err(MeshError::TokenReused {
                 task: task.clone(),
                 token: *token,
@@ -375,9 +438,13 @@ impl Ledger {
         let task = self.get(id)?;
         match self.readiness(id) {
             Readiness::Ready => Ok(()),
-            Readiness::Waiting(waiting) | Readiness::Blocked(waiting) => Err(MeshError::NotReady {
+            Readiness::Waiting(waiting) => Err(MeshError::NotReady {
                 task: id.clone(),
                 waiting,
+            }),
+            Readiness::Blocked(by) => Err(MeshError::Blocked {
+                task: id.clone(),
+                by,
             }),
             Readiness::NotSubmitted => Err(MeshError::InvalidTransition {
                 task: id.clone(),
@@ -521,6 +588,13 @@ impl Ledger {
             Command::Answer { task, text } => (coordinator, Event::Answered { task, answer: text }),
             Command::Retry { task } => (coordinator, Event::Retried { task }),
             Command::Cancel { task, reason } => (coordinator, Event::Canceled { task, reason }),
+            Command::Ack { fingerprint, note } => (
+                coordinator,
+                Event::Acknowledged {
+                    fingerprint: fingerprint.to_ascii_lowercase(),
+                    note,
+                },
+            ),
         };
         self.emit(out, now, &actor, event)
     }
@@ -564,18 +638,24 @@ impl Ledger {
                 limit: card.max_active,
             });
         }
+        if self.next_token == u64::MAX {
+            return Err(MeshError::Exhausted("token"));
+        }
         let worker = worker.unwrap_or_else(|| agent.to_string());
         let event = Event::Claimed {
             task: id,
             agent: agent.clone(),
             worker,
-            token: self.next_token(),
+            token: Token::new(self.next_token, fresh_nonce()),
             expires_at: ctx.now.saturating_add(ttl),
         };
         self.emit(out, ctx.now, agent.as_str(), event)
     }
 
     fn emit(&mut self, out: &mut Vec<Envelope>, now: u64, actor: &str, event: Event) -> Result<()> {
+        if self.next_seq == u64::MAX {
+            return Err(MeshError::Exhausted("sequence"));
+        }
         let env = Envelope {
             seq: self.next_seq,
             ts: now,
@@ -624,6 +704,7 @@ impl Ledger {
     }
 
     /// Whether the task can start. Derived from the dependency states.
+    /// Blocking is transitive: a dependency that is blocked also blocks.
     #[must_use]
     pub fn readiness(&self, id: &TaskId) -> Readiness {
         let Some(task) = self.tasks.get(id) else {
@@ -638,6 +719,9 @@ impl Ledger {
             match self.tasks.get(dep).map(|t| t.life.state()) {
                 Some(State::Completed) => {}
                 Some(State::Failed | State::Canceled) | None => blocked.push(dep.clone()),
+                Some(State::Submitted) if matches!(self.readiness(dep), Readiness::Blocked(_)) => {
+                    blocked.push(dep.clone());
+                }
                 Some(_) => waiting.push(dep.clone()),
             }
         }
@@ -684,8 +768,8 @@ impl Ledger {
 
     /// The token of the next claim.
     #[must_use]
-    pub const fn next_token(&self) -> Token {
-        Token(self.next_token)
+    pub const fn next_token(&self) -> u64 {
+        self.next_token
     }
 }
 
@@ -720,7 +804,7 @@ fn reject(
         Rejection::WrongState(state) => MeshError::InvalidTransition { task, op, state },
         Rejection::StaleToken => MeshError::StaleToken {
             task,
-            token: token.unwrap_or(Token(0)),
+            token: token.unwrap_or(Token::new(0, 0)),
         },
         Rejection::LeaseExpired => MeshError::LeaseExpired(task),
         Rejection::BudgetExhausted => MeshError::BudgetExhausted { task, max },
@@ -838,11 +922,11 @@ mod tests {
         let mut l = Ledger::new();
         let bad = vec![spec("a", "build", &[]), spec("b", "dance", &["a"])];
         assert!(run(&mut l, &r, 1, Command::Plan(bad)).is_err());
-        assert!(l.is_empty());
+        assert_eq!(l.len(), 0);
         let good = vec![spec("b", "review", &["a"]), spec("a", "build", &[])];
         let evs = ok(&mut l, &r, 1, Command::Plan(good));
         assert_eq!(evs.len(), 2);
-        assert_eq!(evs[0].event.task().as_str(), "a");
+        assert_eq!(evs[0].event.task().map(TaskId::as_str), Some("a"));
     }
 
     #[test]
@@ -880,7 +964,7 @@ mod tests {
             .map(|t| t.spec.id.as_str())
             .collect();
         assert_eq!(ready, ["b", "c"]);
-        assert!(l.ready_for(&r, Some(&aid("builder"))).is_empty());
+        assert_eq!(l.ready_for(&r, Some(&aid("builder"))).len(), 0);
         assert_eq!(l.ready_for(&r, None).len(), 2);
     }
 
@@ -888,36 +972,84 @@ mod tests {
     fn blocked_when_a_dependency_failed_or_was_canceled() {
         let r = reg();
         let mut l = Ledger::new();
-        ok(
-            &mut l,
-            &r,
-            1,
-            Command::Plan(vec![spec("a", "build", &[]), spec("b", "review", &["a"])]),
-        );
-        ok(
-            &mut l,
-            &r,
-            2,
-            Command::Cancel {
-                task: tid("a"),
-                reason: "obsolete".into(),
-            },
-        );
+        let mut a = spec("a", "build", &[]);
+        a.max_failures = 1;
+        let plan = vec![
+            a,
+            spec("b", "review", &["a"]),
+            spec("c", "build", &[]),
+            spec("d", "review", &["c"]),
+        ];
+        ok(&mut l, &r, 1, Command::Plan(plan));
+        let t = claim(&mut l, &r, 2, "a", "builder");
+        let fail = Command::Fail {
+            task: tid("a"),
+            token: t,
+            reason: "broken".into(),
+        };
+        ok(&mut l, &r, 3, fail);
+        let cancel = Command::Cancel {
+            task: tid("c"),
+            reason: "obsolete".into(),
+        };
+        ok(&mut l, &r, 4, cancel);
         assert_eq!(l.readiness(&tid("b")), Readiness::Blocked(vec![tid("a")]));
+        assert_eq!(l.readiness(&tid("d")), Readiness::Blocked(vec![tid("c")]));
+        let claim_b = Command::Claim {
+            task: Some(tid("b")),
+            agent: aid("reviewer"),
+            worker: None,
+            ttl: 10,
+        };
         assert!(matches!(
-            run(
-                &mut l,
-                &r,
-                3,
-                Command::Claim {
-                    task: Some(tid("b")),
-                    agent: aid("reviewer"),
-                    worker: None,
-                    ttl: 10
-                }
-            ),
-            Err(MeshError::NotReady { .. })
+            run(&mut l, &r, 5, claim_b),
+            Err(MeshError::Blocked { .. })
         ));
+    }
+
+    #[test]
+    fn claim_next_prefers_the_earliest_ready_task() {
+        let r = reg();
+        let mut l = Ledger::new();
+        let plan = vec![spec("first", "build", &[]), spec("second", "build", &[])];
+        ok(&mut l, &r, 1, Command::Plan(plan));
+        let next = Command::Claim {
+            task: None,
+            agent: aid("builder"),
+            worker: None,
+            ttl: 10,
+        };
+        let evs = ok(&mut l, &r, 2, next);
+        assert_eq!(evs[0].event.task().map(TaskId::as_str), Some("first"));
+    }
+
+    #[test]
+    fn claim_and_heartbeat_validate_worker_and_ttl() {
+        let r = reg();
+        let mut l = Ledger::new();
+        ok(&mut l, &r, 1, Command::Add(spec("a", "build", &[])));
+        let bad_worker = Command::Claim {
+            task: Some(tid("a")),
+            agent: aid("builder"),
+            worker: Some("two\nlines".into()),
+            ttl: 10,
+        };
+        assert!(matches!(
+            run(&mut l, &r, 2, bad_worker),
+            Err(MeshError::ControlChars("worker"))
+        ));
+        let t = claim(&mut l, &r, 2, "a", "builder");
+        for ttl in [0, MAX_TTL + 1] {
+            let hb = Command::Heartbeat {
+                task: tid("a"),
+                token: t,
+                ttl,
+            };
+            assert!(matches!(
+                run(&mut l, &r, 3, hb),
+                Err(MeshError::InvalidTtl { .. })
+            ));
+        }
     }
 
     #[test]
@@ -1030,7 +1162,7 @@ mod tests {
         let t1 = claim(&mut l, &r, 2, "a", "builder");
         let t2 = claim(&mut l, &r, 2, "b", "builder");
         assert!(t2 > t1);
-        assert_eq!(l.next_token(), Token(t2.0 + 1));
+        assert_eq!(l.next_token(), t2.n + 1);
     }
 
     #[test]
@@ -1039,7 +1171,7 @@ mod tests {
         let mut l = Ledger::new();
         ok(&mut l, &r, 1, Command::Add(spec("a", "build", &[])));
         let t = claim(&mut l, &r, 2, "a", "builder");
-        let stale = Token(t.0 + 5);
+        let stale = Token::new(t.n + 5, t.nonce);
         assert!(matches!(
             run(
                 &mut l,
@@ -1134,13 +1266,13 @@ mod tests {
             Err(MeshError::LeaseExpired(_))
         ));
         assert_eq!(l.overdue(110).len(), 1);
-        assert!(l.overdue(109).is_empty());
+        assert_eq!(l.overdue(109).len(), 0);
         let evs = ok(&mut l, &r, 110, Command::Reap);
         assert_eq!(evs.len(), 1);
         assert_eq!(evs[0].actor, SYSTEM);
         assert_eq!(state(&l, "a"), State::Submitted);
         assert_eq!(l.task(&tid("a")).map(|x| x.life.failures()), Some(1));
-        assert!(ok(&mut l, &r, 111, Command::Reap).is_empty());
+        assert_eq!(ok(&mut l, &r, 111, Command::Reap).len(), 0);
     }
 
     #[test]
@@ -1318,7 +1450,7 @@ mod tests {
                 task: tid("b"),
                 agent: aid("builder"),
                 worker: "w".into(),
-                token: Token(1),
+                token: Token::new(1, 0),
                 expires_at: 50,
             },
         };
@@ -1336,13 +1468,13 @@ mod tests {
                 task: tid("zz"),
                 agent: aid("builder"),
                 worker: "w".into(),
-                token: Token(77),
+                token: Token::new(77, 0),
                 expires_at: 50,
             },
         };
         l.observe(&ghost);
         assert!(l.apply(&ghost).is_err());
         assert_eq!(l.next_seq(), 41);
-        assert_eq!(l.next_token(), Token(78));
+        assert_eq!(l.next_token(), 78);
     }
 }

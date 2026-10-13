@@ -1,7 +1,7 @@
 //! Task lifecycle: states, leases, and the transition rules.
 //!
-//! This module follows the Verus model in `verus/lifecycle.rs`.
-//! Keep both in step. Invariants I1-I5 are proved there and tested here.
+//! This module follows the Verus model in `verus/lifecycle.rs`. Keep both in step.
+//! The Verus model proves I1-I5. The tests here check them.
 
 use std::fmt;
 
@@ -320,7 +320,7 @@ mod tests {
 
     fn lease(token: u64, now: u64, ttl: u64) -> Lease {
         Lease {
-            token: Token(token),
+            token: Token::new(token, 0),
             agent: agent(),
             worker: "w".into(),
             claimed_at: now,
@@ -351,7 +351,7 @@ mod tests {
         let l = working(1);
         assert_eq!(l.state(), State::Working);
         assert_eq!(l.attempts(), 1);
-        assert_eq!(l.lease().map(|x| x.token), Some(Token(1)));
+        assert_eq!(l.lease().map(|x| x.token), Some(Token::new(1, 0)));
         assert!(l.invariant_holds());
     }
 
@@ -369,11 +369,14 @@ mod tests {
     #[test]
     fn heartbeat_extends_only_with_current_token() {
         let mut l = working(3);
-        assert_eq!(l.heartbeat(Token(3), 120, 500), Ok(()));
+        assert_eq!(l.heartbeat(Token::new(3, 0), 120, 500), Ok(()));
         assert_eq!(l.lease().map(|x| x.expires_at), Some(500));
-        assert_eq!(l.heartbeat(Token(2), 130, 600), Err(Rejection::StaleToken));
         assert_eq!(
-            l.heartbeat(Token(3), 130, 130),
+            l.heartbeat(Token::new(2, 0), 130, 600),
+            Err(Rejection::StaleToken)
+        );
+        assert_eq!(
+            l.heartbeat(Token::new(3, 0), 130, 130),
             Err(Rejection::InvalidLease)
         );
     }
@@ -381,17 +384,23 @@ mod tests {
     #[test]
     fn worker_ops_reject_stale_token_and_expired_lease() {
         let mut l = working(3);
-        assert_eq!(l.complete(Token(4), 110), Err(Rejection::StaleToken));
-        assert_eq!(l.fail(Token(2), 110), Err(Rejection::StaleToken));
-        assert_eq!(l.ask(Token(9), 110), Err(Rejection::StaleToken));
-        assert_eq!(l.complete(Token(3), 150), Err(Rejection::LeaseExpired));
+        assert_eq!(
+            l.complete(Token::new(4, 0), 110),
+            Err(Rejection::StaleToken)
+        );
+        assert_eq!(l.fail(Token::new(2, 0), 110), Err(Rejection::StaleToken));
+        assert_eq!(l.ask(Token::new(9, 0), 110), Err(Rejection::StaleToken));
+        assert_eq!(
+            l.complete(Token::new(3, 0), 150),
+            Err(Rejection::LeaseExpired)
+        );
         assert_eq!(l.state(), State::Working);
     }
 
     #[test]
     fn complete_clears_lease() {
         let mut l = working(1);
-        assert_eq!(l.complete(Token(1), 120), Ok(()));
+        assert_eq!(l.complete(Token::new(1, 0), 120), Ok(()));
         assert_eq!(l.state(), State::Completed);
         assert!(l.lease().is_none());
     }
@@ -399,7 +408,7 @@ mod tests {
     #[test]
     fn terminal_states_reject_everything() {
         let mut done = working(1);
-        assert_eq!(done.complete(Token(1), 120), Ok(()));
+        assert_eq!(done.complete(Token::new(1, 0), 120), Ok(()));
         let mut canceled = Lifecycle::new(1);
         assert_eq!(canceled.cancel(), Ok(()));
         for l in [&mut done, &mut canceled] {
@@ -409,20 +418,20 @@ mod tests {
             assert_eq!(l.retry(), Err(Rejection::WrongState(s)));
             assert_eq!(l.cancel(), Err(Rejection::WrongState(s)));
             assert_eq!(l.expire(10_000), Err(Rejection::WrongState(s)));
-            assert!(l.complete(Token(1), 120).is_err());
+            assert!(l.complete(Token::new(1, 0), 120).is_err());
         }
     }
 
     #[test]
     fn fail_then_retry_within_budget() {
         let mut l = working(1);
-        assert_eq!(l.fail(Token(1), 110), Ok(()));
+        assert_eq!(l.fail(Token::new(1, 0), 110), Ok(()));
         assert_eq!(l.state(), State::Failed);
         assert_eq!(l.failures(), 1);
         assert_eq!(l.retry(), Ok(()));
         assert_eq!(l.state(), State::Submitted);
         assert_eq!(l.claim(lease(2, 120, 10)), Ok(()));
-        assert_eq!(l.fail(Token(2), 125), Ok(()));
+        assert_eq!(l.fail(Token::new(2, 0), 125), Ok(()));
         assert_eq!(l.failures(), 2);
         assert_eq!(l.retry(), Err(Rejection::BudgetExhausted));
         assert_eq!(l.cancel(), Ok(()));
@@ -432,7 +441,7 @@ mod tests {
     #[test]
     fn ask_releases_lease_and_answer_resubmits() {
         let mut l = working(1);
-        assert_eq!(l.ask(Token(1), 110), Ok(()));
+        assert_eq!(l.ask(Token::new(1, 0), 110), Ok(()));
         assert_eq!(l.state(), State::InputRequired);
         assert!(l.lease().is_none());
         assert_eq!(l.answer(), Ok(()));
@@ -460,9 +469,9 @@ mod tests {
         let mut submitted = Lifecycle::new(1);
         let mut work = working(1);
         let mut input = working(1);
-        assert_eq!(input.ask(Token(1), 110), Ok(()));
+        assert_eq!(input.ask(Token::new(1, 0), 110), Ok(()));
         let mut failed = working(1);
-        assert_eq!(failed.fail(Token(1), 110), Ok(()));
+        assert_eq!(failed.fail(Token::new(1, 0), 110), Ok(()));
         for l in [&mut submitted, &mut work, &mut input, &mut failed] {
             assert_eq!(l.cancel(), Ok(()));
             assert_eq!(l.state(), State::Canceled);
