@@ -566,10 +566,21 @@ pub fn handle_pop_death_system(
 
         // 4. Emit PopDied Event
         if let Some(pos) = pos_opt {
+            // Spec 349: the death site becomes the pop's Grave tile. It is
+            // occupied from birth — it is this pop's resting place; an
+            // unoccupied grave would be reused by the burial system for a
+            // second corpse, overwriting the name. The `AncestralGrave`
+            // link records who lies here so kin (Relationships affinity
+            // >= 80) can be recognised by the grave-visit system even
+            // though the pop entity itself is about to be despawned.
             commands.spawn((
                 crate::layer1::culture::funeral::Grave {
-                    occupied: false,
+                    occupied: true,
                     corpse_name: Some(name.clone()),
+                },
+                crate::layer1::ancestral_graves::AncestralGrave {
+                    pop_name: name.clone(),
+                    original_entity: entity,
                 },
                 *pos,
             ));

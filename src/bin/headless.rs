@@ -492,6 +492,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "provenance" => print_provenance(world),
         "identity" => print_identity(world),
         "artifacts" => print_artifacts(world),
+        "graves" => print_graves(world),
         "sell" => handle_sell_command(world, &parts),
         "museum" => handle_museum_command(world, &parts),
         "return_stock" => handle_return_stock_command(world, &parts),
@@ -3068,6 +3069,9 @@ fn print_stats(world: &mut World) {
     // Spec 347: Great Works completion label for STATS.
     let works_label = scale::layer1::construction::great_works_status_label(world);
 
+    // Spec 349: grave tiles written on the land (built plots + death sites).
+    let graves = scale::layer1::ancestral_graves::grave_count(world);
+
     // Spec 348: black-market presence + corruption level for STATS.
     let smugglers = scale::layer1::economy::black_market::smuggler_count(world);
     let corruption = world
@@ -3081,7 +3085,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={}",
         tick,
         pops,
         avg_health,
@@ -3151,6 +3155,7 @@ fn print_stats(world: &mut World) {
         works_label,
         smugglers,
         corruption,
+        graves,
     );
 }
 
@@ -6326,6 +6331,11 @@ fn print_help() {
                     "List historical artifacts + appraised values (Spec 1376)",
                 ),
                 (
+                    "graves",
+                    "",
+                    "List grave tiles + who lies there; visits buff mood, building over one is sacrilege (Spec 349)",
+                ),
+                (
                     "sell <id>",
                     "",
                     "Sell an artifact to core-world collectors (Spec 1376)",
@@ -7865,6 +7875,51 @@ fn print_provenance(world: &mut World) {
         ),
         Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 349: list every grave tile — built plots and death-site markers —
+/// with who lies there. Building over any of them is sacrilege.
+fn print_graves(world: &mut World) {
+    use scale::layer1::core::map::GridPosition;
+    use scale::layer1::funeral::Grave;
+
+    let mut query = world.query::<(Entity, &Grave, Option<&GridPosition>)>();
+    let mut rows: Vec<String> = Vec::new();
+    let mut occupied = 0usize;
+    for (entity, grave, pos) in query.iter(world) {
+        if grave.occupied {
+            occupied += 1;
+        }
+        let at = pos
+            .map(|p| format!("{},{}", p.x, p.y))
+            .unwrap_or_else(|| "unplaced".to_string());
+        let who = grave
+            .corpse_name
+            .clone()
+            .unwrap_or_else(|| "(empty plot)".to_string());
+        rows.push(format!("#{} {} at {}", entity.index(), who, at));
+    }
+    if rows.is_empty() {
+        print_dashboard_panel(
+            "ANCESTRAL GRAVES",
+            "No graves yet. The colony's history is not yet written on the land — the dead leave Grave tiles where they fall (Spec 349).",
+            Some(comfy_table::Color::Yellow),
+            None,
+        );
+        return;
+    }
+    rows.sort();
+    print_dashboard_panel(
+        "ANCESTRAL GRAVES",
+        &format!(
+            "{} grave(s), {} occupied.\n\n{}\n\nKin and colony-mates who visit a grave gain mood ('Ancestral Veneration' / \"Kin's Vigil\"). Building over a grave is Sacrilege: colony-wide mood penalty, unrest, and a Major chronicle entry.",
+            rows.len(),
+            occupied,
+            rows.join("\n")
+        ),
+        Some(comfy_table::Color::Cyan),
+        None,
     );
 }
 

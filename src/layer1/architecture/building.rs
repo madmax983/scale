@@ -2511,18 +2511,33 @@ fn apply_post_placement_effects(
 
 /// Places a building in the world at the given coordinates.
 pub fn try_place_building(world: &mut World, x: i32, y: i32, building_type: BuildingType) -> bool {
-    // Check for Grave before validation
-    let mut grave_entity = None;
+    // Check for Grave before validation. Two kinds of grave exist (Spec
+    // 349): built grave plots, which are registered in the BuildingMap,
+    // and standalone death-site graves spawned by the death pipeline
+    // (Grave + GridPosition only — never in the BuildingMap, and their
+    // tile is not in OccupiedTiles). Both must trigger sacrilege, so scan
+    // for Grave entities at the tile as well as consulting the map.
+    let mut grave_entities: Vec<Entity> = Vec::new();
     if let Some(map) = world.get_resource::<BuildingMap>() {
         if let Some(&entity) = map.0.get(&(x, y)) {
             if world.get::<crate::layer1::funeral::Grave>(entity).is_some() {
-                grave_entity = Some(entity);
+                grave_entities.push(entity);
             }
         }
     }
+    {
+        let mut grave_query =
+            world.query::<(Entity, &GridPosition, &crate::layer1::funeral::Grave)>();
+        for (entity, grave_pos, _) in grave_query.iter(world) {
+            if grave_pos.x == x && grave_pos.y == y && !grave_entities.contains(&entity) {
+                grave_entities.push(entity);
+            }
+        }
+    }
+    let has_grave = !grave_entities.is_empty();
 
     if let Err(e) = validate_building_placement(world, x, y) {
-        let allow_override = e == "Location occupied" && grave_entity.is_some();
+        let allow_override = e == "Location occupied" && has_grave;
         if !allow_override {
             handle_placement_error(world, e);
             return false;
@@ -2551,13 +2566,16 @@ pub fn try_place_building(world: &mut World, x: i32, y: i32, building_type: Buil
 
     // --- All validation passed, commit to placing the building ---
 
-    // If we are overwriting a grave, handle the sacrilege and destruction now
-    if let Some(ge) = grave_entity {
+    // If we are overwriting a grave, handle the sacrilege and destruction now.
+    // One build = one desecration, however many grave entities share the tile.
+    if has_grave {
         world.send_event(crate::layer1::ancestral_graves::SacrilegeEvent {
             pos: GridPosition { x, y },
         });
-        // Remove grave synchronously
-        world.despawn(ge);
+        // Remove graves synchronously
+        for ge in grave_entities {
+            world.despawn(ge);
+        }
     }
 
     // Spawn building
@@ -3523,6 +3541,58 @@ mod tests {
         assert!(
             world.get_entity(grave_entity).is_ok(),
             "Grave should not be destroyed if build fails"
+        );
+    }
+
+    #[test]
+    fn test_building_over_standalone_death_grave_causes_sacrilege() {
+        // Spec 349: graves spawned by the death pipeline are standalone
+        // entities (Grave + GridPosition) — they are NOT registered in the
+        // BuildingMap and their tile is NOT in OccupiedTiles. Building over
+        // one must still trigger sacrilege and remove the grave.
+        let mut world = World::new();
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Grass; 100],
+        });
+        world.insert_resource(OccupiedTiles::default());
+        world.insert_resource(BuildingMap::default());
+        world.init_resource::<Events<crate::layer1::ancestral_graves::SacrilegeEvent>>();
+        world.init_resource::<Events<crate::layer1::core::events::BuildingRemovedEvent>>();
+        world.init_resource::<Events<crate::layer1::core::events::BuildingCompletedEvent>>();
+        world.insert_resource(ColonyResources {
+            wood: 100.0,
+            stone: 100.0,
+            ..Default::default()
+        });
+
+        let grave_pos = GridPosition { x: 5, y: 5 };
+        let grave_entity = world
+            .spawn((
+                crate::layer1::funeral::Grave {
+                    occupied: true,
+                    corpse_name: Some("Ada".to_string()),
+                },
+                grave_pos,
+            ))
+            .id();
+
+        let placed = try_place_building(&mut world, 5, 5, BuildingType::Wall);
+
+        assert!(placed, "Building should succeed after destroying grave");
+        assert!(
+            world.get_entity(grave_entity).is_err(),
+            "Death grave should be removed by the build"
+        );
+        let events = world
+            .get_resource::<Events<crate::layer1::ancestral_graves::SacrilegeEvent>>()
+            .unwrap();
+        let mut reader = events.get_cursor();
+        assert_eq!(
+            reader.read(events).count(),
+            1,
+            "Building over a standalone death grave should trigger sacrilege"
         );
     }
 }
