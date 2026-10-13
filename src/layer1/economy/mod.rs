@@ -45,6 +45,19 @@ pub fn pay_wage(world: &mut World, worker: Entity, amount: f32) {
             return; // Stateless pops don't get paid normal wages / contribute taxes
         }
     }
+    // Spec 348 (REFACTOR): corruption taxes every wage. The skimmed
+    // fraction vanishes into the underworld before the wage reaches
+    // the wallet; with no ColonyStats resource the factor is 1.0.
+    let amount = if let Some(stats) =
+        world.get_resource::<crate::layer1::economy::black_market::ColonyStats>()
+    {
+        amount
+            * crate::layer1::economy::black_market::corruption_efficiency_factor(
+                stats.corruption,
+            )
+    } else {
+        amount
+    };
     if let Some(mut wallet) = world.get_mut::<Wallet>(worker) {
         wallet.credits += amount;
     }
@@ -108,6 +121,20 @@ mod tests {
 
         let wallet = world.get::<Wallet>(pop).unwrap();
         assert_eq!(wallet.credits, 15.0);
+    }
+
+    #[test]
+    fn test_pay_wage_skimmed_by_corruption() {
+        // Spec 348: at corruption 100, half the wage is skimmed.
+        let mut world = World::new();
+        world.insert_resource(crate::layer1::economy::black_market::ColonyStats {
+            unmet_luxury: 0,
+            corruption: 100.0,
+        });
+        let pop = world.spawn((Pop, Wallet { credits: 10.0 })).id();
+        pay_wage(&mut world, pop, 5.0);
+        let wallet = world.get::<Wallet>(pop).unwrap();
+        assert_eq!(wallet.credits, 12.5);
     }
 
     #[test]

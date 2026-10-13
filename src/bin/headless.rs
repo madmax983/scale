@@ -516,6 +516,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "terrain" => handle_terrain_command(world, &parts),
         "buildings" => print_buildings(world),
         "great_works" | "gw" => print_great_works(world),
+        "blackmarket" | "bm" => print_black_market(world),
+        "smuggler" => handle_smuggler_command(world),
         "greatwork" => handle_greatwork_command(world, &parts),
         "contribute" => handle_contribute_command(world, &parts),
         "bio" => handle_bio_command(world, &parts),
@@ -3066,6 +3068,12 @@ fn print_stats(world: &mut World) {
     // Spec 347: Great Works completion label for STATS.
     let works_label = scale::layer1::construction::great_works_status_label(world);
 
+    // Spec 348: black-market presence + corruption level for STATS.
+    let smugglers = scale::layer1::economy::black_market::smuggler_count(world);
+    let corruption = world
+        .get_resource::<scale::layer1::economy::black_market::ColonyStats>()
+        .map_or(0.0, |s| s.corruption);
+
     // Spec 1382: number of saves visible to the file backend.
     let saves_count = FileSaveStore::default_dir()
         .list()
@@ -3073,7 +3081,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1}",
         tick,
         pops,
         avg_health,
@@ -3141,6 +3149,8 @@ fn print_stats(world: &mut World) {
         quirks_label,
         saves_count,
         works_label,
+        smugglers,
+        corruption,
     );
 }
 
@@ -5665,6 +5675,60 @@ fn print_great_works(world: &mut World) {
     }
 }
 
+/// Black Market panel (headless `blackmarket` command, Spec 348).
+fn print_black_market(world: &mut World) {
+    use scale::layer1::economy::black_market::{
+        black_market_status_label, corruption_efficiency_factor, smuggler_count,
+        BlackMarketState, ColonyStats,
+    };
+    let (unmet, corruption) = world
+        .get_resource::<ColonyStats>()
+        .map_or((0, 0.0), |s| (s.unmet_luxury, s.corruption));
+    let (spawned, trades, siphoned, delivered) = world
+        .get_resource::<BlackMarketState>()
+        .map_or((0, 0, 0.0, 0.0), |s| {
+            (
+                s.total_spawned,
+                s.total_trades,
+                s.total_credits_siphoned,
+                s.total_luxury_delivered,
+            )
+        });
+    let docked = smuggler_count(world);
+    let status = black_market_status_label(world);
+    print_dashboard_panel(
+        "BLACK MARKET",
+        &format!(
+            "Status: {status}\nUnmet luxury needs: {unmet}\nSmugglers docked: {docked} (spawned {spawned}, trades {trades})\nLuxury delivered: {delivered:.1}\nCredits siphoned: {siphoned:.1}\nCorruption: {corruption:.1} (wage efficiency {:.0}%)\n\nWhere the state fails, the underworld provides (Spec 348):\nunmet leisure needs draw smugglers who dock, deliver luxury,\nsiphon credits at markup, and deepen corruption — which skims\nevery wage the colony pays. Watch STATS smugglers= / corruption=.",
+            corruption_efficiency_factor(corruption) * 100.0,
+        ),
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug trigger (headless `smuggler` command, Spec 348): a smuggler
+/// answers immediately and docks with a ready trade, bypassing the
+/// unmet-needs gate and the spawn cooldown.
+fn handle_smuggler_command(world: &mut World) {
+    use scale::layer1::economy::black_market::{
+        BlackMarketState, Smuggler, SmugglerVisit,
+    };
+    world.spawn((
+        Smuggler,
+        SmugglerVisit {
+            ticks_until_trade: 0,
+            traded: false,
+        },
+    ));
+    if let Some(mut state) = world.get_resource_mut::<BlackMarketState>() {
+        state.total_spawned += 1;
+    }
+    println!(
+        "A smuggler slips into a shadow berth, hold full of luxury goods. Run `tick` and watch STATS smugglers= / corruption= — or `blackmarket` for the ledger."
+    );
+}
+
 /// List all buildings with positions
 fn print_buildings(world: &mut World) {
     let mut table = Table::new();
@@ -6056,6 +6120,8 @@ fn print_help() {
                 ("buildings", "", "List all buildings with positions"),
                 ("designations", "d", "List all active designations"),
                 ("great_works", "gw", "List all Great Works projects"),
+                ("blackmarket", "bm", "Black Market panel (Spec 348): unmet needs, docked smugglers, corruption"),
+                ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
                 (
                     "greatwork start <skyhook|aegis|spire>",
                     "",
@@ -8672,6 +8738,22 @@ mod reproduction_tests {
     fn test_print_great_works() {
         let mut world = setup_minimal_world();
         print_great_works(&mut world);
+    }
+
+    #[test]
+    fn test_print_black_market() {
+        let mut world = setup_minimal_world();
+        print_black_market(&mut world);
+    }
+
+    #[test]
+    fn test_handle_smuggler_command() {
+        let mut world = setup_minimal_world();
+        handle_smuggler_command(&mut world);
+        assert_eq!(
+            scale::layer1::economy::black_market::smuggler_count(&mut world),
+            1
+        );
     }
 
     #[test]

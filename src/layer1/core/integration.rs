@@ -384,11 +384,23 @@ pub fn chronicle_rumor_bridge_system(
 /// Bridges `Needs` system to `BlackMarket` system.
 ///
 /// Updates `ColonyStats.unmet_luxury` by counting pops with low leisure needs.
+///
+/// Spec 348 fix: `Needs` values live on a 0.0..=1.0 scale, but this
+/// bridge compared leisure against 30.0, so *every* pop counted as
+/// unmet and the black-market spawn gate measured colony size, not
+/// unmet need. The threshold is now the black market's own
+/// [`UNMET_LEISURE_THRESHOLD`](crate::layer1::economy::black_market::UNMET_LEISURE_THRESHOLD).
 pub fn update_unmet_luxury_system(
     mut stats: ResMut<crate::layer1::black_market::ColonyStats>,
     pops: Query<&crate::layer1::needs::Needs, With<crate::layer1::pop::Pop>>,
 ) {
-    let unmet_count = pops.iter().filter(|needs| needs.leisure < 30.0).count();
+    let unmet_count = pops
+        .iter()
+        .filter(|needs| {
+            needs.leisure
+                < crate::layer1::economy::black_market::UNMET_LEISURE_THRESHOLD
+        })
+        .count();
     stats.unmet_luxury = unmet_count.try_into().unwrap_or(u32::MAX);
 }
 

@@ -568,6 +568,7 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<crate::experimental::genetic_memory::ColonyGeneticMemory>();
 
     world.init_resource::<crate::layer1::black_market::ColonyStats>();
+    world.init_resource::<crate::layer1::economy::black_market::BlackMarketState>();
     world.init_resource::<crate::layer1::administration::SentientBureaucracyState>();
     world.init_resource::<crate::layer1::void_weed::TradeNetwork>();
     world.init_resource::<crate::layer1::void_weed::SmugglingHeat>();
