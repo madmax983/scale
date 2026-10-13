@@ -1,0 +1,190 @@
+//! Health checks for a mesh. CI runs `mesh doctor --strict`.
+
+use std::fmt;
+
+use serde::Serialize;
+
+use crate::store::Store;
+
+/// How bad a finding is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    /// The mesh is not consistent. Fix it.
+    Error,
+    /// The mesh needs attention.
+    Warning,
+}
+
+/// One finding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Finding {
+    /// Severity.
+    pub severity: Severity,
+    /// Check name.
+    pub check: &'static str,
+    /// What is wrong and what to do.
+    pub message: String,
+}
+
+impl fmt::Display for Finding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let level = match self.severity {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+        };
+        write!(f, "{level}: [{}] {}", self.check, self.message)
+    }
+}
+
+/// The doctor result.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Report {
+    /// All findings.
+    pub findings: Vec<Finding>,
+}
+
+impl Report {
+    /// The number of errors.
+    #[must_use]
+    pub fn errors(&self) -> usize {
+        self.count(Severity::Error)
+    }
+
+    /// The number of warnings.
+    #[must_use]
+    pub fn warnings(&self) -> usize {
+        self.count(Severity::Warning)
+    }
+
+    fn count(&self, s: Severity) -> usize {
+        self.findings.iter().filter(|f| f.severity == s).count()
+    }
+
+    /// `true` if the report passes. With `strict`, warnings fail too.
+    #[must_use]
+    pub fn passes(&self, strict: bool) -> bool {
+        self.errors() == 0 && (!strict || self.warnings() == 0)
+    }
+}
+
+/// Reads the `name:` value from the frontmatter of a Claude Code agent file.
+#[must_use]
+pub fn frontmatter_name(text: &str) -> Option<String> {
+    let _ = text;
+    todo!("RED")
+}
+
+/// Runs all checks.
+#[must_use]
+pub fn run(store: &Store, now: u64) -> Report {
+    let _ = (store, now);
+    todo!("RED")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::TaskSpec;
+    use crate::ids::{AgentId, Skill, TaskId};
+    use crate::ledger::Command;
+    use crate::registry::{Registry, DEFAULT_REGISTRY};
+    use crate::store::MESH_DIR;
+
+    fn healthy() -> (tempfile::TempDir, Store) {
+        let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let root = tmp.path();
+        Store::init(&root.join(MESH_DIR)).unwrap_or_else(|e| panic!("{e}"));
+        let agents = root.join(".claude/agents");
+        std::fs::create_dir_all(&agents).unwrap_or_else(|e| panic!("{e}"));
+        let r = Registry::parse(DEFAULT_REGISTRY).unwrap_or_else(|e| panic!("{e}"));
+        for c in r.cards() {
+            let text = format!("---\nname: {}\ndescription: x\n---\nBody\n", c.id);
+            std::fs::write(agents.join(format!("{}.md", c.id)), text).unwrap_or_else(|e| panic!("{e}"));
+        }
+        std::fs::write(root.join(".gitattributes"), ".mesh/ledger.jsonl merge=union\n").unwrap_or_else(|e| panic!("{e}"));
+        let store = Store::open(root.join(MESH_DIR)).unwrap_or_else(|e| panic!("{e}"));
+        (tmp, store)
+    }
+
+    fn checks(r: &Report) -> Vec<&'static str> {
+        r.findings.iter().map(|f| f.check).collect()
+    }
+
+    #[test]
+    fn frontmatter_name_reads_the_name() {
+        assert_eq!(frontmatter_name("---\nname: builder\n---\n").as_deref(), Some("builder"));
+        assert_eq!(frontmatter_name("---\ndescription: x\nname:  \"lore-master\" \n---\n").as_deref(), Some("lore-master"));
+        assert_eq!(frontmatter_name("name: builder\n"), None);
+        assert_eq!(frontmatter_name("---\ndescription: x\n---\nname: no\n"), None);
+    }
+
+    #[test]
+    fn healthy_mesh_passes_strict() {
+        let (_tmp, store) = healthy();
+        let r = run(&store, 1);
+        assert!(r.passes(true), "{:?}", r.findings);
+    }
+
+    #[test]
+    fn missing_or_wrong_agent_file_is_an_error() {
+        let (tmp, store) = healthy();
+        std::fs::remove_file(tmp.path().join(".claude/agents/codex.md")).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(tmp.path().join(".claude/agents/builder.md"), "---\nname: build\n---\n").unwrap_or_else(|e| panic!("{e}"));
+        let r = run(&store, 1);
+        assert_eq!(r.errors(), 2);
+        assert!(checks(&r).iter().all(|c| *c == "agent-files"));
+        assert!(!r.passes(false));
+    }
+
+    #[test]
+    fn stale_board_corrupt_ledger_and_attributes() {
+        let (tmp, store) = healthy();
+        std::fs::write(store.dir().join("BOARD.md"), "x").unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(store.dir().join("ledger.jsonl"), "garbage\n").unwrap_or_else(|e| panic!("{e}"));
+        std::fs::remove_file(tmp.path().join(".gitattributes")).unwrap_or_else(|e| panic!("{e}"));
+        let r = run(&store, 1);
+        let c = checks(&r);
+        assert!(c.contains(&"ledger"));
+        assert!(c.contains(&"board"));
+        assert!(c.contains(&"gitattributes"));
+        assert!(r.passes(false) == (r.errors() == 0));
+    }
+
+    #[test]
+    fn overdue_leases_and_blocked_tasks_are_warnings() {
+        let (_tmp, store) = healthy();
+        let tid = |s: &str| TaskId::new(s).unwrap_or_else(|e| panic!("{e}"));
+        let mut b = TaskSpec::new(tid("b"), "B", Skill::new("review").unwrap_or_else(|e| panic!("{e}")));
+        b.deps = vec![tid("a")];
+        let a = TaskSpec::new(tid("a"), "A", Skill::new("build").unwrap_or_else(|e| panic!("{e}")));
+        let c = TaskSpec::new(tid("c"), "C", Skill::new("build").unwrap_or_else(|e| panic!("{e}")));
+        store.execute(10, Command::Plan(vec![a, b, c])).unwrap_or_else(|e| panic!("{e}"));
+        store.execute(10, Command::Cancel { task: tid("a"), reason: "x".into() }).unwrap_or_else(|e| panic!("{e}"));
+        store
+            .execute(10, Command::Claim { task: Some(tid("c")), agent: AgentId::new("builder").unwrap_or_else(|e| panic!("{e}")), worker: None, ttl: 5 })
+            .unwrap_or_else(|e| panic!("{e}"));
+        let r = run(&store, 100);
+        assert_eq!(r.errors(), 0, "{:?}", r.findings);
+        assert_eq!(r.warnings(), 2);
+        assert!(r.passes(false));
+        assert!(!r.passes(true));
+        assert!(r.findings.iter().any(|f| f.to_string().starts_with("warning: [leases]")));
+    }
+
+    #[test]
+    fn unserved_skill_and_bad_registry_are_errors() {
+        let (_tmp, store) = healthy();
+        let tid = TaskId::new("a").unwrap_or_else(|e| panic!("{e}"));
+        store
+            .execute(1, Command::Add(TaskSpec::new(tid, "A", Skill::new("build").unwrap_or_else(|e| panic!("{e}")))))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let without_build = DEFAULT_REGISTRY.replace("skills = [\"build\", \"fix\"]", "skills = [\"fix\"]");
+        std::fs::write(store.dir().join("registry.toml"), without_build).unwrap_or_else(|e| panic!("{e}"));
+        assert!(checks(&run(&store, 1)).contains(&"skills"));
+        std::fs::write(store.dir().join("registry.toml"), "bad [").unwrap_or_else(|e| panic!("{e}"));
+        let r = run(&store, 1);
+        assert!(checks(&r).contains(&"registry"));
+        assert!(!r.passes(false));
+    }
+}

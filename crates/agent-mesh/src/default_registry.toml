@@ -1,0 +1,71 @@
+# Agent cards of the SCALE agent mesh.
+# Each id must match `.claude/agents/<id>.md`. Run `mesh doctor` after a change.
+# skills: task skills the role can do. writes: path globs the role may change.
+# max_active: the most working tasks for the role at one time.
+version = 1
+
+[[agent]]
+id = "designer"
+description = "Writes new feature ideas."
+skills = ["ideas"]
+writes = ["design/IDEAS.md"]
+max_active = 1
+
+[[agent]]
+id = "lore-master"
+description = "Writes lore fragments, templates, grammars, and terms."
+skills = ["lore"]
+writes = ["lore/**"]
+max_active = 1
+
+[[agent]]
+id = "architect"
+description = "Writes feature specs and backlog entries."
+skills = ["spec"]
+writes = ["specs/**", "design/BACKLOG.md"]
+max_active = 1
+
+[[agent]]
+id = "builder"
+description = "Implements one spec with TDD."
+skills = ["build", "fix"]
+writes = [
+    "src/**",
+    "tests/**",
+    "benches/**",
+    "examples/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "design/BACKLOG.md",
+    "design/IN_PROGRESS.md",
+    "design/COMPLETED.md",
+]
+max_active = 3
+
+[[agent]]
+id = "integrator"
+description = "Connects completed features with glue code and tests."
+skills = ["integrate"]
+writes = [
+    "src/**",
+    "tests/**",
+    "design/IN_PROGRESS.md",
+    "design/COMPLETED.md",
+    "design/SEAM_MAP.md",
+    "design/IDEAS.md",
+]
+max_active = 1
+
+[[agent]]
+id = "codex"
+description = "Writes ADRs and architecture diagrams."
+skills = ["adr"]
+writes = ["docs/adr/**", "docs/architecture.md"]
+max_active = 1
+
+[[agent]]
+id = "reviewer"
+description = "Reviews one change. Reads only. Reports findings."
+skills = ["review"]
+writes = []
+max_active = 3
