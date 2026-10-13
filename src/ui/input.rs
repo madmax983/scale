@@ -93,6 +93,23 @@ pub fn route_input(world: &mut World, key: GameKeyEvent) {
     }
 }
 
+/// Gameplay contexts whose handlers give a bare Esc its own meaning:
+/// exit the mode. `route_root_input` must deliver a bare Esc to the
+/// gameplay handler in these contexts instead of offering it to the
+/// shell first — the shell runtime consumes a bare Esc in PluginInput
+/// mode to flip into Layout mode (and swallows it in Layout mode),
+/// which would leave the gameplay mode stuck active underneath.
+fn context_has_own_escape(context: InputContext) -> bool {
+    matches!(
+        context,
+        InputContext::BuildMode
+            | InputContext::DesignationMode
+            | InputContext::Overlay
+            | InputContext::TechTree
+            | InputContext::DirectControl
+    )
+}
+
 /// Route top-level input through the shell first, then gameplay handlers.
 pub fn route_root_input(world: &SharedWorld, shell: &mut UiShell, key: GameKeyEvent) {
     let is_main_menu = {
@@ -113,6 +130,28 @@ pub fn route_root_input(world: &SharedWorld, shell: &mut UiShell, key: GameKeyEv
     if shell.is_palette_open() {
         let _ = shell.handle_key(key);
         return;
+    }
+
+    // A bare Esc belongs to a modal gameplay context that defines its
+    // own Esc semantics (see `context_has_own_escape`). Placed after
+    // the palette checks so an open palette still claims Esc first,
+    // and before the layout-mode early return so Esc also reaches
+    // gameplay in the poisoned state (shell in Layout mode while a
+    // modal context is active, reachable via the palette's Enter
+    // Layout Mode command). Only the gameplay context is popped; the
+    // shell's own mode is left untouched. In the Normal context a
+    // bare Esc keeps its designed shell meaning (PluginInput ->
+    // Layout), so it is not intercepted there.
+    let is_bare_escape = matches!(key.code, GameKeyCode::Esc)
+        && !key.modifiers.ctrl
+        && !key.modifiers.alt
+        && !key.modifiers.shift;
+    if is_bare_escape {
+        let context = world.borrow().resource::<InputContextStack>().current();
+        if context_has_own_escape(context) {
+            route_input(&mut world.borrow_mut(), key);
+            return;
+        }
     }
 
     if shell.is_layout_mode() {
@@ -1574,6 +1613,249 @@ mod tests {
                 .iter()
                 .any(|event| event.text.contains("orbital charter")),
             "Layer 2 Ready intro text should be added on the menu path"
+        );
+    }
+
+    /// Regression: a bare Esc pressed while a modal gameplay context
+    /// (build / designation / overlay / tech tree / direct control) is
+    /// active must reach the gameplay handler that exits the mode.
+    /// The shell runtime consumes a bare Esc in PluginInput mode to
+    /// flip into Layout mode, so `route_root_input` must not offer
+    /// the key to the shell first in those contexts.
+    #[test]
+    fn esc_in_build_mode_exits_build_mode_without_flipping_shell_to_layout() {
+        let (world, mut shell) = setup_shell_world_for_test();
+        {
+            let mut world_ref = world.borrow_mut();
+            world_ref
+                .resource_mut::<InputContextStack>()
+                .push(InputContext::BuildMode);
+            world_ref.resource_mut::<BuildMode>().active = true;
+        }
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        let world_ref = world.borrow();
+        assert!(
+            !world_ref.resource::<BuildMode>().active,
+            "Esc should exit build mode"
+        );
+        assert_eq!(
+            world_ref.resource::<InputContextStack>().current(),
+            InputContext::Normal,
+            "Esc should pop the BuildMode context back to Normal"
+        );
+        assert!(
+            !shell.is_layout_mode(),
+            "Esc in build mode must not flip the shell into Layout mode"
+        );
+    }
+
+    #[test]
+    fn esc_in_designation_mode_exits_designation_mode_without_flipping_shell_to_layout() {
+        let (world, mut shell) = setup_shell_world_for_test();
+        {
+            let mut world_ref = world.borrow_mut();
+            world_ref
+                .resource_mut::<InputContextStack>()
+                .push(InputContext::DesignationMode);
+            let mut mode = world_ref.resource_mut::<DesignationMode>();
+            mode.active = true;
+            mode.drag_start = Some(GridPosition { x: 1, y: 1 });
+        }
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        let world_ref = world.borrow();
+        let mode = world_ref.resource::<DesignationMode>();
+        assert!(!mode.active, "Esc should exit designation mode");
+        assert!(
+            mode.drag_start.is_none(),
+            "Esc should clear an in-progress designation drag"
+        );
+        assert_eq!(
+            world_ref.resource::<InputContextStack>().current(),
+            InputContext::Normal,
+            "Esc should pop the DesignationMode context back to Normal"
+        );
+        assert!(
+            !shell.is_layout_mode(),
+            "Esc in designation mode must not flip the shell into Layout mode"
+        );
+    }
+
+    #[test]
+    fn esc_in_overlay_context_pops_overlay_without_flipping_shell_to_layout() {
+        let (world, mut shell) = setup_shell_world_for_test();
+        {
+            let mut world_ref = world.borrow_mut();
+            world_ref
+                .resource_mut::<InputContextStack>()
+                .push(InputContext::Overlay);
+            world_ref.insert_resource(ChronicleUiState { is_open: true });
+        }
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        let world_ref = world.borrow();
+        assert_eq!(
+            world_ref.resource::<InputContextStack>().current(),
+            InputContext::Normal,
+            "Esc should pop the Overlay context back to Normal"
+        );
+        assert!(
+            !world_ref.resource::<ChronicleUiState>().is_open,
+            "Esc should close the chronicle overlay"
+        );
+        assert!(
+            !shell.is_layout_mode(),
+            "Esc in overlay must not flip the shell into Layout mode"
+        );
+    }
+
+    #[test]
+    fn esc_in_tech_tree_context_pops_without_flipping_shell_to_layout() {
+        let (world, mut shell) = setup_shell_world_for_test();
+        world
+            .borrow_mut()
+            .resource_mut::<InputContextStack>()
+            .push(InputContext::TechTree);
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        assert_eq!(
+            world.borrow().resource::<InputContextStack>().current(),
+            InputContext::Normal,
+            "Esc should pop the TechTree context back to Normal"
+        );
+        assert!(
+            !shell.is_layout_mode(),
+            "Esc in tech tree must not flip the shell into Layout mode"
+        );
+    }
+
+    #[test]
+    fn esc_in_direct_control_reaches_input_resource_without_flipping_shell_to_layout() {
+        let (world, mut shell) = setup_shell_world_for_test();
+        {
+            let mut world_ref = world.borrow_mut();
+            world_ref
+                .resource_mut::<InputContextStack>()
+                .push(InputContext::DirectControl);
+            if world_ref.get_resource::<Input>().is_none() {
+                world_ref.insert_resource(Input::default());
+            }
+        }
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        let world_ref = world.borrow();
+        assert!(
+            world_ref.resource::<Input>().just_pressed(KeyCode::Esc),
+            "Esc should be pressed into the Input resource so \
+             handle_direct_input_system can release possession"
+        );
+        assert_eq!(
+            world_ref.resource::<InputContextStack>().current(),
+            InputContext::DirectControl,
+            "the context pops asynchronously when the sim consumes the \
+             UnpossessEvent, not in the key handler"
+        );
+        assert!(
+            !shell.is_layout_mode(),
+            "Esc in direct control must not flip the shell into Layout mode"
+        );
+    }
+
+    /// The poisoned state from the original bug: the shell is already
+    /// in Layout mode while a modal gameplay context is active (the
+    /// old Esc flip, or the palette's Enter Layout Mode command).
+    /// Esc must still reach gameplay and exit the mode.
+    #[test]
+    fn esc_in_build_mode_reaches_gameplay_even_when_shell_is_in_layout_mode() {
+        let (world, mut shell) = setup_shell_world_for_test();
+        {
+            let mut world_ref = world.borrow_mut();
+            world_ref
+                .resource_mut::<InputContextStack>()
+                .push(InputContext::BuildMode);
+            world_ref.resource_mut::<BuildMode>().active = true;
+        }
+        assert!(
+            shell.execute_command_by_label("Enter Layout Mode"),
+            "test setup: palette command should enter layout mode"
+        );
+        assert!(shell.is_layout_mode(), "test setup: shell in Layout mode");
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        let world_ref = world.borrow();
+        assert!(
+            !world_ref.resource::<BuildMode>().active,
+            "Esc should exit build mode even when the shell is in Layout mode"
+        );
+        assert_eq!(
+            world_ref.resource::<InputContextStack>().current(),
+            InputContext::Normal,
+            "Esc should pop the BuildMode context even in the poisoned state"
+        );
+    }
+
+    /// No regression: with the palette open over a modal context, Esc
+    /// still belongs to the palette (closes it) and the mode survives.
+    #[test]
+    fn esc_closes_palette_without_exiting_build_mode() {
+        let (world, mut shell) = setup_shell_world_for_test();
+        {
+            let mut world_ref = world.borrow_mut();
+            world_ref
+                .resource_mut::<InputContextStack>()
+                .push(InputContext::BuildMode);
+            world_ref.resource_mut::<BuildMode>().active = true;
+        }
+        route_root_input(
+            &world,
+            &mut shell,
+            GameKeyEvent::new(GameKeyCode::Char('k')).with_ctrl(),
+        );
+        assert!(shell.is_palette_open(), "test setup: Ctrl+K opens palette");
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        assert!(!shell.is_palette_open(), "Esc should close the palette");
+        let world_ref = world.borrow();
+        assert!(
+            world_ref.resource::<BuildMode>().active,
+            "closing the palette must not exit build mode underneath it"
+        );
+        assert_eq!(
+            world_ref.resource::<InputContextStack>().current(),
+            InputContext::BuildMode
+        );
+        assert!(!shell.is_layout_mode());
+    }
+
+    /// No regression: in the Normal context a bare Esc keeps its
+    /// designed shell meaning — flip PluginInput -> Layout — and never
+    /// reaches the gameplay handler (where it would quit the game).
+    #[test]
+    fn esc_in_normal_context_still_flips_shell_to_layout() {
+        let (world, mut shell) = setup_shell_world_for_test();
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        assert!(
+            shell.is_layout_mode(),
+            "Esc in Normal context should flip the shell into Layout mode"
+        );
+        assert_eq!(
+            *world.borrow().resource::<GameState>(),
+            GameState::Running,
+            "Esc in Normal context must not reach the gameplay quit handler"
+        );
+        assert_eq!(
+            world.borrow().resource::<InputContextStack>().current(),
+            InputContext::Normal
         );
     }
 }
