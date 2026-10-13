@@ -202,31 +202,33 @@ mod tests {
     }
 
     fn sample() -> Ledger {
-        let r = Registry::parse(DEFAULT_REGISTRY).unwrap_or_else(|e| panic!("{e}"));
+        let reg = Registry::parse(DEFAULT_REGISTRY).unwrap_or_else(|e| panic!("{e}"));
         let skill = |s: &str| Skill::new(s).unwrap_or_else(|e| panic!("{e}"));
-        let mut a = TaskSpec::new(tid("a"), "Build | the thing", skill("build"));
-        a.paths = vec!["src/**".into()];
-        let mut b = TaskSpec::new(tid("b"), "Review", skill("review"));
-        b.deps = vec![tid("a")];
-        let c = TaskSpec::new(tid("c"), "Spec", skill("spec"));
-        let mut l = Ledger::new();
+        let mut build = TaskSpec::new(tid("a"), "Build | the thing", skill("build"));
+        build.paths = vec!["src/**".into()];
+        let mut review = TaskSpec::new(tid("b"), "Review", skill("review"));
+        review.deps = vec![tid("a")];
+        let spec = TaskSpec::new(tid("c"), "Spec", skill("spec"));
+        let mut ledger = Ledger::new();
         let ctx = Ctx {
             now: 1_700_000_000,
-            registry: &r,
+            registry: &reg,
         };
-        l.execute(Command::Plan(vec![a, b, c]), &ctx)
+        ledger
+            .execute(Command::Plan(vec![build, review, spec]), &ctx)
             .unwrap_or_else(|e| panic!("{e}"));
-        l.execute(
-            Command::Claim {
-                task: Some(tid("a")),
-                agent: AgentId::new("builder").unwrap_or_else(|e| panic!("{e}")),
-                worker: None,
-                ttl: 60,
-            },
-            &ctx,
-        )
-        .unwrap_or_else(|e| panic!("{e}"));
-        l
+        ledger
+            .execute(
+                Command::Claim {
+                    task: Some(tid("a")),
+                    agent: AgentId::new("builder").unwrap_or_else(|e| panic!("{e}")),
+                    worker: None,
+                    ttl: 60,
+                },
+                &ctx,
+            )
+            .unwrap_or_else(|e| panic!("{e}"));
+        ledger
     }
 
     #[test]

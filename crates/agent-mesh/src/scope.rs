@@ -73,13 +73,15 @@ pub fn validate_pattern(pattern: &str) -> Result<()> {
     } else {
         None
     };
-    match reason {
-        Some(reason) => Err(MeshError::InvalidPattern {
-            pattern: pattern.to_string(),
-            reason: reason.to_string(),
-        }),
-        None => glob(pattern).map(|_| ()),
-    }
+    reason.map_or_else(
+        || glob(pattern).map(|_| ()),
+        |reason| {
+            Err(MeshError::InvalidPattern {
+                pattern: pattern.to_string(),
+                reason: reason.to_string(),
+            })
+        },
+    )
 }
 
 fn glob(pattern: &str) -> Result<Glob> {

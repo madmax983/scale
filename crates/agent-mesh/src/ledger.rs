@@ -224,35 +224,12 @@ impl Ledger {
         let ts = env.ts;
         match &env.event {
             Event::TaskAdded { task } => self.add_task(task, ts)?,
-            Event::Claimed {
-                task,
-                agent,
-                worker,
-                token,
-                expires_at,
-            } => {
-                if token.0 < self.next_token {
-                    return Err(MeshError::TokenReused {
-                        task: task.clone(),
-                        token: *token,
-                    });
-                }
-                validate_text("worker", worker, MAX_WORKER, true, true)?;
-                self.check_ready(task)?;
-                let lease = Lease {
-                    token: *token,
-                    agent: agent.clone(),
-                    worker: worker.clone(),
-                    claimed_at: ts,
-                    expires_at: *expires_at,
-                };
-                self.life_op(task, "claim", None, |l| l.claim(lease))?;
-            }
+            Event::Claimed { .. } => self.apply_claim(env)?,
             Event::Heartbeat {
                 task,
                 token,
                 expires_at,
-            } => self.life_op(task, "heartbeat", Some(*token), |l| {
+            } => self.step(env, task, "heartbeat", Some(*token), None, |l| {
                 l.heartbeat(*token, ts, *expires_at)
             })?,
             Event::Completed {
@@ -260,56 +237,108 @@ impl Ledger {
                 token,
                 evidence,
             } => {
-                validate_text("evidence", evidence, MAX_TEXT, true, false)?;
-                self.life_op(task, "complete", Some(*token), |l| l.complete(*token, ts))?;
-                self.note(task, env, NoteKind::Evidence, evidence);
+                let note = Some((NoteKind::Evidence, "evidence", evidence.as_str()));
+                self.step(env, task, "complete", Some(*token), note, |l| {
+                    l.complete(*token, ts)
+                })?;
             }
             Event::Failed {
                 task,
                 token,
                 reason,
             } => {
-                validate_text("reason", reason, MAX_TEXT, true, false)?;
-                self.life_op(task, "fail", Some(*token), |l| l.fail(*token, ts))?;
-                self.note(task, env, NoteKind::Reason, reason);
+                let note = Some((NoteKind::Reason, "reason", reason.as_str()));
+                self.step(env, task, "fail", Some(*token), note, |l| {
+                    l.fail(*token, ts)
+                })?;
             }
             Event::InputRequested {
                 task,
                 token,
                 question,
             } => {
-                validate_text("question", question, MAX_TEXT, true, false)?;
-                self.life_op(task, "ask", Some(*token), |l| l.ask(*token, ts))?;
-                self.note(task, env, NoteKind::Question, question);
+                let note = Some((NoteKind::Question, "question", question.as_str()));
+                self.step(env, task, "ask", Some(*token), note, |l| l.ask(*token, ts))?;
             }
             Event::Answered { task, answer } => {
-                validate_text("answer", answer, MAX_TEXT, true, false)?;
-                self.life_op(task, "answer", None, Lifecycle::answer)?;
-                self.note(task, env, NoteKind::Answer, answer);
+                let note = Some((NoteKind::Answer, "answer", answer.as_str()));
+                self.step(env, task, "answer", None, note, Lifecycle::answer)?;
             }
-            Event::Retried { task } => self.life_op(task, "retry", None, Lifecycle::retry)?,
+            Event::Retried { task } => {
+                self.step(env, task, "retry", None, None, Lifecycle::retry)?;
+            }
             Event::Canceled { task, reason } => {
-                validate_text("reason", reason, MAX_TEXT, true, false)?;
-                self.life_op(task, "cancel", None, Lifecycle::cancel)?;
-                self.note(task, env, NoteKind::Cancel, reason);
+                let note = Some((NoteKind::Cancel, "reason", reason.as_str()));
+                self.step(env, task, "cancel", None, note, Lifecycle::cancel)?;
             }
-            Event::LeaseExpired { task, token } => {
-                let current = self.get(task)?.life.lease().map(|l| l.token);
-                if current.is_some_and(|t| t != *token) {
-                    return Err(MeshError::StaleToken {
-                        task: task.clone(),
-                        token: *token,
-                    });
-                }
-                self.life_op(task, "expire", Some(*token), |l| l.expire(ts))?;
-                let text = format!("lease with token {token} expired");
-                self.note(task, env, NoteKind::Expired, &text);
-            }
+            Event::LeaseExpired { task, token } => self.apply_expiry(env, task, *token)?,
         }
         if let Some(t) = self.tasks.get_mut(env.event.task()) {
             t.updated_at = ts;
         }
         self.observe(env);
+        Ok(())
+    }
+
+    fn apply_claim(&mut self, env: &Envelope) -> Result<()> {
+        let Event::Claimed {
+            task,
+            agent,
+            worker,
+            token,
+            expires_at,
+        } = &env.event
+        else {
+            return Err(MeshError::Ledger("apply_claim needs a claim event".into()));
+        };
+        if token.0 < self.next_token {
+            return Err(MeshError::TokenReused {
+                task: task.clone(),
+                token: *token,
+            });
+        }
+        validate_text("worker", worker, MAX_WORKER, true, true)?;
+        self.check_ready(task)?;
+        let lease = Lease {
+            token: *token,
+            agent: agent.clone(),
+            worker: worker.clone(),
+            claimed_at: env.ts,
+            expires_at: *expires_at,
+        };
+        self.life_op(task, "claim", None, |l| l.claim(lease))
+    }
+
+    fn apply_expiry(&mut self, env: &Envelope, task: &TaskId, token: Token) -> Result<()> {
+        let current = self.get(task)?.life.lease().map(|l| l.token);
+        if current.is_some_and(|t| t != token) {
+            return Err(MeshError::StaleToken {
+                task: task.clone(),
+                token,
+            });
+        }
+        let text = format!("lease with token {token} expired");
+        let note = Some((NoteKind::Expired, "note", text.as_str()));
+        self.step(env, task, "expire", Some(token), note, |l| l.expire(env.ts))
+    }
+
+    /// Checks the note text, runs one lifecycle step, then records the note.
+    fn step(
+        &mut self,
+        env: &Envelope,
+        task: &TaskId,
+        op: &'static str,
+        token: Option<Token>,
+        note: Option<(NoteKind, &'static str, &str)>,
+        step: impl FnOnce(&mut Lifecycle) -> std::result::Result<(), Rejection>,
+    ) -> Result<()> {
+        if let Some((_, field, text)) = note {
+            validate_text(field, text, MAX_TEXT, true, false)?;
+        }
+        self.life_op(task, op, token, step)?;
+        if let Some((kind, _, text)) = note {
+            self.note(task, env, kind, text);
+        }
         Ok(())
     }
 
@@ -413,34 +442,39 @@ impl Ledger {
 
     fn run(&mut self, cmd: Command, ctx: &Ctx<'_>, out: &mut Vec<Envelope>) -> Result<()> {
         let now = ctx.now;
-        match cmd {
+        let coordinator = COORDINATOR.to_string();
+        let (actor, event) = match cmd {
             Command::Add(spec) => {
                 check_served(ctx.registry, &spec)?;
-                self.emit(out, now, COORDINATOR, Event::TaskAdded { task: spec })
+                (coordinator, Event::TaskAdded { task: spec })
             }
             Command::Plan(specs) => {
                 let ordered = plan::order(self, specs)?;
                 ordered
                     .iter()
                     .try_for_each(|s| check_served(ctx.registry, s))?;
-                ordered.into_iter().try_for_each(|task| {
+                return ordered.into_iter().try_for_each(|task| {
                     self.emit(out, now, COORDINATOR, Event::TaskAdded { task })
-                })
+                });
             }
             Command::Claim {
                 task,
                 agent,
                 worker,
                 ttl,
-            } => self.claim(out, ctx, task, agent, worker, ttl),
+            } => return self.claim(out, ctx, task, agent, worker, ttl),
+            Command::Reap => {
+                // Each expiry removes one overdue lease, so the loop ends.
+                while let Some((task, token)) = self.first_overdue(now) {
+                    self.emit(out, now, SYSTEM, Event::LeaseExpired { task, token })?;
+                }
+                return Ok(());
+            }
             Command::Heartbeat { task, token, ttl } => {
                 check_ttl(ttl)?;
-                let actor = self.lease_actor(&task);
                 let expires_at = now.saturating_add(ttl);
-                self.emit(
-                    out,
-                    now,
-                    &actor,
+                (
+                    self.lease_actor(&task),
                     Event::Heartbeat {
                         task,
                         token,
@@ -452,74 +486,43 @@ impl Ledger {
                 task,
                 token,
                 evidence,
-            } => {
-                let actor = self.lease_actor(&task);
-                self.emit(
-                    out,
-                    now,
-                    &actor,
-                    Event::Completed {
-                        task,
-                        token,
-                        evidence,
-                    },
-                )
-            }
+            } => (
+                self.lease_actor(&task),
+                Event::Completed {
+                    task,
+                    token,
+                    evidence,
+                },
+            ),
             Command::Fail {
                 task,
                 token,
                 reason,
-            } => {
-                let actor = self.lease_actor(&task);
-                self.emit(
-                    out,
-                    now,
-                    &actor,
-                    Event::Failed {
-                        task,
-                        token,
-                        reason,
-                    },
-                )
-            }
+            } => (
+                self.lease_actor(&task),
+                Event::Failed {
+                    task,
+                    token,
+                    reason,
+                },
+            ),
             Command::Ask {
                 task,
                 token,
                 question,
-            } => {
-                let actor = self.lease_actor(&task);
-                self.emit(
-                    out,
-                    now,
-                    &actor,
-                    Event::InputRequested {
-                        task,
-                        token,
-                        question,
-                    },
-                )
-            }
-            Command::Answer { task, text } => self.emit(
-                out,
-                now,
-                COORDINATOR,
-                Event::Answered { task, answer: text },
+            } => (
+                self.lease_actor(&task),
+                Event::InputRequested {
+                    task,
+                    token,
+                    question,
+                },
             ),
-            Command::Retry { task } => self.emit(out, now, COORDINATOR, Event::Retried { task }),
-            Command::Cancel { task, reason } => {
-                self.emit(out, now, COORDINATOR, Event::Canceled { task, reason })
-            }
-            Command::Reap => {
-                let overdue: Vec<(TaskId, Token)> = self
-                    .overdue(now)
-                    .iter()
-                    .filter_map(|t| t.life.lease().map(|l| (t.spec.id.clone(), l.token)))
-                    .collect();
-                overdue.into_iter().try_for_each(|(task, token)| {
-                    self.emit(out, now, SYSTEM, Event::LeaseExpired { task, token })
-                })
-            }
-        }
+            Command::Answer { task, text } => (coordinator, Event::Answered { task, answer: text }),
+            Command::Retry { task } => (coordinator, Event::Retried { task }),
+            Command::Cancel { task, reason } => (coordinator, Event::Canceled { task, reason }),
+        };
+        self.emit(out, now, &actor, event)
     }
 
     fn claim(
@@ -584,6 +587,12 @@ impl Ledger {
         Ok(())
     }
 
+    fn first_overdue(&self, now: u64) -> Option<(TaskId, Token)> {
+        let task = self.overdue(now).into_iter().next()?;
+        let lease = task.life.lease()?;
+        Some((task.spec.id.clone(), lease.token))
+    }
+
     /// The role of the current lease, or the coordinator.
     fn lease_actor(&self, id: &TaskId) -> String {
         self.task(id)
@@ -604,13 +613,13 @@ impl Ledger {
 
     /// The number of tasks.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.order.len()
     }
 
     /// `true` if there is no task.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.order.is_empty()
     }
 
@@ -647,10 +656,7 @@ impl Ledger {
         let card = agent.map(|a| registry.get(a));
         self.tasks()
             .filter(|t| self.readiness(&t.spec.id) == Readiness::Ready)
-            .filter(|t| match card {
-                None => true,
-                Some(card) => card.is_some_and(|c| c.has_skill(&t.spec.skill)),
-            })
+            .filter(|t| card.is_none_or(|c| c.is_some_and(|c| c.has_skill(&t.spec.skill))))
             .collect()
     }
 

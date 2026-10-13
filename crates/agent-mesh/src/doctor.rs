@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::board;
 use crate::ledger::Readiness;
 use crate::registry::Registry;
-use crate::store::{ReplayIssue, Store, BOARD_FILE};
+use crate::store::{Replay, ReplayIssue, Store, BOARD_FILE};
 use crate::time::fmt_utc;
 
 /// The `.gitattributes` line that makes git merge ledgers by union.
@@ -123,77 +123,7 @@ pub fn run(store: &Store, now: u64) -> Report {
         check_agent_files(store.root(), reg, &mut r);
     }
     match store.load() {
-        Ok(replay) => {
-            for issue in &replay.issues {
-                let message = match issue {
-                    ReplayIssue::Corrupt { line, error } => {
-                        format!("line {line} is not a valid event ({error}); repair or remove the line")
-                    }
-                    ReplayIssue::Conflict { line, seq, error } => format!(
-                        "line {line} (seq {seq}) conflicts with earlier events ({error}); a merge mixed two ledgers"
-                    ),
-                };
-                r.push(Severity::Error, "ledger", message);
-            }
-            let ledger = &replay.ledger;
-            for t in ledger.tasks() {
-                let id = &t.spec.id;
-                if !t.life.invariant_holds() {
-                    r.push(
-                        Severity::Error,
-                        "invariants",
-                        format!("task `{id}` breaks the lifecycle invariants"),
-                    );
-                }
-                let unserved = registry
-                    .as_ref()
-                    .is_some_and(|reg| !reg.serves(&t.spec.skill));
-                if unserved && !t.life.state().is_terminal() {
-                    r.push(
-                        Severity::Error,
-                        "skills",
-                        format!(
-                            "task `{id}` needs skill `{}`; no agent has it",
-                            t.spec.skill
-                        ),
-                    );
-                }
-                if let Readiness::Blocked(deps) = ledger.readiness(id) {
-                    let deps: Vec<String> = deps.iter().map(ToString::to_string).collect();
-                    r.push(
-                        Severity::Warning,
-                        "blocked",
-                        format!(
-                            "task `{id}` is blocked by {}; retry them or cancel this task",
-                            deps.join(", ")
-                        ),
-                    );
-                }
-            }
-            for t in ledger.overdue(now) {
-                if let Some(l) = t.life.lease() {
-                    r.push(
-                        Severity::Warning,
-                        "leases",
-                        format!(
-                            "the lease of `{}` (token {}) expired at {}; run `mesh reap`",
-                            t.spec.id,
-                            l.token,
-                            fmt_utc(l.expires_at)
-                        ),
-                    );
-                }
-            }
-            let current = std::fs::read_to_string(store.dir().join(BOARD_FILE))
-                .is_ok_and(|b| b == board::render(ledger));
-            if !current {
-                r.push(
-                    Severity::Error,
-                    "board",
-                    "BOARD.md does not match the ledger; run `mesh board`".into(),
-                );
-            }
-        }
+        Ok(replay) => check_ledger(store, &replay, registry.as_ref(), now, &mut r),
         Err(e) => r.push(Severity::Error, "ledger", e.to_string()),
     }
     let attrs = std::fs::read_to_string(store.root().join(".gitattributes")).unwrap_or_default();
@@ -208,6 +138,69 @@ pub fn run(store: &Store, now: u64) -> Report {
         );
     }
     r
+}
+
+fn check_ledger(
+    store: &Store,
+    replay: &Replay,
+    registry: Option<&Registry>,
+    now: u64,
+    r: &mut Report,
+) {
+    for issue in &replay.issues {
+        let message = match issue {
+            ReplayIssue::Corrupt { line, error } => {
+                format!("line {line} is not a valid event ({error}); repair or remove the line")
+            }
+            ReplayIssue::Conflict { line, seq, error } => format!(
+                "line {line} (seq {seq}) conflicts with earlier events ({error}); a merge mixed two ledgers"
+            ),
+        };
+        r.push(Severity::Error, "ledger", message);
+    }
+    let ledger = &replay.ledger;
+    for t in ledger.tasks() {
+        let id = &t.spec.id;
+        if !t.life.invariant_holds() {
+            r.push(
+                Severity::Error,
+                "invariants",
+                format!("task `{id}` breaks the lifecycle invariants"),
+            );
+        }
+        if registry.is_some_and(|reg| !reg.serves(&t.spec.skill)) && !t.life.state().is_terminal() {
+            let message = format!(
+                "task `{id}` needs skill `{}`; no agent has it",
+                t.spec.skill
+            );
+            r.push(Severity::Error, "skills", message);
+        }
+        if let Readiness::Blocked(deps) = ledger.readiness(id) {
+            let deps: Vec<String> = deps.iter().map(ToString::to_string).collect();
+            let message = format!(
+                "task `{id}` is blocked by {}; retry them or cancel this task",
+                deps.join(", ")
+            );
+            r.push(Severity::Warning, "blocked", message);
+        }
+    }
+    for t in ledger.overdue(now) {
+        if let Some(l) = t.life.lease() {
+            let message = format!(
+                "the lease of `{}` (token {}) expired at {}; run `mesh reap`",
+                t.spec.id,
+                l.token,
+                fmt_utc(l.expires_at)
+            );
+            r.push(Severity::Warning, "leases", message);
+        }
+    }
+    let current = std::fs::read_to_string(store.dir().join(BOARD_FILE))
+        .is_ok_and(|b| b == board::render(ledger));
+    if !current {
+        let message = "BOARD.md does not match the ledger; run `mesh board`".to_string();
+        r.push(Severity::Error, "board", message);
+    }
 }
 
 fn check_agent_files(root: &Path, registry: &Registry, r: &mut Report) {
@@ -321,7 +314,7 @@ mod tests {
         assert!(c.contains(&"ledger"));
         assert!(c.contains(&"board"));
         assert!(c.contains(&"gitattributes"));
-        assert!(r.passes(false) == (r.errors() == 0));
+        assert_eq!(r.passes(false), r.errors() == 0);
     }
 
     #[test]

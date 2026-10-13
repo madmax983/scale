@@ -37,6 +37,15 @@ struct Cli {
 enum Cmd {
     /// Make `.mesh/` with the default registry. Changes nothing if it exists.
     Init,
+    /// Claude Code `PreToolUse` hook. Reads JSON on stdin. Exit 2 blocks the tool.
+    Hook,
+    #[command(flatten)]
+    Mesh(MeshCmd),
+}
+
+/// Commands that need an existing mesh.
+#[derive(Subcommand)]
+enum MeshCmd {
     /// List the agent cards.
     Agents,
     /// Add one task.
@@ -206,8 +215,6 @@ enum Cmd {
         /// Files to check. Default: git changes since `--base`.
         files: Vec<String>,
     },
-    /// Claude Code `PreToolUse` hook. Reads JSON on stdin. Exit 2 blocks the tool.
-    Hook,
     /// Check the health of the mesh.
     Doctor {
         /// Fail on warnings too.
@@ -250,19 +257,15 @@ fn run(cli: Cli) -> Result<ExitCode> {
     match cli.cmd {
         Cmd::Init => init(dir, json),
         Cmd::Hook => Ok(hook_cmd()),
-        cmd => {
-            let store = open(dir)?;
-            dispatch(&store, cmd, json)
-        }
+        Cmd::Mesh(cmd) => dispatch(&open(dir)?, cmd, json),
     }
 }
 
-fn dispatch(store: &Store, cmd: Cmd, json: bool) -> Result<ExitCode> {
+fn dispatch(store: &Store, cmd: MeshCmd, json: bool) -> Result<ExitCode> {
     let write = |cmd: Command| write(store, cmd, json);
     match cmd {
-        Cmd::Init | Cmd::Hook => unreachable!("handled in run"),
-        Cmd::Agents => agents(store, json),
-        Cmd::Add {
+        MeshCmd::Agents => agents(store, json),
+        MeshCmd::Add {
             id,
             title,
             skill,
@@ -279,9 +282,9 @@ fn dispatch(store: &Store, cmd: Cmd, json: bool) -> Result<ExitCode> {
             detail,
             max_failures,
         })),
-        Cmd::Plan { file, dry_run } => plan_cmd(store, &file, dry_run, json),
-        Cmd::Ready { agent } => ready(store, agent.as_ref(), json),
-        Cmd::Claim {
+        MeshCmd::Plan { file, dry_run } => plan_cmd(store, &file, dry_run, json),
+        MeshCmd::Ready { agent } => ready(store, agent.as_ref(), json),
+        MeshCmd::Claim {
             task,
             next: _,
             agent,
@@ -293,8 +296,8 @@ fn dispatch(store: &Store, cmd: Cmd, json: bool) -> Result<ExitCode> {
             worker,
             ttl,
         }),
-        Cmd::Heartbeat { task, token, ttl } => write(Command::Heartbeat { task, token, ttl }),
-        Cmd::Complete {
+        MeshCmd::Heartbeat { task, token, ttl } => write(Command::Heartbeat { task, token, ttl }),
+        MeshCmd::Complete {
             task,
             token,
             evidence,
@@ -303,7 +306,7 @@ fn dispatch(store: &Store, cmd: Cmd, json: bool) -> Result<ExitCode> {
             token,
             evidence,
         }),
-        Cmd::Fail {
+        MeshCmd::Fail {
             task,
             token,
             reason,
@@ -312,7 +315,7 @@ fn dispatch(store: &Store, cmd: Cmd, json: bool) -> Result<ExitCode> {
             token,
             reason,
         }),
-        Cmd::Ask {
+        MeshCmd::Ask {
             task,
             token,
             question,
@@ -321,22 +324,22 @@ fn dispatch(store: &Store, cmd: Cmd, json: bool) -> Result<ExitCode> {
             token,
             question,
         }),
-        Cmd::Answer { task, text } => write(Command::Answer { task, text }),
-        Cmd::Retry { task } => write(Command::Retry { task }),
-        Cmd::Cancel { task, reason } => write(Command::Cancel { task, reason }),
-        Cmd::Reap => write(Command::Reap),
-        Cmd::Fence { task, token } => fence(store, &task, token, json),
-        Cmd::Status => status(store, json),
-        Cmd::Show { task } => show(store, &task, json),
-        Cmd::Log { task, limit } => log(store, task.as_ref(), limit, json),
-        Cmd::Board { check } => board_cmd(store, check),
-        Cmd::CheckScope {
+        MeshCmd::Answer { task, text } => write(Command::Answer { task, text }),
+        MeshCmd::Retry { task } => write(Command::Retry { task }),
+        MeshCmd::Cancel { task, reason } => write(Command::Cancel { task, reason }),
+        MeshCmd::Reap => write(Command::Reap),
+        MeshCmd::Fence { task, token } => fence(store, &task, token, json),
+        MeshCmd::Status => status(store, json),
+        MeshCmd::Show { task } => show(store, &task, json),
+        MeshCmd::Log { task, limit } => log(store, task.as_ref(), limit, json),
+        MeshCmd::Board { check } => board_cmd(store, check),
+        MeshCmd::CheckScope {
             agent,
             task,
             base,
             files,
         } => check_scope(store, &agent, task.as_ref(), &base, files, json),
-        Cmd::Doctor { strict } => doctor_cmd(store, strict, json),
+        MeshCmd::Doctor { strict } => doctor_cmd(store, strict, json),
     }
 }
 

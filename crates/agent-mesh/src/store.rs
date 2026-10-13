@@ -463,6 +463,6 @@ mod tests {
         let r = store.load().unwrap_or_else(|e| panic!("{e}"));
         assert!(r.ledger.is_empty());
         store.execute(1, add("a")).unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(store.load().map(|r| r.ledger.len()).unwrap_or(0), 1);
+        assert_eq!(store.load().map_or(0, |r| r.ledger.len()), 1);
     }
 }

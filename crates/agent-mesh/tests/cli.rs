@@ -275,7 +275,7 @@ fn leases_expire_and_fence_checks_the_token() {
     assert!(err.contains("expired"), "{err}");
     let reap = repo.ok(200, &["reap"]);
     assert!(reap.contains("expired"), "{reap}");
-    assert!(repo.ok(201, &["ready"]).contains("A"));
+    assert!(repo.ok(201, &["ready"]).contains('A'));
     // The second expiry uses the budget: the task fails.
     repo.ok(300, &["claim", "a", "--agent", "builder", "--ttl", "10"]);
     let out = repo.ok(

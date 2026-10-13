@@ -17,14 +17,10 @@ pub fn is_valid_id(s: &str) -> bool {
     let b = s.as_bytes();
     let body =
         |c: &u8| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'_' | b'-');
-    match b.first() {
-        Some(first) => {
-            b.len() <= MAX_ID_LEN
-                && (first.is_ascii_lowercase() || first.is_ascii_digit())
-                && b.iter().all(body)
-        }
-        None => false,
-    }
+    b.len() <= MAX_ID_LEN
+        && b.first()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && b.iter().all(body)
 }
 
 macro_rules! id_type {

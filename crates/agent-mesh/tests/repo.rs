@@ -96,9 +96,8 @@ fn coordinator_skill_and_scripts_exist() {
     #[cfg(unix)]
     for script in ["scripts/mesh", "scripts/mesh-hook.sh"] {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(repo_root().join(script))
-            .map(|m| m.permissions().mode())
-            .unwrap_or(0);
+        let mode =
+            std::fs::metadata(repo_root().join(script)).map_or(0, |m| m.permissions().mode());
         assert!(mode & 0o111 != 0, "{script} must be executable");
     }
 }

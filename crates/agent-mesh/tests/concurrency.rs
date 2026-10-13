@@ -38,6 +38,10 @@ fn threads_racing_for_one_task_produce_one_winner() {
         .unwrap_or_else(|e| panic!("{e}"));
     let n = 12;
     let barrier = Arc::new(Barrier::new(n));
+    #[allow(
+        clippy::needless_collect,
+        reason = "start all threads before the first join"
+    )]
     let handles: Vec<_> = (0..n)
         .map(|i| {
             let dir = dir.clone();
@@ -124,16 +128,16 @@ fn processes_racing_for_one_task_produce_one_winner() {
     Store::open(&dir)
         .and_then(|s| s.execute(1, add("a")))
         .unwrap_or_else(|e| panic!("{e}"));
+    #[allow(
+        clippy::needless_collect,
+        reason = "start all processes before the first wait"
+    )]
     let children: Vec<_> = (0..8)
         .map(|_| run(tmp.path(), &["claim", "a", "--agent", "builder"]))
         .collect();
     let wins = children
         .into_iter()
-        .map(|c| {
-            c.wait_with_output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
-        })
+        .map(|c| c.wait_with_output().is_ok_and(|o| o.status.success()))
         .filter(|w| *w)
         .count();
     assert_eq!(wins, 1);

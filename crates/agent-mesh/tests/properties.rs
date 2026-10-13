@@ -241,13 +241,12 @@ proptest! {
             }
             let Some(cmd) = command(&ledger, op) else { continue };
             let before = ledger.clone();
-            match ledger.execute(cmd, &Ctx { now, registry: &reg }) {
-                Ok(events) => {
-                    check_step(&before, &ledger, &events, now, &mut max_token, &reg);
-                    log.extend(events);
-                }
+            if let Ok(events) = ledger.execute(cmd, &Ctx { now, registry: &reg }) {
+                check_step(&before, &ledger, &events, now, &mut max_token, &reg);
+                log.extend(events);
+            } else {
                 // Atomic: a rejected command changes nothing.
-                Err(_) => prop_assert_eq!(&before, &ledger),
+                prop_assert_eq!(&before, &ledger);
             }
         }
         // Replay of the accepted events gives the same ledger.
