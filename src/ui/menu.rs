@@ -13,6 +13,10 @@ const LOGO: &str = r#"
 
 const SUBTITLE: &str = "From pebble to empire. Every world remembers.";
 
+/// The official slogan, per Mark (2026-10-13) — born in the Field Guide:
+/// "Potatoes, because they endure winter. Trust the potatoes."
+const SLOGAN: &str = "Trust the potatoes.";
+
 /// Renders the main menu screen.
 ///
 /// Displays the game title and a selectable list of options (Start Game, Quit).
@@ -22,7 +26,7 @@ pub fn render_main_menu(frame: &mut Frame, area: Rect, state: &MenuState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(2),                                 // Top spacing
-            Constraint::Length(9),                              // Title and Subtitle
+            Constraint::Length(9),                              // Title, Subtitle, and Slogan
             Constraint::Length(state.options.len() as u16 + 2), // Menu items
             Constraint::Length(3),                              // Scenario info
             Constraint::Length(3),                              // Origin info
@@ -32,8 +36,11 @@ pub fn render_main_menu(frame: &mut Frame, area: Rect, state: &MenuState) {
         ])
         .split(area);
 
-    // Title Block
+    // Title Block. The LOGO literal opens with a blank line (raw-string
+    // newline); trimming it frees the row the slogan now occupies, so the
+    // title block keeps its original height on small terminals.
     let mut title_text: Vec<Line> = LOGO
+        .trim_start()
         .lines()
         .map(|line| {
             Line::from(Span::styled(
@@ -50,6 +57,12 @@ pub fn render_main_menu(frame: &mut Frame, area: Rect, state: &MenuState) {
         SUBTITLE,
         Style::default()
             .fg(Color::Gray)
+            .add_modifier(Modifier::ITALIC),
+    )));
+    title_text.push(Line::from(Span::styled(
+        SLOGAN,
+        Style::default()
+            .fg(Color::Yellow)
             .add_modifier(Modifier::ITALIC),
     )));
 
@@ -225,5 +238,30 @@ mod tests {
         }
 
         assert!(full_text.contains("Lawbound"));
+    }
+
+    #[test]
+    fn test_render_main_menu_shows_slogan_beneath_subtitle() {
+        // A full-size terminal: at 80x24 the layout solver compresses the
+        // title block and even the subtitle is clipped (pre-existing on
+        // trunk), so title text is asserted at a size where the whole
+        // menu fits.
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = MenuState::default();
+
+        terminal
+            .draw(|frame| render_main_menu(frame, frame.area(), &state))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let mut full_text = String::with_capacity(buffer.area.area() as usize);
+        for cell in &buffer.content {
+            full_text.push_str(cell.symbol());
+        }
+
+        // The poetic tagline stays, and the official slogan rides beneath it.
+        assert!(full_text.contains("From pebble to empire. Every world remembers."));
+        assert!(full_text.contains("Trust the potatoes."));
     }
 }
