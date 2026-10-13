@@ -2,22 +2,195 @@
 <html>
   <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <title>SCALE WASM</title>
     <!-- ratzilla draws default-colored cells as white text on a transparent
          background, so the page itself has to supply the dark terminal backdrop. -->
     <style>
-      body { margin: 0; background-color: #000; }
+      html, body { height: 100%; }
+      body { margin: 0; background-color: #000; overflow: hidden; touch-action: none; overscroll-behavior: none; }
       /* Each grid row is a <pre>; the browser's default 1em margin would
          make rows taller than the cell height ratzilla measured. */
       pre { margin: 0; }
+
+      /* ---- Spec 1383: touch control cluster --------------------------
+         Real DOM buttons (accessible labels), shown on coarse pointers
+         or narrow viewports, or via the manual toggle button. The cluster
+         is position:fixed and the terminal area is shrunk by reserving
+         bottom padding on the grid container via --cluster-h (set by the
+         fit script below), so the cluster never covers terminal cells. */
+      :root { --cluster-h: 0px; }
+      #touch-cluster {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+        display: none; gap: 8px; align-items: stretch; justify-content: space-between;
+        padding: 8px calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+        background: rgba(10, 10, 14, 0.92); border-top: 1px solid #333;
+        font-family: system-ui, sans-serif; user-select: none; -webkit-user-select: none;
+      }
+      body.touch-ui #touch-cluster { display: flex; }
+      #touch-cluster .dpad { display: grid; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 44px); gap: 4px; }
+      #touch-cluster .actions { display: grid; grid-template-columns: repeat(3, minmax(52px, auto)); grid-auto-rows: 44px; gap: 4px; align-content: start; }
+      #touch-cluster button {
+        min-width: 44px; min-height: 44px; border: 1px solid #555; border-radius: 8px;
+        background: #1c1c22; color: #eee; font-size: 15px; touch-action: none; cursor: pointer;
+      }
+      #touch-cluster button:active { background: #3a3a48; }
+      #touch-cluster .spacer { visibility: hidden; }
+      #touch-reopen {
+        position: fixed; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 11;
+        display: none; min-width: 44px; min-height: 44px; border: 1px solid #555; border-radius: 8px;
+        background: rgba(28, 28, 34, 0.92); color: #eee; font-size: 18px; touch-action: none;
+      }
+      body.touch-ui.cluster-collapsed #touch-reopen { display: block; }
+      body.touch-ui.cluster-collapsed #touch-cluster { display: none; }
+      /* Visually unobtrusive but focusable: focusing it opens the
+         phone's virtual keyboard (Spec 1383 text-input bridge). */
+      #touch-input { position: fixed; left: 8px; bottom: 8px; width: 8px; height: 8px; opacity: 0.01; border: 0; padding: 0; z-index: -1; }
+      @media (pointer: coarse) { /* default-on for touch devices; JS also toggles */ }
     </style>
     <!-- wasm-opt must be told about the WASM features rustc enables by default,
          or it rejects the module (e.g. memory.copy needs bulk-memory). -->
     <link data-trunk rel="rust" data-bin="wasm_app"
           data-wasm-opt-params="--enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types" />
+    <script>
+      // Spec 1383 — Mobile Controls shell (input translation only).
+      // Every button dispatches the identical KeyboardEvent a physical
+      // key produces, on the document — the same channel wasm_app's
+      // on_document_key_event listens on. The canonical button->key
+      // table lives in Rust (src/ui/mobile.rs, TouchButton::dom_key)
+      // and is unit-tested there; this table mirrors it exactly.
+      (function () {
+        var KEYS = {
+          up:        ["ArrowUp", "ArrowUp"],
+          down:      ["ArrowDown", "ArrowDown"],
+          left:      ["ArrowLeft", "ArrowLeft"],
+          right:     ["ArrowRight", "ArrowRight"],
+          enter:     ["Enter", "Enter"],
+          esc:       ["Escape", "Escape"],
+          tab:       ["Tab", "Tab"],
+          space:     [" ", "Space"],
+          backspace: ["Backspace", "Backspace"]
+        };
+        function dispatchKey(pair) {
+          document.dispatchEvent(new KeyboardEvent("keydown", {
+            key: pair[0], code: pair[1], bubbles: true, cancelable: true
+          }));
+        }
+        function isTouchUi() {
+          return window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 820;
+        }
+        // Viewport scaling — mirrors compute_grid_layout in
+        // src/ui/mobile.rs: cells >= 12px wide, grid fits the viewport
+        // (no horizontal scroll), cluster space reserved at the bottom.
+        function fitGrid() {
+          var touch = isTouchUi();
+          document.body.classList.toggle("touch-ui", touch);
+          var collapsed = document.body.classList.contains("cluster-collapsed");
+          var reserved = touch && !collapsed ? 148 : (touch ? 0 : 0);
+          document.documentElement.style.setProperty("--cluster-h", reserved + "px");
+          if (touch) {
+            var w = window.innerWidth;
+            var cols = Math.floor(w / 12);
+            cols = Math.max(24, Math.min(120, cols));
+            var cellW = w / cols;
+            var fontPx = cellW / 0.6;
+            document.body.style.fontSize = fontPx + "px";
+          } else {
+            document.body.style.fontSize = "";
+          }
+        }
+        function buildCluster() {
+          if (document.getElementById("touch-cluster")) return;
+          var cluster = document.createElement("div");
+          cluster.id = "touch-cluster";
+          cluster.setAttribute("role", "group");
+          cluster.setAttribute("aria-label", "Touch controls");
+          function btn(id, label, text) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.textContent = text;
+            b.setAttribute("aria-label", label);
+            if (id) {
+              // pointerdown (not click) for responsiveness, per spec §7.
+              b.addEventListener("pointerdown", function (ev) {
+                ev.preventDefault();
+                dispatchKey(KEYS[id]);
+              });
+            }
+            return b;
+          }
+          var dpad = document.createElement("div");
+          dpad.className = "dpad";
+          var spacer = function () { var s = btn(null, "", ""); s.className = "spacer"; return s; };
+          dpad.append(spacer(), btn("up", "Up", "↑"), spacer(),
+                      btn("left", "Left", "←"), btn("down", "Down", "↓"), btn("right", "Right", "→"),
+                      spacer(), spacer(), spacer());
+          var actions = document.createElement("div");
+          actions.className = "actions";
+          actions.append(btn("enter", "Enter", "⏎ Enter"), btn("esc", "Escape", "Esc"), btn("tab", "Tab", "Tab"),
+                         btn("space", "Space", "Space"), btn("backspace", "Backspace", "⌫"));
+          var kb = document.createElement("button");
+          kb.type = "button"; kb.textContent = "⌨ Text"; kb.setAttribute("aria-label", "Open keyboard");
+          kb.addEventListener("pointerdown", function (ev) {
+            ev.preventDefault();
+            var input = document.getElementById("touch-input");
+            if (input) { input.value = ""; input.focus(); }
+          });
+          actions.append(kb);
+          var collapse = document.createElement("button");
+          collapse.type = "button"; collapse.textContent = "▾ Hide"; collapse.setAttribute("aria-label", "Collapse controls");
+          collapse.addEventListener("pointerdown", function (ev) {
+            ev.preventDefault();
+            document.body.classList.add("cluster-collapsed");
+            fitGrid();
+          });
+          actions.append(collapse);
+          cluster.append(dpad, actions);
+          document.body.append(cluster);
+          var reopen = document.createElement("button");
+          reopen.id = "touch-reopen"; reopen.type = "button"; reopen.textContent = "🎮";
+          reopen.setAttribute("aria-label", "Show touch controls");
+          reopen.addEventListener("pointerdown", function (ev) {
+            ev.preventDefault();
+            document.body.classList.remove("cluster-collapsed");
+            fitGrid();
+          });
+          document.body.append(reopen);
+          // Text-input bridge (minimal viable level): the virtual
+          // keyboard types into this input; Enter submits the line —
+          // each character plus Enter is dispatched as key events.
+          var input = document.createElement("input");
+          input.id = "touch-input"; input.type = "text";
+          input.setAttribute("aria-label", "Type a command, Enter submits");
+          input.setAttribute("autocomplete", "off"); input.setAttribute("autocapitalize", "off");
+          input.addEventListener("change", function () {
+            var text = input.value;
+            for (var i = 0; i < text.length; i++) {
+              document.dispatchEvent(new KeyboardEvent("keydown", {
+                key: text[i], code: "", bubbles: true, cancelable: true
+              }));
+            }
+            dispatchKey(KEYS.enter);
+            input.value = "";
+            input.blur();
+          });
+          document.body.append(input);
+          fitGrid();
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", buildCluster);
+        } else {
+          buildCluster();
+        }
+        window.addEventListener("resize", fitGrid);
+        window.addEventListener("orientationchange", function () { setTimeout(fitGrid, 50); });
+      })();
+    </script>
   </head>
-  <!-- Keep <body> empty: ratzilla's DomBackend sizes its cell grid from the
-       body's rect and only falls back to the window size when body has none.
-       Any content here shrinks the grid and the first draw indexes past it. -->
+  <!-- Keep <body> empty of static content: ratzilla's DomBackend sizes its
+       cell grid from the body's rect and only falls back to the window size
+       when body has none. The touch cluster is therefore built by script
+       (position:fixed, out of flow) and html/body height is pinned to 100%
+       above so the body's rect stays the viewport size. -->
   <body></body>
 </html>

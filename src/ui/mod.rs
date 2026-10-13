@@ -177,6 +177,8 @@ pub fn render_with_shell(world: &World, shell: &mut UiShell, frame: &mut Frame) 
 
 pub mod input;
 pub mod menu_state;
+/// Spec 1383: mobile touch input translation layer.
+pub mod mobile;
 pub mod selection;
 pub mod world_history;
 

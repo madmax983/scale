@@ -179,6 +179,62 @@ fn on_document_key_event(
     Ok(())
 }
 
+
+/// Spec 1383: route `pointerdown` taps on the document to `callback`
+/// with the tap's CSS-pixel coordinates; the callback returns whether
+/// it handled the tap (handled taps are `prevent_default`-ed so the
+/// browser does not also synthesize a mouse click for them).
+#[cfg(target_arch = "wasm32")]
+fn on_document_pointer_event(
+    mut callback: impl FnMut(f32, f32) -> bool + 'static,
+) -> std::io::Result<()> {
+    use ratzilla::web_sys::wasm_bindgen::{prelude::Closure, JsCast};
+    use ratzilla::web_sys::{window, MouseEvent};
+
+    let document = window()
+        .and_then(|window| window.document())
+        .ok_or_else(|| std::io::Error::other("no document"))?;
+    let closure = Closure::<dyn FnMut(MouseEvent)>::new(move |event: MouseEvent| {
+        #[allow(clippy::cast_precision_loss)]
+        let handled = callback(event.client_x() as f32, event.client_y() as f32);
+        if handled {
+            event.prevent_default();
+        }
+    });
+    document
+        .add_event_listener_with_callback("pointerdown", closure.as_ref().unchecked_ref())
+        .map_err(|err| std::io::Error::other(format!("{err:?}")))?;
+    closure.forget();
+    Ok(())
+}
+
+/// Spec 1383: the pixel rect the terminal grid actually occupies.
+/// Prefers the grid container's own bounding rect (which captures any
+/// letterboxing/offset and the space the shell reserves for the touch
+/// cluster); falls back to the full window.
+#[cfg(target_arch = "wasm32")]
+fn grid_pixel_rect() -> Option<scale::ui::mobile::PixelRect> {
+    use ratzilla::web_sys::window;
+    let window = window()?;
+    if let Some(document) = window.document() {
+        if let Ok(Some(element)) = document.query_selector("body > div") {
+            let rect = element.get_bounding_client_rect();
+            if rect.width() > 0.0 && rect.height() > 0.0 {
+                #[allow(clippy::cast_possible_truncation)]
+                return Some(scale::ui::mobile::PixelRect::new(
+                    rect.left() as f32,
+                    rect.top() as f32,
+                    rect.width() as f32,
+                    rect.height() as f32,
+                ));
+            }
+        }
+    }
+    let width = window.inner_width().ok()?.as_f64()? as f32;
+    let height = window.inner_height().ok()?.as_f64()? as f32;
+    Some(scale::ui::mobile::PixelRect::new(0.0, 0.0, width, height))
+}
+
 #[cfg(target_arch = "wasm32")]
 fn main() -> std::io::Result<()> {
     let world = Rc::new(RefCell::new(setup_world()));
@@ -210,6 +266,7 @@ fn main() -> std::io::Result<()> {
         .clone();
     let shell = Rc::new(RefCell::new(build_default_shell(Rc::clone(&world), config)));
 
+    let grid_size = Rc::new(RefCell::new((0u16, 0u16)));
     let backend = GridSizedDom::new()?;
     let mut terminal = Terminal::new(backend)?;
 
@@ -234,12 +291,75 @@ fn main() -> std::io::Result<()> {
         }
     })?;
 
+
+    // Spec 1383 tap layer: taps on the main menu are translated into
+    // the keyboard sequences a keyboard user would produce (select,
+    // then confirm on a second tap of the selected row; setup rows
+    // focus/cycle). In game, taps fall through to ratzilla's existing
+    // mouse synthesis -> route_root_mouse_input, exactly like a
+    // physical click, so nothing is double-routed.
+    let _ = on_document_pointer_event({
+        let world = world.clone();
+        let shell = shell.clone();
+        let grid_size = grid_size.clone();
+        move |px, py| {
+            use scale::ui::mobile::{
+                menu_rows, menu_tap_keys, setup_row_tap_keys, tap_to_cell, SetupRow,
+            };
+            let (cols, rows) = *grid_size.borrow();
+            if cols == 0 || rows == 0 {
+                return false;
+            }
+            let is_main_menu = {
+                let world = world.borrow();
+                *world.resource::<GameState>() == GameState::MainMenu
+            };
+            if !is_main_menu {
+                return false;
+            }
+            let Some(rect) = grid_pixel_rect() else {
+                return false;
+            };
+            let Some(cell) = tap_to_cell(px, py, rect, cols, rows) else {
+                return false;
+            };
+            let (selected, count, scenario_focused) = {
+                let world = world.borrow();
+                let menu = world.resource::<scale::ui::menu_state::MenuState>();
+                (
+                    menu.selected_index,
+                    menu.options.len(),
+                    menu.selector == scale::ui::menu_state::MenuSelector::Scenario,
+                )
+            };
+            let area = ratzilla::ratatui::layout::Rect::new(0, 0, cols, rows);
+            let (option_rows, scenario_row, origin_row) = menu_rows(area, count);
+            let keys = if let Some(idx) = option_rows.iter().position(|&row| row == cell.1) {
+                menu_tap_keys(idx, selected, count)
+            } else if scenario_row == Some(cell.1) {
+                setup_row_tap_keys(SetupRow::Scenario, scenario_focused)
+            } else if origin_row == Some(cell.1) {
+                setup_row_tap_keys(SetupRow::Origin, scenario_focused)
+            } else {
+                return false;
+            };
+            if keys.is_empty() {
+                return false;
+            }
+            for key in keys {
+                route_root_input(&world, &mut shell.borrow_mut(), key);
+            }
+            true
+        }
+    });
+
     let frame_count = Rc::new(RefCell::new(0u32));
 
     terminal.draw_web({
         let world = world;
         let shell = shell;
         let save_bridge = save_bridge;
+        let grid_size = grid_size;
         move |frame| {
             {
                 let mut world = world.borrow_mut();
@@ -340,6 +460,7 @@ fn main() -> std::io::Result<()> {
                 update_render_cache(&mut world);
             }
 
+            *grid_size.borrow_mut() = (frame.area().width, frame.area().height);
             let world = world.borrow();
             let mut shell = shell.borrow_mut();
             render_with_shell(&world, &mut shell, frame);
