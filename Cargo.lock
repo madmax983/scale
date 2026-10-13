@@ -3754,6 +3754,7 @@ dependencies = [
  "env_logger",
  "getrandom 0.3.4",
  "image",
+ "js-sys",
  "lazy_static",
  "log",
  "mockall",
@@ -3771,6 +3772,9 @@ dependencies = [
  "strum 0.26.3",
  "strum_macros 0.26.4",
  "thiserror 2.0.18",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "wgpu 24.0.5",
 ]
 

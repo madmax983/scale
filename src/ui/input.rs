@@ -442,6 +442,36 @@ fn handle_main_menu_mode(world: &mut World, key: GameKeyEvent) {
                     stack.stack = vec![InputContext::Normal];
                 }
                 1 => {
+                    // Load Autosave (Spec 1382): native reads the file
+                    // store; WASM fires the IndexedDB bridge request and
+                    // the shell applies it when the completion lands.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let store = crate::persistence::FileSaveStore::default_dir();
+                        match crate::persistence::load_world(
+                            world,
+                            &store,
+                            crate::persistence::AUTOSAVE_SLOT,
+                        ) {
+                            Ok(_) => {
+                                *world.resource_mut::<GameState>() = GameState::Running;
+                                let mut stack = world.resource_mut::<InputContextStack>();
+                                stack.stack = vec![InputContext::Normal];
+                            }
+                            Err(e) => {
+                                world.resource_mut::<MenuState>().save_summary =
+                                    format!("Load failed: {e}");
+                            }
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let bridge = crate::persistence::wasm_idb::shared_bridge();
+                        bridge.request_load(crate::persistence::AUTOSAVE_SLOT);
+                        bridge.set_pending_apply(crate::persistence::AUTOSAVE_SLOT);
+                    }
+                }
+                2 => {
                     // Quit
                     *world.resource_mut::<GameState>() = GameState::Quitting;
                 }
@@ -1287,7 +1317,7 @@ mod tests {
             .push(InputContext::MainMenu);
 
         world.insert_resource(MenuState {
-            selected_index: 1,
+            selected_index: 2,
             ..Default::default()
         }); // "Quit" selected
 

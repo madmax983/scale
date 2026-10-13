@@ -182,6 +182,28 @@ fn on_document_key_event(
 #[cfg(target_arch = "wasm32")]
 fn main() -> std::io::Result<()> {
     let world = Rc::new(RefCell::new(setup_world()));
+
+    // Spec 1382: IndexedDB save bridge + persistent-storage request,
+    // plus settings crumbs pre-selecting the last origin (localStorage).
+    scale::persistence::wasm_idb::request_persistent_storage();
+    let save_bridge = Rc::new(RefCell::new(
+        scale::persistence::wasm_idb::shared_bridge(),
+    ));
+    save_bridge.borrow().request_list();
+    {
+        let settings = scale::persistence::load_settings();
+        if let Some(origin_id) = settings.last_origin.as_deref() {
+            if let Some(kind) =
+                scale::layer1::culture::origins::OriginKind::parse(origin_id)
+            {
+                world.borrow_mut().insert_resource(
+                    scale::layer1::culture::origins::OriginChoice {
+                        chosen: Some(kind),
+                    },
+                );
+            }
+        }
+    }
     let config = world
         .borrow()
         .resource::<scale::ui::shell::ShellConfig>()
@@ -217,6 +239,7 @@ fn main() -> std::io::Result<()> {
     terminal.draw_web({
         let world = world;
         let shell = shell;
+        let save_bridge = save_bridge;
         move |frame| {
             {
                 let mut world = world.borrow_mut();
@@ -232,6 +255,83 @@ fn main() -> std::io::Result<()> {
                         let speed = world.resource::<SimulationTime>().speed;
                         if speed != SimSpeed::Paused {
                             run_simulation_tick(&mut world);
+                        }
+                    }
+                    // Spec 1382: autosave to the reserved slot via the
+                    // IndexedDB bridge, and drain bridge completions
+                    // into the world's event stream.
+                    {
+                        let mut bridge = save_bridge.borrow_mut();
+                        let now_unix = (js_sys::Date::now() / 1000.0) as u64;
+                        let _ = scale::persistence::maybe_autosave(
+                            &mut world,
+                            &mut *bridge,
+                            now_unix,
+                        );
+                        let completions = bridge.poll_completions();
+                        if !completions.is_empty() {
+                            // Menu "Load Autosave": a completed load for
+                            // the pending slot is applied to the world
+                            // and the game starts.
+                            if let Some(slot) = bridge.peek_pending_apply() {
+                                let loaded = completions.iter().any(|c| {
+                                    c.ok
+                                        && c.kind
+                                            == scale::persistence::SaveLoadKind::Load
+                                        && c.slot == slot
+                                });
+                                if loaded {
+                                    let _ = bridge.take_pending_apply();
+                                    let store = bridge.clone();
+                                    if scale::persistence::load_world(
+                                        &mut world, &store, &slot,
+                                    )
+                                    .is_ok()
+                                    {
+                                        *world.resource_mut::<GameState>() =
+                                            GameState::Running;
+                                        world
+                                            .resource_mut::<
+                                                scale::ui::input::InputContextStack,
+                                            >()
+                                            .push(scale::ui::input::InputContext::Normal);
+                                    }
+                                }
+                            }
+                            // Refresh the menu's saves line from the
+                            // bridge cache whenever anything completes.
+                            {
+                                use scale::persistence::SaveStore;
+                                if let Ok(list) = bridge.list() {
+                                    let summary = if list.is_empty() {
+                                        "No saves yet".to_string()
+                                    } else {
+                                        list.iter()
+                                            .map(|m| {
+                                                format!(
+                                                    "{} · tick {} · {}",
+                                                    m.slot, m.tick, m.colony_name
+                                                )
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("  |  ")
+                                    };
+                                    if let Some(mut menu) = world.get_resource_mut::<
+                                        scale::ui::menu_state::MenuState,
+                                    >() {
+                                        menu.save_summary = summary;
+                                    }
+                                }
+                            }
+                            if let Some(mut events) = world.get_resource_mut::<
+                                bevy_ecs::event::Events<
+                                    scale::persistence::SaveLoadCompleted,
+                                >,
+                            >() {
+                                for completion in completions {
+                                    events.send(completion);
+                                }
+                            }
                         }
                     }
                 }

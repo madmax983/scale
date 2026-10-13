@@ -33,6 +33,11 @@
 //!   `origins`        - List adventurer origins and this run's roster
 //!   `help`           - Show this help
 //!   `quit`           - Exit
+//!   `save <slot>`    - Save the colony to a slot (Spec 1382)
+//!   `load <slot>`    - Load the colony from a slot
+//!   `saves`          - List stored saves with metadata
+//!   `delsave <slot>` - Delete a stored save
+//!   `export <slot> <path>` - Copy a save to a .scale-save file
 
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_possible_truncation)]
@@ -102,6 +107,10 @@ use scale::setup::{setup_world_with_config, SetupConfig};
 use scale::shared::log::MessageLog;
 use scale::shared::state::GameState;
 use scale::shared::time::SimulationTime;
+use scale::persistence::{
+    export_save, import_save, list_saves, load_world, maybe_autosave, save_world, FileSaveStore,
+    SaveStore,
+};
 use scale::simulation::run_simulation_tick;
 use std::io::{self, BufRead, Write};
 
@@ -468,6 +477,12 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "curio" => print_curio_ledger(world),
         "rumors" => print_rumors(world),
         "season" => print_season(world),
+        "save" => handle_save_command(world, &parts),
+        "load" => handle_load_command(world, &parts),
+        "saves" => print_saves(world),
+        "delsave" => handle_delsave_command(world, &parts),
+        "export" => handle_export_command(world, &parts),
+        "import" => handle_import_command(world, &parts),
         "quirks" => print_quirks(world),
         "quirk" => handle_quirk_command(world, &parts),
         "provenance" => print_provenance(world),
@@ -2451,8 +2466,15 @@ fn handle_abdicate_command(world: &mut World) {
 fn run_ticks(world: &mut World, n: u64) {
     let start_tick = world.resource::<SimulationTime>().tick;
 
+    let mut save_store = FileSaveStore::default_dir();
     for _ in 0..n {
         run_simulation_tick(world);
+        // Spec 1382: autosave every 1000 ticks to the reserved slot only.
+        match maybe_autosave(world, &mut save_store, unix_now()) {
+            Ok(true) => println!("Autosaved to slot 'autosave'."),
+            Ok(false) => {}
+            Err(e) => eprintln!("Autosave failed: {e}"),
+        }
     }
 
     let end_tick = world.resource::<SimulationTime>().tick;
@@ -2605,6 +2627,196 @@ fn print_status(world: &mut World) {
     ]);
 
     print_dashboard_table(&format!("COLONY STATUS (Tick {})", tick), table);
+}
+
+/// Wall-clock unix seconds for save metadata (0 if the clock is broken).
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+fn handle_save_command(world: &mut World, parts: &[&str]) {
+    let Some(slot) = parts.get(1) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: save <slot>",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let mut store = FileSaveStore::default_dir();
+    match save_world(world, &mut store, slot, unix_now()) {
+        Ok(meta) => print_dashboard_panel(
+            "SAVE",
+            &format!(
+                "Saved '{}' at tick {} ({} bytes) to saves/{}.json",
+                meta.slot, meta.tick, meta.size_bytes, meta.slot
+            ),
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(e) => print_dashboard_panel(
+            "ERROR",
+            &format!("Save failed: {e}"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_load_command(world: &mut World, parts: &[&str]) {
+    let Some(slot) = parts.get(1) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: load <slot>",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let store = FileSaveStore::default_dir();
+    match load_world(world, &store, slot) {
+        Ok(report) => print_dashboard_panel(
+            "LOAD",
+            &format!(
+                "Loaded '{slot}': {} pops, {} buildings, {} items, {} designations restored{}",
+                report.pops,
+                report.buildings,
+                report.items,
+                report.designations,
+                if report.warnings.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({} warnings)", report.warnings.len())
+                }
+            ),
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(e) => print_dashboard_panel(
+            "ERROR",
+            &format!("Load failed: {e}"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn print_saves(_world: &mut World) {
+    let store = FileSaveStore::default_dir();
+    match list_saves(&store) {
+        Ok(list) if list.is_empty() => print_dashboard_panel(
+            "SAVES",
+            "No saves stored yet. Use `save <slot>` first.",
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Ok(list) => {
+            for meta in &list {
+                println!(
+                    "SAVE slot={} tick={} colony={:?} format=v{} saved_at={} bytes={}",
+                    meta.slot,
+                    meta.tick,
+                    meta.colony_name,
+                    meta.format_version,
+                    meta.saved_at_unix,
+                    meta.size_bytes
+                );
+            }
+        }
+        Err(e) => print_dashboard_panel(
+            "ERROR",
+            &format!("Listing saves failed: {e}"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_delsave_command(_world: &mut World, parts: &[&str]) {
+    let Some(slot) = parts.get(1) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: delsave <slot>",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let mut store = FileSaveStore::default_dir();
+    match store.delete(slot) {
+        Ok(()) => print_dashboard_panel(
+            "SAVES",
+            &format!("Deleted save '{slot}' (if it existed)."),
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(e) => print_dashboard_panel(
+            "ERROR",
+            &format!("Delete failed: {e}"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_export_command(_world: &mut World, parts: &[&str]) {
+    if parts.len() < 3 {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: export <slot> <path>",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let store = FileSaveStore::default_dir();
+    match export_save(&store, parts[1], std::path::Path::new(parts[2])) {
+        Ok(()) => print_dashboard_panel(
+            "SAVES",
+            &format!("Exported '{}' to {}", parts[1], parts[2]),
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(e) => print_dashboard_panel(
+            "ERROR",
+            &format!("Export failed: {e}"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+fn handle_import_command(_world: &mut World, parts: &[&str]) {
+    if parts.len() < 3 {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: import <slot> <path>",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let mut store = FileSaveStore::default_dir();
+    match import_save(&mut store, parts[1], std::path::Path::new(parts[2])) {
+        Ok(meta) => print_dashboard_panel(
+            "SAVES",
+            &format!(
+                "Imported {} into slot '{}' (tick {})",
+                parts[2], meta.slot, meta.tick
+            ),
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        ),
+        Err(e) => print_dashboard_panel(
+            "ERROR",
+            &format!("Import failed: {e}"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
 }
 
 /// Prints one compact, machine-parseable stats line for playtest snapshots.
@@ -2839,8 +3051,14 @@ fn print_stats(world: &mut World) {
     // Spec 345: canonical quirk names for STATS; full panel is `quirks`.
     let quirks_label = scale::layer1::quirks::quirks_summary(world);
 
+    // Spec 1382: number of saves visible to the file backend.
+    let saves_count = FileSaveStore::default_dir()
+        .list()
+        .map(|l| l.len())
+        .unwrap_or(0);
+
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} season={} quirks={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} season={} quirks={} saves={}",
         tick,
         pops,
         avg_health,
@@ -2905,6 +3123,7 @@ fn print_stats(world: &mut World) {
         rumors,
         season_name,
         quirks_label,
+        saves_count,
     );
 }
 
@@ -5695,6 +5914,12 @@ fn print_help() {
             "Simulation",
             vec![
                 ("tick [N]", "", "Advance N ticks (default 1)"),
+                ("save <slot>", "", "Save colony to a slot (Spec 1382)"),
+                ("load <slot>", "", "Load colony from a slot"),
+                ("saves", "", "List stored saves with metadata"),
+                ("delsave <slot>", "", "Delete a stored save"),
+                ("export <slot> <path>", "", "Export a save to a .scale-save file"),
+                ("import <slot> <path>", "", "Import a .scale-save file into a slot"),
                 ("quit", "q, exit", "Exit the simulation"),
                 ("help", "h, ?", "Show this help"),
             ],

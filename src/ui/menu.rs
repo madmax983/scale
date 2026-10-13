@@ -26,6 +26,7 @@ pub fn render_main_menu(frame: &mut Frame, area: Rect, state: &MenuState) {
             Constraint::Length(state.options.len() as u16 + 2), // Menu items
             Constraint::Length(3),                              // Scenario info
             Constraint::Length(3),                              // Origin info
+            Constraint::Length(2),                              // Saves info (Spec 1382)
             Constraint::Min(1),                                 // Bottom spacing
             Constraint::Length(3),                              // Footer
         ])
@@ -128,6 +129,13 @@ pub fn render_main_menu(frame: &mut Frame, area: Rect, state: &MenuState) {
     .alignment(Alignment::Center);
     frame.render_widget(origin_info, layout[4]);
 
+    // Spec 1382: stored saves, with metadata, under the setup rows.
+    let saves_text = format!("Saves: {}", state.save_summary);
+    let saves_info = Paragraph::new(saves_text)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(saves_info, layout[5]);
+
     // Footer
     let footer_text = "Use ↑/↓ to select | ←/→ change | Tab switch row | Enter to confirm";
     let footer = Paragraph::new(footer_text)
@@ -139,7 +147,7 @@ pub fn render_main_menu(frame: &mut Frame, area: Rect, state: &MenuState) {
                 .border_type(BorderType::Double)
                 .border_style(Style::default().fg(Color::DarkGray)),
         );
-    frame.render_widget(footer, layout[6]);
+    frame.render_widget(footer, layout[7]);
 }
 
 /// Highlight style for the setup row (scenario / origin) the ←/→ keys

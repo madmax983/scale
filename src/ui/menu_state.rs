@@ -25,18 +25,51 @@ pub struct MenuState {
     pub selected_origin: Option<OriginKind>,
     /// Which setup row ←/→ currently edits.
     pub selector: MenuSelector,
+    /// Spec 1382: one-line summary of stored saves (slot · tick · colony),
+    /// rendered under the menu options. Populated from the native file
+    /// store by default; the WASM shell refreshes it from the IndexedDB
+    /// bridge as completions arrive.
+    pub save_summary: String,
 }
 
 impl Default for MenuState {
     fn default() -> Self {
         Self {
             selected_index: 0,
-            options: vec!["Start Game".to_string(), "Quit".to_string()],
+            options: vec![
+                "Start Game".to_string(),
+                "Load Autosave".to_string(),
+                "Quit".to_string(),
+            ],
             selected_scenario: StartScenarioId::Classic,
             selected_origin: None,
             selector: MenuSelector::Scenario,
+            save_summary: default_save_summary(),
         }
     }
+}
+
+/// Native default for the menu's saves line: metadata from the file
+/// store under `saves/`. On WASM the shell fills this in from the
+/// IndexedDB bridge instead.
+#[cfg(not(target_arch = "wasm32"))]
+fn default_save_summary() -> String {
+    use crate::persistence::SaveStore;
+    let store = crate::persistence::FileSaveStore::default_dir();
+    match store.list() {
+        Ok(list) if !list.is_empty() => list
+            .iter()
+            .map(|m| format!("{} · tick {} · {}", m.slot, m.tick, m.colony_name))
+            .collect::<Vec<_>>()
+            .join("  |  "),
+        _ => "No saves yet".to_string(),
+    }
+}
+
+/// WASM default: the IndexedDB bridge refreshes the summary async.
+#[cfg(target_arch = "wasm32")]
+fn default_save_summary() -> String {
+    "Loading saves…".to_string()
 }
 
 impl MenuState {
@@ -142,9 +175,10 @@ mod tests {
         assert_eq!(menu.selected_index, 0);
         assert_eq!(menu.selected_scenario, StartScenarioId::Classic);
         // Should have options
-        assert!(menu.options.len() >= 2);
+        assert!(menu.options.len() >= 3);
         assert_eq!(menu.options[0], "Start Game");
-        assert_eq!(menu.options[1], "Quit");
+        assert_eq!(menu.options[1], "Load Autosave");
+        assert_eq!(menu.options[2], "Quit");
     }
 
     #[test]
@@ -157,7 +191,9 @@ mod tests {
 
         // Should wrap or clamp (design decision: clamp)
         menu.next();
-        assert_eq!(menu.selected_index, 1); // Assuming 2 options
+        assert_eq!(menu.selected_index, 2);
+        menu.next();
+        assert_eq!(menu.selected_index, 2); // Clamped at the last option
     }
 
     #[test]

@@ -61,6 +61,8 @@ pub mod layer2;
 /// Layer 3: Galaxy Simulation (The Silence, Threats).
 pub mod layer3;
 /// Platform abstraction for native/WASM backends.
+pub mod persistence;
+/// Platform abstraction for native/WASM backends.
 pub mod platform;
 /// No-op text-styling shims for wasm32 (stand-in for crossterm::style).
 #[cfg(target_arch = "wasm32")]

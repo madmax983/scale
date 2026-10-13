@@ -107,6 +107,20 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyhow::Res
                 let speed = world.borrow().resource::<SimulationTime>().speed;
                 if speed != SimSpeed::Paused {
                     run_simulation_tick(&mut world.borrow_mut());
+                    // Spec 1382: autosave every 1000 ticks (reserved slot).
+                    {
+                        let mut store = scale::persistence::FileSaveStore::default_dir();
+                        let now_unix = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs());
+                        if let Err(e) = scale::persistence::maybe_autosave(
+                            &mut world.borrow_mut(),
+                            &mut store,
+                            now_unix,
+                        ) {
+                            log::error!("Autosave failed: {e}");
+                        }
+                    }
                 }
             }
 
