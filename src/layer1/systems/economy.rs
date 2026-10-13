@@ -168,7 +168,12 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Economy),
     );
     schedule.add_systems(
-        (crate::layer1::private_stash::stash_creation_system,).in_set(Layer1SystemSet::Economy),
+        (
+            crate::layer1::private_stash::stash_creation_system,
+            // Spec 350: a hungry owner eats from their own stash.
+            crate::layer1::private_stash::stash_access_system,
+        )
+            .in_set(Layer1SystemSet::Economy),
     );
 
     schedule.add_systems(

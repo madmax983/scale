@@ -493,6 +493,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "identity" => print_identity(world),
         "artifacts" => print_artifacts(world),
         "graves" => print_graves(world),
+        "stash" => print_stashes(world),
+        "search_rooms" => handle_search_rooms_command(world),
         "sell" => handle_sell_command(world, &parts),
         "museum" => handle_museum_command(world, &parts),
         "return_stock" => handle_return_stock_command(world, &parts),
@@ -3072,6 +3074,9 @@ fn print_stats(world: &mut World) {
     // Spec 349: grave tiles written on the land (built plots + death sites).
     let graves = scale::layer1::ancestral_graves::grave_count(world);
 
+    // Spec 350: non-empty private stashes — food hidden from this very report.
+    let stashes = scale::layer1::private_stash::stash_count(world);
+
     // Spec 348: black-market presence + corruption level for STATS.
     let smugglers = scale::layer1::economy::black_market::smuggler_count(world);
     let corruption = world
@@ -3085,7 +3090,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={}",
         tick,
         pops,
         avg_health,
@@ -3156,6 +3161,7 @@ fn print_stats(world: &mut World) {
         smugglers,
         corruption,
         graves,
+        stashes,
     );
 }
 
@@ -6336,6 +6342,16 @@ fn print_help() {
                     "List grave tiles + who lies there; visits buff mood, building over one is sacrilege (Spec 349)",
                 ),
                 (
+                    "stash",
+                    "",
+                    "List private stashes: hidden food the colony inventory cannot see (Spec 350)",
+                ),
+                (
+                    "search_rooms",
+                    "",
+                    "Search every room: stashes return to the stockpile, colony morale craters (Spec 350)",
+                ),
+                (
                     "sell <id>",
                     "",
                     "Sell an artifact to core-world collectors (Spec 1376)",
@@ -7920,6 +7936,98 @@ fn print_graves(world: &mut World) {
         ),
         Some(comfy_table::Color::Cyan),
         None,
+    );
+}
+
+/// Spec 350: list every non-empty private stash — who is hiding what from
+/// the colony inventory, and how much food the official count is missing.
+fn print_stashes(world: &mut World) {
+    use scale::layer1::pop::PopName;
+    use scale::layer1::private_stash::PrivateStash;
+    use scale::layer1::resources::ResourceType;
+
+    // Owner names first (query borrows world mutably; collect, then stash rows).
+    let names: std::collections::HashMap<u32, String> = {
+        let mut query = world.query::<(Entity, &PopName)>();
+        query
+            .iter(world)
+            .map(|(e, n)| (e.index(), n.0.clone()))
+            .collect()
+    };
+    let mut rows: Vec<String> = Vec::new();
+    let mut hidden_food = 0.0f32;
+    {
+        let mut query = world.query::<(Entity, &PrivateStash)>();
+        for (entity, stash) in query.iter(world) {
+            if stash.is_empty() {
+                continue;
+            }
+            hidden_food += stash.get(ResourceType::Food);
+            let owner = stash
+                .owner
+                .and_then(|o| names.get(&o.index()).cloned())
+                .unwrap_or_else(|| "(carried)".to_string());
+            let goods: Vec<String> = stash
+                .inventory
+                .iter()
+                .map(|(r, a)| format!("{r:?} {a:.1}"))
+                .collect();
+            rows.push(format!("#{} owner={} [{}]", entity.index(), owner, goods.join(", ")));
+        }
+    }
+    if rows.is_empty() {
+        print_dashboard_panel(
+            "PRIVATE STASHES",
+            "No private stashes. Either nobody is anxious, or nobody has been caught — the colony inventory is honest... today. Run `search_rooms` if you stop believing that.",
+            Some(comfy_table::Color::Yellow),
+            None,
+        );
+        return;
+    }
+    rows.sort();
+    print_dashboard_panel(
+        "PRIVATE STASHES",
+        &format!(
+            "{} stash(es), {:.1} food hidden from the colony inventory (visible food: {:.1}).\n\n{}\n\nOnly the owner eats from a stash. Run `search_rooms` to seize it all — the colony will hate it.",
+            rows.len(),
+            hidden_food,
+            scale::layer1::private_stash::calculate_visible_food(world),
+            rows.join("\n")
+        ),
+        Some(comfy_table::Color::Cyan),
+        None,
+    );
+}
+
+/// Spec 350: "Search Rooms" — seize every private stash back into the
+/// stockpile at a massive colony-wide morale penalty.
+fn handle_search_rooms_command(world: &mut World) {
+    world.init_resource::<bevy_ecs::event::Events<
+        scale::layer1::core::chronicle::AddChronicleEvent,
+    >>();
+    let report = scale::layer1::private_stash::execute_search_rooms(world);
+    if report.stashes_searched == 0 {
+        print_dashboard_panel(
+            "SEARCH ROOMS",
+            "The search found nothing. No doors were knocked on, no feelings were hurt — this time.",
+            Some(comfy_table::Color::Yellow),
+            None,
+        );
+        return;
+    }
+    print_dashboard_panel(
+        "SEARCH ROOMS",
+        &format!(
+            "Searched {} stash(es): {:.1} total goods seized ({:.1} food) and returned to the stockpile.\nEvery pop takes '{}' ({:+.2} morale, {} ticks). The colony eats tonight; it will remember the knock on the door.",
+            report.stashes_searched,
+            report.total_recovered,
+            report.food_recovered,
+            scale::layer1::private_stash::SEARCH_ROOMS_MORALE_LABEL,
+            scale::layer1::private_stash::SEARCH_ROOMS_MORALE_PENALTY,
+            scale::layer1::private_stash::SEARCH_ROOMS_MORALE_DURATION,
+        ),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
     );
 }
 
