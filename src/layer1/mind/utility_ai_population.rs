@@ -495,6 +495,19 @@ fn populate_graves(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
 /// utility from 0.6 to 1.8 (before distance falloff).
 pub const LIFESUPPORT_REPAIR_URGENCY: f32 = 1.2;
 
+/// Damage fraction at which routine (non-LifeSupport) maintenance becomes a
+/// repair candidate.
+///
+/// Structures weather perpetually, so an "any damage at all" rule keeps
+/// every building in the colony a permanent repair candidate — and with
+/// repair utility (0.6) above designation Work (0.5), the repair queue
+/// captures the entire workforce and player-designated gathering never
+/// happens. Below this fraction, scratches are deferred (the same idea as
+/// [`DeferMaintenance`]); at or above it, the structure is a candidate as
+/// before. LifeSupport is exempt: air is existential, and its urgency
+/// bonus already scales with severity.
+pub const REPAIR_DAMAGE_FRACTION: f32 = 0.1;
+
 fn populate_repair_structures(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
     buffer.clear();
     buffer.extend(
@@ -507,8 +520,15 @@ fn populate_repair_structures(world: &mut World, buffer: &mut Vec<ScorableCandid
                 Option<&DeferMaintenance>,
             )>()
             .iter(world)
-            .filter(|(_, _, structure, _, defer)| {
-                defer.is_none() && (structure.current_hp - structure.max_hp).abs() >= f32::EPSILON
+            .filter(|(_, _, structure, building, defer)| {
+                if defer.is_some() || structure.current_hp >= structure.max_hp {
+                    return false;
+                }
+                if building.is_some_and(|b| b.building_type == BuildingType::LifeSupport) {
+                    return true;
+                }
+                structure.max_hp > 0.0
+                    && (1.0 - structure.current_hp / structure.max_hp) >= REPAIR_DAMAGE_FRACTION
             })
             .map(|(entity, pos, structure, building, _)| {
                 let mut candidate = ScorableCandidate::new(entity, *pos);
@@ -1018,6 +1038,71 @@ mod tests {
         world.spawn((housing_empty, GridPosition { x: 1, y: 0 }));
         populate_housing(&mut world, &mut buffer);
         assert_eq!(buffer.len(), 1, "Should include available housing");
+    }
+
+    #[test]
+    fn test_scratch_damage_is_not_a_repair_candidate() {
+        let mut world = World::new();
+
+        // Housing with a weathering scratch (99/100 HP).
+        world.spawn((
+            Building {
+                building_type: BuildingType::Housing,
+            },
+            Structure {
+                current_hp: 99.0,
+                max_hp: 100.0,
+            },
+            GridPosition { x: 5, y: 5 },
+        ));
+        // LifeSupport with the same scratch: air is existential, still a candidate.
+        let ls = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::LifeSupport,
+                },
+                Structure {
+                    current_hp: 99.0,
+                    max_hp: 100.0,
+                },
+                GridPosition { x: 6, y: 6 },
+            ))
+            .id();
+
+        let mut buffer = Vec::with_capacity(2);
+        populate_repair_structures(&mut world, &mut buffer);
+
+        assert_eq!(
+            buffer.len(),
+            1,
+            "Only the LifeSupport scratch should be a repair candidate"
+        );
+        assert_eq!(buffer[0].entity, ls);
+    }
+
+    #[test]
+    fn test_material_damage_is_a_repair_candidate() {
+        let mut world = World::new();
+
+        // Housing at 80% HP: 20% damage, above the deferral threshold.
+        let housing = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::Housing,
+                },
+                Structure {
+                    current_hp: 80.0,
+                    max_hp: 100.0,
+                },
+                GridPosition { x: 5, y: 5 },
+            ))
+            .id();
+
+        let mut buffer = Vec::with_capacity(1);
+        populate_repair_structures(&mut world, &mut buffer);
+
+        assert_eq!(buffer.len(), 1);
+        assert_eq!(buffer[0].entity, housing);
     }
 
     #[test]

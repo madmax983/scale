@@ -804,12 +804,25 @@ impl<'a> PopDecider<'a> {
     /// *   **Hobby**: Personal projects.
     /// *   **The Hum**: Tuning in to the void.
     fn evaluate_group_leisure(&mut self) {
-        if let Some(hobby_type) = self.data.hobby_type {
-            let utility = evaluate_hobby(self.data, hobby_type);
-            let penalty =
-                crate::layer1::taboo::evaluate_taboo_penalty(ActionType::Hobby, self.context.taboo);
-            self.evaluator
-                .consider(ActionType::Hobby, utility + penalty, None);
+        // Leisure is Priority 7: "optional activities when everything else
+        // is satisfied". Pending player designations (Work / Repair orders)
+        // mean everything else is NOT satisfied — but Hobby's flat utility
+        // (0.4 for an idle pop) outbids designation Work (0.5 base, shaved
+        // by distance falloff) at any working distance, so a pop with a
+        // hobby would never take a designation. Defer Hobby while orders
+        // are pending; it returns the moment the queue drains.
+        let orders_pending = !self.buffer.work_designations.is_empty()
+            || !self.buffer.repair_designations.is_empty();
+        if !orders_pending {
+            if let Some(hobby_type) = self.data.hobby_type {
+                let utility = evaluate_hobby(self.data, hobby_type);
+                let penalty = crate::layer1::taboo::evaluate_taboo_penalty(
+                    ActionType::Hobby,
+                    self.context.taboo,
+                );
+                self.evaluator
+                    .consider(ActionType::Hobby, utility + penalty, None);
+            }
         }
 
         // Evaluate ListenToTheHum

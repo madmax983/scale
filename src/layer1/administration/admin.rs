@@ -24,6 +24,19 @@
 //! 1.  Build more [`Office`] buildings.
 //! 2.  Assign Pops to work as Administrators.
 //! 3.  Reduce the number of non-essential buildings (reduce demand).
+//!
+//! ## The Efficiency Floor
+//!
+//! Efficiency never drops below [`MIN_ADMIN_EFFICIENCY`]. Every Pop and
+//! Building is an [`AdminConsumer`] from the moment it exists, while the
+//! first source of Supply (an [`Office`]) costs more Wood and Stone
+//! than a new colony starts with — and gathering more requires work,
+//! whose speed this very multiplier scales. Without a floor, a fresh
+//! colony's efficiency computes to exactly 0.0 and every work amount
+//! with it: a permanent deadlock before the first Office can ever be
+//! afforded. The floor models informal coordination: a colony with no
+//! bureaucracy is slow, never fully stopped. Drag above the floor is
+//! unchanged — outgrowing your administration still hurts.
 
 use bevy_ecs::prelude::*;
 
@@ -36,12 +49,17 @@ pub struct AdminStats {
     pub supply: f32,
     /// Total Admin points consumed by buildings and pops.
     pub demand: f32,
-    /// Global efficiency multiplier (0.0 to 1.0).
+    /// Global efficiency multiplier ([`MIN_ADMIN_EFFICIENCY`] to 1.0).
     ///
     /// *   **1.0**: Perfect efficiency.
     /// *   **0.5**: Everything takes twice as long.
     pub efficiency: f32,
 }
+
+/// Minimum value of [`AdminStats::efficiency`] (see "The Efficiency
+/// Floor" in the module docs). Bureaucratic drag can slow a colony to
+/// a crawl, but never to a complete standstill.
+pub const MIN_ADMIN_EFFICIENCY: f32 = 0.25;
 
 /// Component for entities that provide Administrative Points (Supply).
 ///
@@ -89,7 +107,7 @@ impl Default for Office {
 ///
 /// # Logic
 ///
-/// `Efficiency = clamp(Supply / Demand, 0.0, 1.0)`
+/// `Efficiency = clamp(Supply / Demand, MIN_ADMIN_EFFICIENCY, 1.0)`
 ///
 /// If `Demand` is 0, Efficiency is 1.0.
 ///
@@ -129,11 +147,14 @@ pub fn calculate_admin_stats(world: &mut World) {
         demand += consumer.demand;
     }
 
-    // Default to 1.0 efficiency if no demand
+    // Default to 1.0 efficiency if no demand. Otherwise the ratio is
+    // floored at MIN_ADMIN_EFFICIENCY so a colony with no admin supply
+    // yet is slowed, not stopped (see module docs: "The Efficiency
+    // Floor").
     let efficiency = if demand <= f32::EPSILON {
         1.0
     } else {
-        (supply / demand).clamp(0.0, 1.0)
+        (supply / demand).clamp(MIN_ADMIN_EFFICIENCY, 1.0)
     };
 
     world.insert_resource(AdminStats {
@@ -218,6 +239,46 @@ mod tests {
 
         // Efficiency: 5 / 10 = 0.5
         assert_eq!(stats.efficiency, 0.5);
+    }
+
+    #[test]
+    fn test_zero_supply_efficiency_is_floored_not_zero() {
+        // Regression: a brand-new colony has AdminConsumers (every Pop
+        // and Building) but no Office yet, so Supply is 0. Efficiency
+        // used to compute to exactly 0.0, which zeroed every work
+        // amount in `calculate_work_amount` — a permanent deadlock,
+        // since the first Office costs more Wood/Stone than a new
+        // colony starts with and gathering more requires work.
+        let mut world = World::new();
+        world.insert_resource(AdminStats::default());
+
+        // Demand with no supply at all (the fresh-colony state).
+        world.spawn(AdminConsumer { demand: 20.0 });
+
+        calculate_admin_stats(&mut world);
+
+        let stats = world.resource::<AdminStats>();
+        assert_eq!(stats.supply, 0.0);
+        assert_eq!(stats.efficiency, MIN_ADMIN_EFFICIENCY);
+    }
+
+    #[test]
+    fn test_deep_drag_is_floored() {
+        // A colony that vastly outgrew its administration is dragged
+        // to the floor, not below it.
+        let mut world = World::new();
+        world.insert_resource(AdminStats::default());
+
+        world.spawn(AdminProvider { amount: 1.0 });
+        world.spawn(AdminConsumer { demand: 100.0 });
+
+        calculate_admin_stats(&mut world);
+
+        // Raw ratio would be 0.01; the floor applies.
+        assert_eq!(
+            world.resource::<AdminStats>().efficiency,
+            MIN_ADMIN_EFFICIENCY
+        );
     }
 
     #[test]

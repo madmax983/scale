@@ -40,4 +40,5 @@ pub fn setup_world() -> World {
 pub mod arrival_tests;
 pub mod combat_tests;
 pub mod movement_tests;
+pub mod schedule_work_tests;
 pub mod work_tests;

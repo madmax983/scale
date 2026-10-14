@@ -290,6 +290,28 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Execution),
     );
 
+    // The designation-work and combat executors. Both are exclusive
+    // `&mut World` systems in `crate::layer1::execution`, and both were
+    // previously ONLY referenced by `.before(...)` / `.after(...)`
+    // ordering constraints scattered through this file and
+    // `systems/observation.rs` — Bevy silently drops ordering against
+    // systems that are never added, so neither executor ever ran in the
+    // live schedule: pops planned Work/Repair/Fight, travelled, arrived,
+    // and then stood at their targets forever (their unit tests call the
+    // functions directly, which masked the omission). Register them at
+    // the position the pipeline docs in `execution/mod.rs` describe:
+    // after arrival, in the Execution set. The systems that declare
+    // `.after(work_execution_system)` / `.after(combat_execution_system)`
+    // (shower use, sabotage, turret fire, warden and pre-crime
+    // execution, fugue completion, ...) now order against real systems.
+    schedule.add_systems(
+        (
+            work_execution_system.after(arrival_handler_system),
+            combat_execution_system.after(arrival_handler_system),
+        )
+            .in_set(Layer1SystemSet::Execution),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::petrification::petrification_exposure_system,
