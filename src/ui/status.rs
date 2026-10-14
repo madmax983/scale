@@ -144,6 +144,13 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, world: &World) {
         active_singularity_mass,
     );
 
+    // Atmosphere segment (Item 77 Phase 2): pops standing in vacuum and
+    // unpowered LifeSupport, from the ColonyAtmosphere snapshot. Quiet
+    // while everyone breathes.
+    status
+        .spans
+        .extend(build_atmosphere_spans(world));
+
     // Reign & sky segments: constellation broadcast, god-mind bit-rot,
     // sovereign legitimacy, and the possessed pop. Quiet unless live.
     status
@@ -220,6 +227,42 @@ fn build_play_pause_span(paused: bool) -> Span<'static> {
                 .add_modifier(Modifier::BOLD),
         )
     }
+}
+
+/// Build the atmosphere segment of the status bar (Item 77 Phase 2).
+///
+/// Reads the [`ColonyAtmosphere`] snapshot: when any pop stands in
+/// vacuum it renders a red warning with the count and the thinnest air
+/// any pop is breathing; when LifeSupport sits unpowered it renders a
+/// power warning. Both are silent while the colony breathes.
+///
+/// [`ColonyAtmosphere`]: crate::layer1::physics::pressure::ColonyAtmosphere
+fn build_atmosphere_spans(world: &World) -> Vec<Span<'static>> {
+    let Some(atmo) = world.get_resource::<crate::layer1::physics::pressure::ColonyAtmosphere>()
+    else {
+        return Vec::new();
+    };
+    let mut spans = Vec::new();
+    if atmo.pops_in_vacuum > 0 {
+        spans.push(Span::styled(
+            format!(
+                " ⚠ {} in vacuum · air {:.2} ",
+                atmo.pops_in_vacuum, atmo.min_pop_pressure
+            ),
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if atmo.life_support_unpowered() {
+        spans.push(Span::styled(
+            " ⚠ LifeSupport unpowered ".to_string(),
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    spans
 }
 
 fn build_time_spans(
@@ -908,5 +951,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn atmosphere_spans_warn_only_when_air_is_bad() {
+        // Item 77 Phase 2: the status bar's air readout is quiet while
+        // everyone breathes and loud the moment they do not.
+        use crate::layer1::physics::pressure::ColonyAtmosphere;
+
+        let mut world = World::new();
+        world.insert_resource(ColonyAtmosphere::default());
+        assert!(
+            build_atmosphere_spans(&world).is_empty(),
+            "no warnings while the air is fine"
+        );
+
+        world.insert_resource(ColonyAtmosphere {
+            pops_in_vacuum: 2,
+            min_pop_pressure: 0.0,
+            unpowered_life_support: 1,
+            life_support_total: 1,
+        });
+        let spans = build_atmosphere_spans(&world);
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("2 in vacuum"), "vacuum count shown: {text}");
+        assert!(text.contains("air 0.00"), "min pressure shown: {text}");
+        assert!(
+            text.contains("LifeSupport unpowered"),
+            "power warning shown: {text}"
+        );
     }
 }

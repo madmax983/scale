@@ -125,6 +125,7 @@ pub fn guide_lines() -> Vec<Line<'static>> {
     lines.push(blank());
     legend_section(&mut lines);
     first_minutes_section(&mut lines);
+    vacuum_section(&mut lines);
     controls_section(&mut lines);
     weird_stuff_section(&mut lines);
     lines.push(blank());
@@ -345,6 +346,29 @@ fn first_minutes_section(lines: &mut Vec<Line<'static>>) {
     lines.push(blank());
 }
 
+fn vacuum_section(lines: &mut Vec<Line<'static>>) {
+    lines.push(header("THE AIR IS THE HULL"));
+    lines.push(body(
+        "There is no sky here. Outside the sealed hull the pressure is zero — the planet does not hold air for you, the walls do.",
+    ));
+    lines.push(body(
+        "Air comes from Life Support, and Life Support runs on power: the Lander makes it, a Power Pole carries it, and a broken or unpowered chain means the colony is breathing whatever is already in the rooms.",
+    ));
+    lines.push(body(
+        "A colonist caught outside — chopping, mining, fleeing — starts suffocating within moments and loses health every heartbeat. A trip outside and back is an errand; a long work party out there is a funeral with extra steps, roughly a hundred heartbeats of grace.",
+    ));
+    lines.push(body(
+        "Panic makes it worse: a frightened colonist runs, and out here running usually means running out of air. Keep the scared ones inside until they settle.",
+    ));
+    lines.push(body(
+        "Watch the status bar: it counts anyone standing in vacuum and names the thinnest air any colonist is breathing. When someone is suffocating, the Chronicle says so — once, by name, while there is still time to matter.",
+    ));
+    lines.push(body(
+        "New arrivals walk in from the beacon with nothing but their skills. The roster marks them NEW ARRIVAL while they are still finding their feet.",
+    ));
+    lines.push(blank());
+}
+
 fn controls_section(lines: &mut Vec<Line<'static>>) {
     lines.push(header("CONTROLS"));
     lines.push(control(
@@ -547,6 +571,22 @@ mod tests {
             text.contains("THE WEIRD STUFF"),
             "weird-stuff section missing"
         );
+    }
+
+    #[test]
+    fn guide_teaches_vacuum_and_air() {
+        // Item 77 Phase 2: the guide must teach the death chain — vacuum
+        // outside the hull, the power chain behind Life Support, and
+        // suffocation — in plain language, before it happens to the reader.
+        let text = all_text();
+        assert!(
+            text.contains("THE AIR IS THE HULL"),
+            "vacuum section missing"
+        );
+        assert!(text.contains("pressure is zero"), "vacuum danger missing");
+        assert!(text.contains("Life Support"), "air source missing");
+        assert!(text.contains("Power Pole"), "power chain missing");
+        assert!(text.contains("suffocating"), "suffocation warning missing");
     }
 
     #[test]

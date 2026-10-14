@@ -306,6 +306,7 @@ fn handle_designate_command(world: &mut World, parts: &[&str], designation_type:
             DesignationType::Mine => "mine",
             DesignationType::Chop => "chop",
             DesignationType::ExcavateDust => "excavate",
+            DesignationType::Douse => "douse",
             _ => "designate", // Fallback, though we only call this for destroy, mine, chop
         };
         let msg = format!("Usage: {name} <x> <y>");
@@ -509,6 +510,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "mine" => handle_designate_command(world, &parts, DesignationType::Mine),
         "chop" => handle_designate_command(world, &parts, DesignationType::Chop),
         "excavate" => handle_designate_command(world, &parts, DesignationType::ExcavateDust),
+        "douse" => handle_designate_command(world, &parts, DesignationType::Douse),
+        "shelter" => handle_shelter_command(world, &parts),
         "dust" => print_dust_report(world),
         "launch_sat" => handle_launch_sat_command(world),
         "constellation" => print_constellation_report(world),
@@ -2865,9 +2868,16 @@ fn print_stats(world: &mut World) {
             })
             .collect()
     };
+    // Item 77 Phase 2: pops standing in vacuum (below the suffocation
+    // threshold), counted alongside the minimum-pressure scan.
+    let mut vacuum = 0u32;
     if let Some(grid) = world.get_resource::<scale::layer1::pressure::PressureGrid>() {
         for (x, y) in &pop_tiles {
-            min_pressure = min_pressure.min(grid.get(*x, *y));
+            let pressure = grid.get(*x, *y);
+            min_pressure = min_pressure.min(pressure);
+            if pressure < scale::layer1::physics::pressure::SUFFOCATION_PRESSURE_THRESHOLD {
+                vacuum += 1;
+            }
         }
     }
     if min_pressure == f32::MAX {
@@ -2885,6 +2895,27 @@ fn print_stats(world: &mut World) {
             }
         }
     }
+
+    // Item 77 Phase 2: LifeSupport units whose power consumer is inactive,
+    // and whether the shelter order is in force.
+    let mut ls_unpowered = 0u32;
+    {
+        let mut query =
+            world.query::<(&Building, &scale::layer1::energy::PowerConsumer)>();
+        for (building, consumer) in query.iter(world) {
+            if building.building_type == BuildingType::LifeSupport && !consumer.active {
+                ls_unpowered += 1;
+            }
+        }
+    }
+    let shelter = if world
+        .get_resource::<scale::layer1::physics::pressure::ShelterOrder>()
+        .is_some_and(|order| order.active)
+    {
+        "on"
+    } else {
+        "off"
+    };
 
     let avg_health = if pops > 0 {
         health_sum / pops as f32
@@ -3100,7 +3131,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={}",
         tick,
         pops,
         avg_health,
@@ -3173,6 +3204,9 @@ fn print_stats(world: &mut World) {
         graves,
         stashes,
         travelers,
+        vacuum,
+        ls_unpowered,
+        shelter,
     );
 }
 
@@ -3464,7 +3498,13 @@ fn print_pops(world: &mut World) {
         let at_target = world.get::<scale::layer1::AtTarget>(entity).is_some();
         let is_possessed = world.get::<Possessed>(entity).is_some();
 
-        let status = if is_possessed {
+        // Item 77 Phase 2: freshly arrived migrants keep a visible marker
+        // in the roster while their RecentArrival window lasts.
+        let is_new_arrival =
+            world.get::<scale::layer1::integration::RecentArrival>(entity).is_some();
+        let status = if is_new_arrival {
+            "NEW ARRIVAL".to_string()
+        } else if is_possessed {
             "POSSESSED (you)".to_string()
         } else if at_target {
             "At target".to_string()
@@ -4270,6 +4310,46 @@ fn handle_recall_command(world: &mut World, parts: &[&str]) {
     );
 }
 
+/// Issue or lift the shelter order (Item 77 Phase 2 counterplay).
+///
+/// `shelter` orders every pop in thin air to head for the nearest
+/// pressurized tile; `shelter off` lifts it. (Headless `recall` is the
+/// Spec 1373 product recall, so the atmosphere order is `shelter`.)
+fn handle_shelter_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
+    use scale::layer1::physics::pressure::ShelterOrder;
+
+    let lift = parts.get(1).is_some_and(|arg| *arg == "off");
+    let tick = world.resource::<SimulationTime>().tick;
+    world.init_resource::<ShelterOrder>();
+    {
+        let mut order = world.resource_mut::<ShelterOrder>();
+        order.active = !lift;
+        order.issued_tick = if lift { 0 } else { tick };
+    }
+    world.init_resource::<bevy_ecs::event::Events<AddChronicleEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<AddChronicleEvent>>()
+        .send(AddChronicleEvent {
+            text: if lift {
+                "The shelter order is lifted. The colony goes back to work.".to_string()
+            } else {
+                "SHELTER ORDER: everyone in thin air, get inside — now.".to_string()
+            },
+            importance: EventImportance::Major,
+        });
+    print_dashboard_panel(
+        if lift { "SHELTER LIFTED" } else { "SHELTER ORDER" },
+        if lift {
+            "The shelter order is lifted."
+        } else {
+            "All pops in vacuum are heading for pressurized tiles."
+        },
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 /// List active manufacturer recalls (Spec 1373).
 fn print_recalls(world: &mut World) {
     use scale::layer1::economy::recall::{item_display_name, RecallManager};
@@ -4604,6 +4684,7 @@ fn print_map(world: &mut World, center_x: i32, center_y: i32) {
                     DesignationType::CollectSample => 'S',
                     DesignationType::Consume => 'E',
                     DesignationType::ExcavateDust => 'U',
+                    DesignationType::Douse => '~',
                 };
                 map_content.push_str(&format!("{c}").magenta().to_string());
                 continue;
@@ -4748,6 +4829,9 @@ fn designate_at(world: &mut World, designation_type: DesignationType, x: i32, y:
         DesignationType::Consume => return, // Do nothing for consume
         DesignationType::ExcavateDust => {
             format!("Failed: no Desire Dust at ({x}, {y})")
+        }
+        DesignationType::Douse => {
+            format!("Failed: no fire at ({x}, {y})")
         }
     };
 
@@ -5079,6 +5163,7 @@ fn print_designations(world: &mut World) {
             DesignationType::CollectSample => Cell::new(type_str).fg(Color::Cyan),
             DesignationType::Consume => Cell::new(type_str).fg(Color::Red),
             DesignationType::ExcavateDust => Cell::new(type_str).fg(Color::Yellow),
+            DesignationType::Douse => Cell::new(type_str).fg(Color::Cyan),
         };
 
         table.add_row(vec![type_cell, Cell::new(format!("{},{}", pos.x, pos.y))]);
@@ -5269,6 +5354,7 @@ fn scan_terrain(world: &mut World, center_x: i32, center_y: i32, radius: ScanRad
                 DesignationType::Destroy => "destroy",
                 DesignationType::CollectSample => "collect_sample",
                 DesignationType::Consume => "consume",
+                DesignationType::Douse => "douse",
             };
             (p.x, p.y, dt.to_string())
         })

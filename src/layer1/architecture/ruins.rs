@@ -76,6 +76,37 @@ pub fn process_scavenge(world: &mut World, ruin_entity: Entity) -> Vec<ResourceT
     loot.into_iter().map(|(t, _)| t).collect()
 }
 
+/// Chronicle promotion for structure destruction (Item 77 Phase 2).
+///
+/// Every path that reduces a building to a ruin (fire damage, sabotage,
+/// deorbit impact, decay) ends by spawning a `Ruin`, so watching for
+/// `Added<Ruin>` is the one central place where destruction becomes
+/// history. Before this, fire-driven destruction only reached the
+/// ephemeral message log while a colony's LifeSupport silently became
+/// a ruin. Losing a LifeSupport is Major; anything else is Standard.
+pub fn ruin_chronicle_system(
+    new_ruins: Query<(&Ruin, Option<&RuinHistory>, &GridPosition), Added<Ruin>>,
+    mut chronicle: EventWriter<crate::layer1::chronicle::AddChronicleEvent>,
+) {
+    use crate::layer1::chronicle::EventImportance;
+
+    for (ruin, history, pos) in &new_ruins {
+        let reason = history.map_or("destroyed", |h| h.reason.as_str());
+        let importance = if ruin.original_type == BuildingType::LifeSupport {
+            EventImportance::Major
+        } else {
+            EventImportance::Standard
+        };
+        chronicle.send(crate::layer1::chronicle::AddChronicleEvent {
+            text: format!(
+                "The {:?} at ({}, {}) has been destroyed ({reason}). Only a ruin remains.",
+                ruin.original_type, pos.x, pos.y
+            ),
+            importance,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::layer1::building::{Building, BuildingType, Material, MaterialType, OccupiedTiles};
@@ -178,5 +209,46 @@ mod tests {
 
         // OccupiedTiles should be cleared
         assert!(!world.resource::<OccupiedTiles>().0.contains(&(2, 2)));
+    }
+
+    #[test]
+    fn test_ruin_chronicle_system_reports_destruction() {
+        use crate::layer1::chronicle::{AddChronicleEvent, EventImportance};
+        use crate::layer1::ruins::RuinHistory;
+        use bevy_ecs::event::Events;
+        use bevy_ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.init_resource::<Events<AddChronicleEvent>>();
+        world.spawn((
+            Ruin {
+                original_type: BuildingType::LifeSupport,
+                material: MaterialType::Metal,
+            },
+            RuinHistory {
+                destruction_tick: 42,
+                reason: "Fire".to_string(),
+            },
+            GridPosition { x: 3, y: 4 },
+        ));
+
+        world
+            .run_system_once(crate::layer1::ruins::ruin_chronicle_system)
+            .unwrap();
+
+        let events = world.resource::<Events<AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        let sent: Vec<_> = reader.read(events).collect();
+        assert_eq!(sent.len(), 1, "one chronicle event per new ruin");
+        assert!(
+            sent[0].text.contains("LifeSupport") && sent[0].text.contains("(3, 4)"),
+            "chronicle entry names the structure and place: {}",
+            sent[0].text
+        );
+        assert_eq!(
+            sent[0].importance,
+            EventImportance::Major,
+            "losing a LifeSupport is Major"
+        );
     }
 }

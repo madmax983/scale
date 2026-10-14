@@ -294,6 +294,7 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::economy::beacon::process_colony_beacon_system,
             crate::layer1::economy::beacon::toggle_beacon_system,
             crate::layer1::integration::beacon_migrant_arrival_bridge,
+            crate::layer1::integration::recent_arrival_marker_system,
             crate::layer1::integration::beacon_trade_ship_bridge,
             crate::layer1::integration::beacon_pirate_raid_bridge,
             crate::layer1::economy::smugglers_cove::spawn_smugglers_cove_system,

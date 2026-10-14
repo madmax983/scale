@@ -174,7 +174,7 @@ fn skill_for_designation(designation_type: DesignationType) -> Option<SkillType>
         | DesignationType::Cannibalize
         | DesignationType::Destroy => Some(SkillType::Construction),
         DesignationType::ClearFlora | DesignationType::CollectSample => Some(SkillType::Farming),
-        DesignationType::SetZone(_) | DesignationType::Consume => None,
+        DesignationType::SetZone(_) | DesignationType::Consume | DesignationType::Douse => None,
         DesignationType::Tame => Some(SkillType::Husbandry),
     }
 }

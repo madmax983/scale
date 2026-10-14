@@ -69,7 +69,9 @@ pub fn produce_manual_system(
                 | DesignationType::SetZone(_) => Some(SkillType::Construction),
                 DesignationType::ExcavateDust => Some(SkillType::Mining),
                 DesignationType::Tame => Some(SkillType::Husbandry),
-                DesignationType::Cannibalize | DesignationType::Consume => None,
+                DesignationType::Cannibalize
+                | DesignationType::Consume
+                | DesignationType::Douse => None,
             });
 
         let (chosen_skill, level) = if let Some(s) = skill_type_opt {
@@ -163,7 +165,9 @@ pub fn manual_aura_system(
                     | DesignationType::SetZone(_) => Some(SkillType::Construction),
                     DesignationType::ExcavateDust => Some(SkillType::Mining),
                     DesignationType::Tame => Some(SkillType::Husbandry),
-                    DesignationType::Cannibalize | DesignationType::Consume => None,
+                    DesignationType::Cannibalize
+                    | DesignationType::Consume
+                    | DesignationType::Douse => None,
                 };
                 skill_opt == Some(manual.skill_type)
             } else {

@@ -266,6 +266,9 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(OccupiedTiles::default());
     world.insert_resource(crate::layer1::crowding::CrowdingGrid::new(80, 50));
     world.insert_resource(ColonyResources::default());
+    // Item 77 Phase 2: atmosphere telegraphing snapshot + shelter order.
+    world.insert_resource(crate::layer1::pressure::ColonyAtmosphere::default());
+    world.insert_resource(crate::layer1::pressure::ShelterOrder::default());
     world.insert_resource(crate::shared::random::GlobalRng(rand::rngs::StdRng::from_entropy()));
     world.insert_resource(crate::layer1::social::golden_age::ColonySafety {
         days_without_incident: 0,
@@ -748,6 +751,18 @@ const STARTER_WALL_OFFSETS: &[(i32, i32)] = &[
 const STARTER_AIRLOCK_OFFSET: (i32, i32) = (0, 2);
 const STARTER_LANDER_OFFSET: (i32, i32) = (1, 0);
 const STARTER_LIFE_SUPPORT_OFFSET: (i32, i32) = (-1, 0);
+/// Item 77 Phase 2 (forensics bug #1): the starter LifeSupport shipped
+/// electrically isolated — the power grid only connects tiles carrying
+/// power components, and no power tile sat between the Lander (1, 0) and
+/// the LifeSupport (-1, 0), so the generator could never be powered and
+/// colonies coasted on the one-time seeded air charge. A PowerPole on
+/// the center tile bridges Lander → pole → LifeSupport (both are
+/// cardinal-adjacent to the center), so pressure generation is live
+/// from tick 0. The pole is a walkable small structure, and the center
+/// tile carries no other building — except in Layer 2 Ready, whose
+/// CommandCenter sits there and bridges the grid itself (see
+/// `apply_layer2_ready_start`).
+const STARTER_POWER_POLE_OFFSET: (i32, i32) = (0, 0);
 const STARTER_FARM_OFFSET: (i32, i32) = (1, 1);
 const STARTER_FARM2_OFFSET: (i32, i32) = (-1, -1);
 const STARTER_STOCKPILE_OFFSET: (i32, i32) = (-1, 1);
@@ -962,7 +977,11 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
         resources.food = resources.food.max(14.0);
         resources.wood = resources.wood.max(20.0);
         resources.stone = resources.stone.max(20.0);
-        resources.metal = resources.metal.max(25.0);
+        // Item 77 Phase 2 (Layer 2 Ready maintenance lane): 25 base metal
+        // plus 50 earmarked for one spare LifeSupport (its build cost) —
+        // the relief lane keeps a replacement unit affordable instead of
+        // letting a sabotage kill become a death sentence.
+        resources.metal = resources.metal.max(75.0);
         resources.tools = resources.tools.max(4.0);
         resources.knowledge = resources.knowledge.max(15.0);
     }
@@ -1007,6 +1026,71 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
             .resource_mut::<OccupiedTiles>()
             .0
             .insert((command_center_pos.x, command_center_pos.y));
+    }
+
+    // Item 77 Phase 2 (Layer 2 Ready maintenance lane ONLY — Classic,
+    // Ground Survival, and Social Drama numbers are untouched): atmosphere
+    // redundancy inside the hull. A second LifeSupport on the free (0, 1)
+    // interior tile and a Generator on the free (0, -1) interior tile.
+    // Both are cardinal-adjacent to the CommandCenter's power consumer on
+    // the center tile, so both join the Lander's grid: if either
+    // LifeSupport is sabotaged to scrap, the other keeps the hull
+    // pressurized, and the Generator is a second power source behind the
+    // boosted Lander. This is maintenance relief that does not decay —
+    // the lane Mark designated "much easier to maintain".
+    let redundant_life_support_pos = crate::layer1::GridPosition {
+        x: layout.center.x,
+        y: layout.center.y + 1,
+    };
+    let generator_pos = crate::layer1::GridPosition {
+        x: layout.center.x,
+        y: layout.center.y - 1,
+    };
+    let building_at = |world: &mut World,
+                       pos: crate::layer1::GridPosition,
+                       kind: crate::layer1::building::BuildingType|
+     -> bool {
+        world
+            .query::<(
+                &crate::layer1::building::Building,
+                &crate::layer1::map::GridPosition,
+            )>()
+            .iter(world)
+            .any(|(building, p)| building.building_type == kind && *p == pos)
+    };
+    if !building_at(
+        world,
+        redundant_life_support_pos,
+        crate::layer1::building::BuildingType::LifeSupport,
+    ) {
+        crate::layer1::building::spawn_building(
+            world,
+            redundant_life_support_pos.x,
+            redundant_life_support_pos.y,
+            crate::layer1::building::BuildingType::LifeSupport,
+            crate::layer1::building::MaterialType::default(),
+        );
+        world
+            .resource_mut::<OccupiedTiles>()
+            .0
+            .insert((redundant_life_support_pos.x, redundant_life_support_pos.y));
+    }
+    if !building_at(
+        world,
+        generator_pos,
+        crate::layer1::building::BuildingType::Generator,
+    ) {
+        crate::layer1::building::spawn_building(
+            world,
+            generator_pos.x,
+            generator_pos.y,
+            crate::layer1::building::BuildingType::Generator,
+            crate::layer1::building::MaterialType::default(),
+        );
+        world
+            .resource_mut::<OccupiedTiles>()
+            .0
+            .insert((generator_pos.x, generator_pos.y));
     }
 
     let lander_pos = crate::layer1::GridPosition {
@@ -1167,6 +1251,35 @@ fn spawn_starter_colony(world: &mut World) -> Option<StarterColonyLayout> {
         .resource_mut::<OccupiedTiles>()
         .0
         .insert((life_support_pos.x, life_support_pos.y));
+
+    // Starter power bridge (Item 77 Phase 2, forensics bug #1): a
+    // PowerPole on the center tile connects the Lander's PowerSource to
+    // the LifeSupport's PowerConsumer through the power grid's tile
+    // adjacency, so `power_grid_system` activates the LifeSupport and
+    // `update_pressure_system` actually generates pressure from tick 0.
+    // Layer 2 Ready is the one exception: its CommandCenter occupies the
+    // center tile and is itself a PowerConsumer bridging the same two
+    // neighbors, so a pole there would collide in the grid map.
+    let scenario_id = world
+        .get_resource::<ActiveStartScenario>()
+        .map_or(StartScenarioId::Classic, |active| active.id);
+    if scenario_id != StartScenarioId::Layer2Ready {
+        let pole_pos = crate::layer1::GridPosition {
+            x: center.x + STARTER_POWER_POLE_OFFSET.0,
+            y: center.y + STARTER_POWER_POLE_OFFSET.1,
+        };
+        crate::layer1::building::spawn_building(
+            world,
+            pole_pos.x,
+            pole_pos.y,
+            crate::layer1::building::BuildingType::PowerPole,
+            crate::layer1::building::MaterialType::default(),
+        );
+        world
+            .resource_mut::<OccupiedTiles>()
+            .0
+            .insert((pole_pos.x, pole_pos.y));
+    }
 
     // Starter farm: the colony's food supply. Placed on a free interior
     // tile (1, 1) inside the pressurized hull — never on a wall tile.
@@ -1395,6 +1508,20 @@ mod tests {
             *y -= min_y;
         }
         shell.sort_by_key(|(_, x, y)| (*x, *y));
+        // Item 77 Phase 2: Layer 2 Ready adds a redundant second
+        // LifeSupport inside the shell; the shared-shell comparison is
+        // about the starter layout every scenario has in common, so it
+        // keeps only the first (shared) LifeSupport entry.
+        let mut seen_life_support = false;
+        shell.retain(|(building_type, _, _)| {
+            if *building_type == BuildingType::LifeSupport {
+                if seen_life_support {
+                    return false;
+                }
+                seen_life_support = true;
+            }
+            true
+        });
         shell
     }
 
@@ -1796,6 +1923,105 @@ mod tests {
     }
 
     #[test]
+    fn test_starter_life_support_is_powered_from_tick_zero() {
+        // Item 77 Phase 2 (forensics bug #1): the starter LifeSupport used
+        // to be its own power grid (production 0, consumer permanently
+        // inactive). The starter PowerPole bridges Lander -> LifeSupport,
+        // so the grid containing the LifeSupport must now include the
+        // Lander's production in every scenario whose center tile carries
+        // the pole. (Per-tick activation is the brownout mechanic's
+        // business: every building spawns as a Prototype at 0.5
+        // efficiency, so the Lander's 10 output counts as 5 against the
+        // LifeSupport's 10 demand.)
+        for scenario in [
+            StartScenarioId::Classic,
+            StartScenarioId::GroundSurvival,
+            StartScenarioId::SocialDrama,
+        ] {
+            let mut world = setup_world_with_config(SetupConfig {
+                headless: true,
+                scenario,
+            });
+            let pole_count = world
+                .query::<&Building>()
+                .iter(&world)
+                .filter(|b| b.building_type == BuildingType::PowerPole)
+                .count();
+            assert_eq!(
+                pole_count, 1,
+                "scenario {scenario:?}: starter layout should ship one PowerPole bridge"
+            );
+            let life_support = world
+                .query::<(Entity, &Building)>()
+                .iter(&world)
+                .find(|(_, b)| b.building_type == BuildingType::LifeSupport)
+                .map(|(e, _)| e)
+                .expect("starter colony has a LifeSupport");
+            let (production, demand) =
+                crate::layer1::energy::calculate_grid_stats(&mut world, life_support);
+            assert_eq!(
+                production, 5.0,
+                "scenario {scenario:?}: Lander production should reach the LifeSupport grid through the pole"
+            );
+            assert_eq!(
+                demand, 10.0,
+                "scenario {scenario:?}: LifeSupport demand should be on the bridged grid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_layer2_ready_has_redundant_powered_atmosphere() {
+        // Item 77 Phase 2, Layer 2 Ready maintenance lane: a redundant
+        // second LifeSupport plus a Generator on the completed power
+        // chain, and metal earmarked for a spare LifeSupport.
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Layer2Ready,
+        });
+
+        let life_support_count = world
+            .query::<&Building>()
+            .iter(&world)
+            .filter(|b| b.building_type == BuildingType::LifeSupport)
+            .count();
+        assert_eq!(
+            life_support_count, 2,
+            "Layer 2 Ready should start with a redundant second LifeSupport"
+        );
+        let generator_count = world
+            .query::<&Building>()
+            .iter(&world)
+            .filter(|b| b.building_type == BuildingType::Generator)
+            .count();
+        assert_eq!(generator_count, 1, "Layer 2 Ready should place a Generator");
+        // Both LifeSupport units and the Generator share the
+        // CommandCenter grid with the Lander, so production reaching a
+        // LifeSupport is at least Lander (5 after Prototype efficiency) +
+        // Generator (5) = 10 — worldgen structures may add more. (The
+        // CommandCenter's own 50 demand keeps
+        // the grid in trunk's brownout regime; redundancy plus doubled
+        // production is what the lane buys.)
+        let life_support = world
+            .query::<(Entity, &Building)>()
+            .iter(&world)
+            .find(|(_, b)| b.building_type == BuildingType::LifeSupport)
+            .map(|(e, _)| e)
+            .expect("Layer 2 Ready has LifeSupport units");
+        let (production, _) =
+            crate::layer1::energy::calculate_grid_stats(&mut world, life_support);
+        assert!(
+            production >= 10.0,
+            "Layer 2 Ready LifeSupport grid should include Lander + Generator production, got {production}"
+        );
+        let metal = world.resource::<ColonyResources>().metal;
+        assert!(
+            metal >= 75.0,
+            "Layer 2 Ready metal should include the 50-metal spare-LifeSupport earmark, got {metal}"
+        );
+    }
+
+    #[test]
     fn test_layer2_ready_adds_distinct_intro_chronicle_text() {
         let world = setup_world_with_config(SetupConfig {
             headless: true,
@@ -2057,3 +2283,5 @@ mod tests {
         );
     }
 }
+
+

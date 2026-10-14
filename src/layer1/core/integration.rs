@@ -1569,6 +1569,34 @@ pub fn psionic_fire_bridge_system(
     }
 }
 
+/// Item 77 Phase 2: arrival marker for newly landed migrants.
+///
+/// A fresh migrant is indistinguishable from a founder in the roster,
+/// which hides both a mouth to feed and a pair of hands. The marker
+/// lasts [`MIGRANT_MARKER_TICKS`] ticks; the headless roster prints
+/// NEW ARRIVAL while it is present.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct RecentArrival {
+    /// Tick the pop arrived.
+    pub arrival_tick: u64,
+}
+
+/// How long a migrant keeps the NEW ARRIVAL marker.
+pub const MIGRANT_MARKER_TICKS: u64 = 200;
+
+/// Expires [`RecentArrival`] markers once their window passes.
+pub fn recent_arrival_marker_system(
+    mut commands: Commands,
+    time: Res<SimulationTime>,
+    arrivals: Query<(Entity, &RecentArrival)>,
+) {
+    for (entity, arrival) in &arrivals {
+        if time.tick.saturating_sub(arrival.arrival_tick) > MIGRANT_MARKER_TICKS {
+            commands.entity(entity).remove::<RecentArrival>();
+        }
+    }
+}
+
 /// INT-762: Bridges MigrantArrivalEvent to Pop spawning
 pub fn beacon_migrant_arrival_bridge(
     mut commands: Commands,
@@ -1620,7 +1648,7 @@ pub fn beacon_migrant_arrival_bridge(
                 crate::layer1::PopBundle::random(spawn_pos.x, spawn_pos.y, &mut rng);
             bundle.traits = traits;
             bundle.arrival = crate::layer1::social::old_guard::Arrival { tick };
-            commands.spawn(bundle);
+            commands.spawn((bundle, RecentArrival { arrival_tick: tick }));
         }
 
         chronicle_events.send(crate::layer1::core::chronicle::AddChronicleEvent {
@@ -3682,5 +3710,39 @@ pub fn consultant_chronicle_bridge(
         commands
             .entity(entity)
             .insert(ConsultantChronicleEventFired);
+    }
+}
+
+#[cfg(test)]
+mod recent_arrival_tests {
+    use super::*;
+    use bevy_ecs::system::RunSystemOnce;
+
+    #[test]
+    fn recent_arrival_marker_expires_after_window() {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime { tick: 50, ..Default::default() });
+        let pop = world
+            .spawn(RecentArrival { arrival_tick: 0 })
+            .id();
+        world.run_system_once(recent_arrival_marker_system).unwrap();
+        // Commands apply at the end of the run; flush by running again is
+        // not needed — deferred commands land when the system returns via
+        // run_system_once's apply. The marker is still inside its window.
+        assert!(
+            world.get::<RecentArrival>(pop).is_some(),
+            "marker should persist inside the arrival window"
+        );
+
+        world.insert_resource(SimulationTime {
+            tick: MIGRANT_MARKER_TICKS + 1,
+            ..Default::default()
+        });
+        world.run_system_once(recent_arrival_marker_system).unwrap();
+        world.run_system_once(recent_arrival_marker_system).unwrap();
+        assert!(
+            world.get::<RecentArrival>(pop).is_none(),
+            "marker should expire after the arrival window"
+        );
     }
 }

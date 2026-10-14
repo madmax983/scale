@@ -321,6 +321,14 @@ pub fn register(schedule: &mut Schedule) {
                 .after(update_pressure_system),
             crate::layer1::physics::pressure::lifesupport_self_repair_system
                 .after(update_pressure_system),
+            // Item 77 Phase 2: atmosphere telegraphing + counterplay.
+            crate::layer1::physics::pressure::lifesupport_power_warning_system
+                .after(update_pressure_system),
+            crate::layer1::physics::pressure::update_colony_atmosphere_system
+                .after(update_pressure_system),
+            crate::layer1::physics::pressure::shelter_order_system
+                .after(update_pressure_system),
+            crate::layer1::ruins::ruin_chronicle_system,
             update_noise_system.after(update_pressure_system),
             // Spec 1374: canyon howling adds noise after the reset/propagation,
             // before the leisure/morale drain sees it.

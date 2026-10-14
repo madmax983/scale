@@ -377,7 +377,10 @@ pub(crate) const fn get_skill_for_designation(
         | DesignationType::Destroy => Some(SkillType::Construction),
         DesignationType::ClearFlora | DesignationType::CollectSample => Some(SkillType::Farming),
         DesignationType::ExcavateDust => Some(SkillType::Mining),
-        DesignationType::SetZone(_) | DesignationType::Tame | DesignationType::Consume => None,
+        DesignationType::SetZone(_)
+        | DesignationType::Tame
+        | DesignationType::Consume
+        | DesignationType::Douse => None,
     }
 }
 
@@ -533,6 +536,7 @@ fn execute_work_on_designation(
             }
         }
         DesignationType::ExcavateDust => handle_dust_excavation(world, designation_entity, pos),
+        DesignationType::Douse => handle_douse(world, designation_entity, pos),
         DesignationType::SetZone(_) | DesignationType::Tame => false,
     }
 }
@@ -550,6 +554,35 @@ fn handle_dust_excavation(
         crate::layer1::desire_dust::excavate_dust_tile(world, p.x, p.y);
         if let Some(mut log) = world.get_resource_mut::<crate::shared::log::MessageLog>() {
             log.add(format!("Excavated desire dust at ({}, {})", p.x, p.y));
+        }
+    }
+    world.despawn(designation_entity);
+    true
+}
+
+/// Douse a fire on a designation tile (Item 77 Phase 2 fire response).
+///
+/// Before this, `ActionType::ExtinguishFire` existed in the action enum
+/// but no executable path ever put a pop on a burning tile: fires burned
+/// until the structure under them became a ruin. Dousing removes every
+/// `Fire` entity on the tile and completes the designation.
+fn handle_douse(
+    world: &mut World,
+    designation_entity: Entity,
+    pos: Option<GridPosition>,
+) -> bool {
+    if let Some(p) = pos {
+        let fires: Vec<Entity> = world
+            .query::<(Entity, &GridPosition, &crate::layer1::fire::Fire)>()
+            .iter(world)
+            .filter(|(_, fire_pos, _)| **fire_pos == p)
+            .map(|(entity, _, _)| entity)
+            .collect();
+        for fire in fires {
+            world.despawn(fire);
+        }
+        if let Some(mut log) = world.get_resource_mut::<crate::shared::log::MessageLog>() {
+            log.add(format!("Doused the fire at ({}, {})", p.x, p.y));
         }
     }
     world.despawn(designation_entity);

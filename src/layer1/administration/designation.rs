@@ -48,6 +48,8 @@ pub enum DesignationType {
     CollectSample,
     /// Excavate accumulated Desire Dust from a tile (Spec 1379 counterplay).
     ExcavateDust,
+    /// Designate a burning tile for dousing (Item 77 Phase 2 fire response).
+    Douse,
 }
 
 impl DesignationType {
@@ -76,6 +78,7 @@ impl DesignationType {
             Self::Consume => 'E',
             Self::CollectSample => 'S',
             Self::ExcavateDust => 'U',
+            Self::Douse => '~',
         }
     }
 
@@ -104,6 +107,7 @@ impl DesignationType {
             Self::Consume => "E",
             Self::CollectSample => "S",
             Self::ExcavateDust => "U",
+            Self::Douse => "~",
         }
     }
 
@@ -132,6 +136,7 @@ impl DesignationType {
             Self::Consume => "Consume",
             Self::CollectSample => "Collect Sample",
             Self::ExcavateDust => "Excavate Dust",
+            Self::Douse => "Douse Fire",
         }
     }
 }
@@ -304,6 +309,9 @@ pub fn can_designate(world: &World, x: i32, y: i32, designation_type: Designatio
         DesignationType::ExcavateDust => world
             .get_resource::<crate::layer1::desire_dust::DesireDust>()
             .is_some_and(|dust| dust.amount_at(x, y) > 0.0),
+        DesignationType::Douse => {
+            has_component_at::<crate::layer1::fire::Fire>(world, x, y)
+        }
     }
 }
 
@@ -447,6 +455,13 @@ fn get_valid_targets_for_tool(
             }
             Some(targets)
         }
+        DesignationType::Douse => Some(
+            world
+                .query::<(&GridPosition, &crate::layer1::fire::Fire)>()
+                .iter(world)
+                .map(|(pos, _)| (pos.x, pos.y))
+                .collect(),
+        ),
         _ => None,
     }
 }
@@ -529,7 +544,8 @@ pub fn try_designate_area(
                     DesignationType::Tame
                     | DesignationType::ClearFlora
                     | DesignationType::Cannibalize
-                    | DesignationType::CollectSample => valid_targets
+                    | DesignationType::CollectSample
+                    | DesignationType::Douse => valid_targets
                         .as_ref()
                         .is_some_and(|targets| targets.contains(&(x, y))),
                     DesignationType::Consume => {
@@ -987,4 +1003,41 @@ fn test_try_designate_area_performance_smoke_test() {
 
     // Total area 2500. 10 already existed. So 2490 should be new.
     assert_eq!(count, 2490);
+}
+
+#[test]
+fn test_douse_designation_requires_fire() {
+    // Item 77 Phase 2: Douse is the executable fire response. It can only
+    // be placed on a tile that is actually burning.
+    let mut world = World::new();
+    world.insert_resource(TerrainGrid {
+        width: 10,
+        height: 10,
+        tiles: vec![TerrainType::Grass; 100],
+    });
+    world.insert_resource(OccupiedTiles::default());
+
+    assert!(
+        !can_designate(&world, 3, 3, DesignationType::Douse),
+        "no fire, no douse designation"
+    );
+
+    world.spawn((
+        crate::layer1::fire::Fire {
+            intensity: 5.0,
+            lifetime: 10,
+        },
+        GridPosition { x: 3, y: 3 },
+    ));
+
+    assert!(
+        can_designate(&world, 3, 3, DesignationType::Douse),
+        "a burning tile can be designated for dousing"
+    );
+    assert_eq!(DesignationType::Douse.char(), '~');
+    assert_eq!(DesignationType::Douse.label(), "Douse Fire");
+
+    // Area designation targets exactly the burning tiles.
+    let count = try_designate_area(&mut world, 0, 0, 9, 9, DesignationType::Douse);
+    assert_eq!(count, 1, "only the burning tile is designated");
 }

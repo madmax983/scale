@@ -384,7 +384,27 @@ pub fn lifesupport_damage_warning_system(    mut commands: Commands,
     }
 }
 
+/// Marker: this pop has already been alerted for its current vacuum
+/// excursion (Item 77 Phase 2 telegraphing).
+///
+/// Inserted by [`pressure_damage_system`] on the first tick a pop takes
+/// suffocation damage, removed when the pop is back at or above the
+/// suffocation threshold — so each new excursion alerts exactly once and
+/// a pop standing in vacuum does not spam the chronicle every tick.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct SuffocationAlerted;
+
+/// Pressure below which a pop takes suffocation damage (and alerts fire).
+pub const SUFFOCATION_PRESSURE_THRESHOLD: f32 = 0.2;
+
 /// System to apply suffocation damage.
+///
+/// Item 77 Phase 2: the first signal of a suffocation death used to be the
+/// death notice itself. Now the first tick a pop is below
+/// [`SUFFOCATION_PRESSURE_THRESHOLD`] and losing HP chronicles
+/// "{name} is suffocating — no air at their position", throttled per pop
+/// per excursion via [`SuffocationAlerted`]. The damage itself is
+/// unchanged (1 HP/tick — Classic stays brutal; this is awareness).
 #[allow(clippy::type_complexity)]
 pub fn pressure_damage_system(
     mut commands: Commands,
@@ -393,6 +413,8 @@ pub fn pressure_damage_system(
             Entity,
             &crate::layer1::map::GridPosition,
             &mut crate::layer1::health::Health,
+            Option<&crate::layer1::pop::PopName>,
+            Has<SuffocationAlerted>,
         ),
         (
             With<crate::layer1::pop::Pop>,
@@ -409,22 +431,35 @@ pub fn pressure_damage_system(
     let Some(grid) = grid_opt else { return };
     let mut killed = 0;
 
-    for (entity, pos, mut health) in pop_query.iter_mut() {
+    for (entity, pos, mut health, name, alerted) in pop_query.iter_mut() {
         if health.current <= 0.0 {
             continue;
         }
 
         let pressure = grid.get(pos.x, pos.y);
-        if pressure < 0.2 {
+        if pressure < SUFFOCATION_PRESSURE_THRESHOLD {
+            if !alerted {
+                let label = name.map_or_else(|| "A colonist".to_string(), |n| n.0.clone());
+                events.send(crate::layer1::chronicle::AddChronicleEvent {
+                    text: format!("{label} is suffocating — no air at their position."),
+                    importance: EventImportance::Major,
+                });
+                // try_insert: the pop may be despawned by another system
+                // in the same tick batch before commands apply.
+                commands.entity(entity).try_insert(SuffocationAlerted);
+            }
             health.take_damage(1.0);
             if health.current <= 0.0 {
                 commands
                     .entity(entity)
-                    .insert(crate::layer1::health::DeathCause(
+                    .try_insert(crate::layer1::health::DeathCause(
                         "Atmospheric breach".to_string(),
                     ));
                 killed += 1;
             }
+        } else if alerted {
+            // Back in air: re-arm the alert for the next excursion.
+            commands.entity(entity).remove::<SuffocationAlerted>();
         }
     }
 
@@ -433,6 +468,277 @@ pub fn pressure_damage_system(
             text: format!("{} Pops suffocated due to atmospheric breach.", killed),
             importance: EventImportance::Major,
         });
+    }
+}
+
+/// Colony-level atmosphere snapshot, refreshed every tick by
+/// [`update_colony_atmosphere_system`] (Item 77 Phase 2).
+///
+/// This is the data the shell status bar and the headless STATS line read:
+/// how many pops are standing in vacuum right now, the worst pop-tile
+/// pressure, and whether any LifeSupport unit is sitting unpowered. Before
+/// Phase 2 the only surface for any of this was the building inspector.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct ColonyAtmosphere {
+    /// Pops currently on tiles below the suffocation threshold.
+    pub pops_in_vacuum: usize,
+    /// Lowest pressure on any living pop's tile (1.0 when there are no pops).
+    pub min_pop_pressure: f32,
+    /// LifeSupport units whose power consumer is inactive.
+    pub unpowered_life_support: usize,
+    /// Total LifeSupport units in the colony.
+    pub life_support_total: usize,
+}
+
+impl ColonyAtmosphere {
+    /// True when at least one LifeSupport exists and none of them is powered.
+    #[must_use]
+    pub fn life_support_unpowered(&self) -> bool {
+        self.life_support_total > 0 && self.unpowered_life_support == self.life_support_total
+    }
+}
+
+/// Refresh the [`ColonyAtmosphere`] snapshot from the live world.
+pub fn update_colony_atmosphere_system(
+    mut snapshot: ResMut<ColonyAtmosphere>,
+    grid_opt: Option<Res<PressureGrid>>,
+    pops: Query<&crate::layer1::map::GridPosition, With<crate::layer1::pop::Pop>>,
+    life_support: Query<(
+        &crate::layer1::building::Building,
+        Option<&crate::layer1::energy::PowerConsumer>,
+    )>,
+) {
+    use crate::layer1::building::BuildingType;
+
+    let mut min_pressure = 1.0f32;
+    let mut in_vacuum = 0usize;
+    if let Some(grid) = grid_opt.as_deref() {
+        for pos in pops.iter() {
+            let pressure = grid.get(pos.x, pos.y);
+            min_pressure = min_pressure.min(pressure);
+            if pressure < SUFFOCATION_PRESSURE_THRESHOLD {
+                in_vacuum += 1;
+            }
+        }
+    }
+    let mut total = 0usize;
+    let mut unpowered = 0usize;
+    for (building, consumer) in life_support.iter() {
+        if building.building_type != BuildingType::LifeSupport {
+            continue;
+        }
+        total += 1;
+        // A LifeSupport with no PowerConsumer at all runs unconditionally
+        // (update_pressure_system treats missing consumer as active).
+        if consumer.is_some_and(|c| !c.active) {
+            unpowered += 1;
+        }
+    }
+    *snapshot = ColonyAtmosphere {
+        pops_in_vacuum: in_vacuum,
+        min_pop_pressure: if pops.is_empty() { 1.0 } else { min_pressure },
+        unpowered_life_support: unpowered,
+        life_support_total: total,
+    };
+}
+
+/// Per-entity alert state for the unpowered-LifeSupport warning.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct LifeSupportPowerAlertState {
+    /// Tick the current continuous unpowered stretch began.
+    unpowered_since: Option<u64>,
+    /// Whether the warning has fired for the current stretch.
+    warned_unpowered: bool,
+}
+
+/// How long a LifeSupport must stay continuously unpowered before the
+/// colony warning fires.
+///
+/// The power grid's brownout mechanic flickers consumers on undersized
+/// grids (the starter grid runs at half supply by design), so a warning
+/// on the first dark tick would spam the chronicle every few ticks and
+/// cry wolf. A unit on a grid with no production at all — the forensics
+/// bug this alert exists for — stays dark forever and crosses this
+/// threshold; a brownout flicker never comes close.
+pub const UNPOWERED_WARNING_DELAY_TICKS: u64 = 100;
+
+/// Colony-level alert: a LifeSupport unit with no power (Item 77 Phase 2).
+///
+/// Before Phase 2 this fact lived only in the inspector of the exact
+/// building ("Consumer Demand: 10 (Inactive)"), so a colony could coast on
+/// its one-time seeded air charge with a dead generator and never be told.
+/// The warning fires once per sustained power loss (see
+/// [`UNPOWERED_WARNING_DELAY_TICKS`]) and re-arms on repowering.
+pub fn lifesupport_power_warning_system(
+    mut commands: Commands,
+    time: Res<crate::shared::time::SimulationTime>,
+    query: Query<(
+        Entity,
+        &crate::layer1::building::Building,
+        Option<&crate::layer1::energy::PowerConsumer>,
+        Option<&LifeSupportPowerAlertState>,
+    )>,
+    mut chronicle: EventWriter<crate::layer1::chronicle::AddChronicleEvent>,
+) {
+    use crate::layer1::building::BuildingType;
+    use crate::layer1::chronicle::EventImportance;
+
+    for (entity, building, consumer, alert) in query.iter() {
+        if building.building_type != BuildingType::LifeSupport {
+            continue;
+        }
+        let powered = consumer.is_none_or(|c| c.active);
+        let state = alert.copied().unwrap_or_default();
+        if powered {
+            if state.unpowered_since.is_some() || state.warned_unpowered {
+                commands.entity(entity).try_insert(LifeSupportPowerAlertState {
+                    unpowered_since: None,
+                    warned_unpowered: false,
+                });
+            }
+            continue;
+        }
+        let since = state.unpowered_since.unwrap_or(time.tick);
+        if state.unpowered_since.is_none() {
+            commands.entity(entity).try_insert(LifeSupportPowerAlertState {
+                unpowered_since: Some(time.tick),
+                warned_unpowered: false,
+            });
+        } else if !state.warned_unpowered
+            && time.tick.saturating_sub(since) >= UNPOWERED_WARNING_DELAY_TICKS
+        {
+            chronicle.send(crate::layer1::chronicle::AddChronicleEvent {
+                text: "LifeSupport has no power — the air is only what the hull already holds. Bridge it to a power source with a Power Pole or build a Generator.".to_string(),
+                importance: EventImportance::Major,
+            });
+            // try_insert: a LifeSupport can be destroyed (ruined) by
+            // another system in the same tick batch; warning about a
+            // building that no longer exists must not panic the schedule.
+            commands.entity(entity).try_insert(LifeSupportPowerAlertState {
+                unpowered_since: Some(since),
+                warned_unpowered: true,
+            });
+        }
+    }
+}
+
+/// The shelter / recall order (Item 77 Phase 2 counterplay).
+///
+/// While active, every non-panicked, non-possessed pop standing in vacuum
+/// is ordered to the nearest pressurized tile. This is the missing verb
+/// against exposure deaths and panic-cascade aftermaths: the player can
+/// call everyone home instead of watching them linger outside. It does
+/// NOT soften panic itself — panicked pops keep fleeing (their movement
+/// is panic's, not the order's), and vacuum damage is unchanged.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct ShelterOrder {
+    /// Whether the order is currently in force.
+    pub active: bool,
+    /// Tick the order was last issued (0 = never / lifted).
+    pub issued_tick: u64,
+}
+
+/// Pressure a tile must hold for the shelter order to count it as safe.
+pub const SHELTER_SAFE_PRESSURE: f32 = 0.5;
+
+/// Find the nearest tile at or above [`SHELTER_SAFE_PRESSURE`] to `from`,
+/// scanning expanding Chebyshev rings. Deterministic: nearest distance,
+/// then lowest (x, y).
+#[must_use]
+pub fn nearest_pressurized_tile(
+    grid: &PressureGrid,
+    from: crate::layer1::map::GridPosition,
+) -> Option<crate::layer1::map::GridPosition> {
+    use crate::layer1::map::GridPosition;
+    if grid.get(from.x, from.y) >= SHELTER_SAFE_PRESSURE {
+        return Some(from);
+    }
+    // The grid is at most a few hundred tiles across; a bounded ring scan
+    // is more than fast enough for a per-tick order check.
+    for radius in 1..=64i32 {
+        let mut best: Option<GridPosition> = None;
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx.abs() != radius && dy.abs() != radius {
+                    continue;
+                }
+                let candidate = GridPosition {
+                    x: from.x + dx,
+                    y: from.y + dy,
+                };
+                if grid.get(candidate.x, candidate.y) >= SHELTER_SAFE_PRESSURE
+                    && best.is_none_or(|b| (candidate.x, candidate.y) < (b.x, b.y))
+                {
+                    best = Some(candidate);
+                }
+            }
+        }
+        if best.is_some() {
+            return best;
+        }
+    }
+    None
+}
+
+/// Drive the shelter order: pops in vacuum get a movement target on the
+/// nearest pressurized tile (self-targeted, the same pattern visitor
+/// departure and panic flight use to move without a building target).
+#[allow(clippy::type_complexity)]
+pub fn shelter_order_system(
+    order: Res<ShelterOrder>,
+    grid_opt: Option<Res<PressureGrid>>,
+    mut commands: Commands,
+    pops: Query<
+        (
+            Entity,
+            &crate::layer1::map::GridPosition,
+            Option<&crate::layer1::execution::components::MovementTarget>,
+        ),
+        (
+            With<crate::layer1::pop::Pop>,
+            Without<crate::layer1::psychology::panic_spirals::Panic>,
+            Without<crate::layer1::culture::chronostalker::Phased>,
+            // The possessed pop is the player's own hands; the order
+            // never overrides direct control.
+            Without<crate::layer1::direct_link::Possessed>,
+        ),
+    >,
+) {
+    if !order.active {
+        return;
+    }
+    let Some(grid) = grid_opt.as_deref() else {
+        return;
+    };
+    for (entity, pos, movement) in pops.iter() {
+        if grid.get(pos.x, pos.y) >= SUFFOCATION_PRESSURE_THRESHOLD {
+            // Safe: release any shelter movement target we issued so the
+            // utility AI owns the pop again.
+            if movement.is_some_and(|mt| mt.target_entity == entity) {
+                commands
+                    .entity(entity)
+                    .remove::<crate::layer1::execution::components::MovementTarget>()
+                    .remove::<crate::layer1::execution::components::AtTarget>();
+            }
+            continue;
+        }
+        if let Some(target) = nearest_pressurized_tile(grid, *pos) {
+            if target == *pos {
+                continue;
+            }
+            let already_heading = movement
+                .is_some_and(|mt| mt.target_entity == entity && mt.target_position == target);
+            if !already_heading {
+                commands
+                    .entity(entity)
+                    .remove::<crate::layer1::execution::components::AtTarget>()
+                    .try_insert(crate::layer1::execution::components::MovementTarget {
+                        target_entity: entity,
+                        target_position: target,
+                        for_action: crate::layer1::utility_types::ActionType::Idle,
+                    });
+            }
+        }
     }
 }
 
@@ -1049,5 +1355,230 @@ mod tests {
         let mut reader = events.get_cursor();
         let count = reader.read(events).count();
         assert_eq!(count, 1, "Warning should fire once, not every tick");
+    }
+
+    // -----------------------------------------------------------------
+    // Item 77 Phase 2: suffocation alert, atmosphere snapshot, power
+    // warning, shelter order.
+    // -----------------------------------------------------------------
+
+    fn chronicle_texts(app: &bevy::prelude::App) -> Vec<String> {
+        use crate::layer1::chronicle::AddChronicleEvent;
+        let events = app
+            .world()
+            .resource::<bevy::prelude::Events<AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        reader.read(events).map(|e| e.text.clone()).collect()
+    }
+
+    fn suffocation_app() -> bevy::prelude::App {
+        use crate::layer1::chronicle::AddChronicleEvent;
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+        app.add_event::<AddChronicleEvent>();
+        app.insert_resource(PressureGrid::new(10, 10));
+        app
+    }
+
+    fn spawn_named_pop(app: &mut bevy::prelude::App, x: i32, y: i32) -> Entity {
+        app.world_mut()
+            .spawn((
+                Pop,
+                crate::layer1::pop::PopName("Ada".to_string()),
+                Health {
+                    current: 100.0,
+                    max: 100.0,
+                    has_rust_lung: false,
+                },
+                GridPosition { x, y },
+            ))
+            .id()
+    }
+
+    #[test]
+    fn test_suffocation_alert_fires_once_per_excursion() {
+        let mut app = suffocation_app();
+        let pop = spawn_named_pop(&mut app, 5, 5);
+        app.add_systems(bevy::prelude::Update, pressure_damage_system);
+
+        // First tick in vacuum: the alert fires immediately (event buffers
+        // only retain two frames, so read before running further ticks).
+        app.update();
+        let texts = chronicle_texts(&app);
+        let alerts: Vec<_> = texts.iter().filter(|t| t.contains("suffocating")).collect();
+        assert_eq!(alerts.len(), 1, "one alert per excursion, got {texts:?}");
+        assert!(alerts[0].contains("Ada"), "alert names the pop: {alerts:?}");
+        // Two more ticks in vacuum: no re-alert, damage every tick.
+        app.update();
+        app.update();
+        assert!(
+            app.world().get::<SuffocationAlerted>(pop).is_some(),
+            "alert marker should persist for the whole excursion"
+        );
+        let health = app.world().get::<Health>(pop).unwrap();
+        assert_eq!(health.current, 97.0, "damage unchanged at 1 HP/tick");
+
+        // Back in air: marker clears (re-arm). Then a new excursion alerts again.
+        app.world_mut().resource_mut::<PressureGrid>().set(5, 5, 1.0);
+        app.update();
+        assert!(
+            app.world().get::<SuffocationAlerted>(pop).is_none(),
+            "alert marker should clear once the pop breathes again"
+        );
+        app.world_mut().resource_mut::<PressureGrid>().set(5, 5, 0.0);
+        app.update();
+        let texts = chronicle_texts(&app);
+        // A fresh event cursor reads the whole retained buffer, so counts
+        // are cumulative: first excursion + second excursion = 2.
+        let alerts = texts.iter().filter(|t| t.contains("suffocating")).count();
+        assert_eq!(alerts, 2, "second excursion should alert again");
+    }
+
+    #[test]
+    fn test_colony_atmosphere_snapshot_counts_vacuum_and_unpowered() {
+        let mut app = suffocation_app();
+        app.init_resource::<ColonyAtmosphere>();
+        spawn_named_pop(&mut app, 5, 5); // vacuum tile
+        let safe = spawn_named_pop(&mut app, 6, 6);
+        app.world_mut().resource_mut::<PressureGrid>().set(6, 6, 1.0);
+        let _ = safe;
+        app.world_mut().spawn((
+            Building {
+                building_type: BuildingType::LifeSupport,
+            },
+            GridPosition { x: 1, y: 1 },
+            crate::layer1::energy::PowerConsumer {
+                demand: 10.0,
+                active: false,
+            },
+        ));
+        app.add_systems(bevy::prelude::Update, update_colony_atmosphere_system);
+        app.update();
+        let snapshot = *app.world().resource::<ColonyAtmosphere>();
+        assert_eq!(snapshot.pops_in_vacuum, 1);
+        assert_eq!(snapshot.min_pop_pressure, 0.0);
+        assert_eq!(snapshot.life_support_total, 1);
+        assert_eq!(snapshot.unpowered_life_support, 1);
+        assert!(snapshot.life_support_unpowered());
+    }
+
+    #[test]
+    fn test_lifesupport_power_warning_fires_once_and_rearms() {
+        use crate::layer1::chronicle::AddChronicleEvent;
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+        app.add_event::<AddChronicleEvent>();
+        app.insert_resource(crate::shared::time::SimulationTime::default());
+        let ls = app
+            .world_mut()
+            .spawn((
+                Building {
+                    building_type: BuildingType::LifeSupport,
+                },
+                GridPosition { x: 5, y: 5 },
+                crate::layer1::energy::PowerConsumer {
+                    demand: 10.0,
+                    active: false,
+                },
+            ))
+            .id();
+        app.add_systems(bevy::prelude::Update, lifesupport_power_warning_system);
+        let set_tick = |app: &mut bevy::prelude::App, tick: u64| {
+            app.world_mut()
+                .resource_mut::<crate::shared::time::SimulationTime>()
+                .tick = tick;
+        };
+        // Brownout-length flickers must NOT warn: the delay is what keeps
+        // the chronicle honest on undersized grids.
+        app.update();
+        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS - 1);
+        app.update();
+        let texts = chronicle_texts(&app);
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("no power")).count(),
+            0,
+            "no warning before the sustained-loss delay, got {texts:?}"
+        );
+        // Sustained loss: fires exactly once.
+        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS);
+        app.update();
+        app.update();
+        let texts = chronicle_texts(&app);
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("no power")).count(),
+            1,
+            "unpowered warning should fire once after the delay, got {texts:?}"
+        );
+        // Repower (re-arms), then a new sustained loss refires.
+        app.world_mut()
+            .get_mut::<crate::layer1::energy::PowerConsumer>(ls)
+            .unwrap()
+            .active = true;
+        app.update();
+        app.world_mut()
+            .get_mut::<crate::layer1::energy::PowerConsumer>(ls)
+            .unwrap()
+            .active = false;
+        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS + 10);
+        app.update();
+        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS * 2 + 10);
+        app.update();
+        let texts = chronicle_texts(&app);
+        // Cumulative count (fresh cursor reads the retained buffer).
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("no power")).count(),
+            2,
+            "warning should refire after a repower/re-loss cycle"
+        );
+    }
+
+    #[test]
+    fn test_shelter_order_targets_nearest_pressurized_tile() {
+        let mut app = suffocation_app();
+        app.init_resource::<ShelterOrder>();
+        app.world_mut().resource_mut::<ShelterOrder>().active = true;
+        // One safe tile at (8, 5); the pop stands in vacuum at (5, 5).
+        app.world_mut().resource_mut::<PressureGrid>().set(8, 5, 1.0);
+        let pop = spawn_named_pop(&mut app, 5, 5);
+        app.add_systems(bevy::prelude::Update, shelter_order_system);
+        app.update();
+        let target = app
+            .world()
+            .get::<crate::layer1::execution::components::MovementTarget>(pop)
+            .expect("shelter order should give the pop a movement target");
+        assert_eq!(target.target_position, GridPosition { x: 8, y: 5 });
+        assert_eq!(target.target_entity, pop, "shelter targets are self-targeted");
+
+        // Inactive order: no target issued.
+        let mut app2 = suffocation_app();
+        app2.init_resource::<ShelterOrder>();
+        app2.world_mut().resource_mut::<PressureGrid>().set(8, 5, 1.0);
+        let pop2 = spawn_named_pop(&mut app2, 5, 5);
+        app2.add_systems(bevy::prelude::Update, shelter_order_system);
+        app2.update();
+        assert!(
+            app2.world()
+                .get::<crate::layer1::execution::components::MovementTarget>(pop2)
+                .is_none(),
+            "no shelter target while the order is lifted"
+        );
+    }
+
+    #[test]
+    fn test_nearest_pressurized_tile_prefers_closest() {
+        let mut grid = PressureGrid::new(20, 20);
+        grid.set(12, 10, 1.0);
+        grid.set(10, 14, 1.0);
+        let found = nearest_pressurized_tile(&grid, GridPosition { x: 10, y: 10 });
+        assert_eq!(found, Some(GridPosition { x: 12, y: 10 }));
+        // Already safe: returns own tile.
+        let found = nearest_pressurized_tile(&grid, GridPosition { x: 12, y: 10 });
+        assert_eq!(found, Some(GridPosition { x: 12, y: 10 }));
+        // No safe tile anywhere: None.
+        let empty = PressureGrid::new(5, 5);
+        assert_eq!(
+            nearest_pressurized_tile(&empty, GridPosition { x: 2, y: 2 }),
+            None
+        );
     }
 }
