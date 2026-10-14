@@ -503,6 +503,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "return_stock" => handle_return_stock_command(world, &parts),
         "map" | "m" => handle_map_command(world, &parts),
         "tick" | "t" => handle_tick_command(world, &parts),
+        "probe" => handle_probe_command(world, &parts),
         "build" | "b" => handle_build_command(world, &parts),
         "destroy" => handle_designate_command(world, &parts, DesignationType::Destroy),
         "mine" => handle_designate_command(world, &parts, DesignationType::Mine),
@@ -9164,4 +9165,198 @@ mod reproduction_tests {
         assert!(ScanRadius::new(101).is_err());
         assert!(ScanRadius::new(i32::MAX).is_err());
     }
+}
+
+
+// ===================== FORENSICS PROBE (diagnostic) =====================
+// `probe <ticks> [interval]`: run ticks one at a time, stream every new
+// chronicle event with its tick, and emit a CSV state row every `interval`
+// ticks. Exists to replay colony deaths (e.g. atmospheric breach) as
+// timelines instead of guessing from end-state.
+fn handle_probe_command(world: &mut World, parts: &[&str]) {
+    let n: u64 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(600);
+    let interval: u64 = parts
+        .get(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10)
+        .max(1);
+    let mut seen_events = world.resource::<Chronicle>().events.len();
+    let mut expo_last: std::collections::HashMap<Entity, u64> = Default::default();
+    println!("PROBE_BEGIN n={n} interval={interval}");
+    println!("CSV,tick,pops,min_pop_p,mean_pop_p,ls_n,ls_hp,ls_on,min_wall_hp,lt30,fires,ruins,src_out,cons_on,cons_n,repair_actors,work_actors,food");
+    for _ in 0..n {
+        run_simulation_tick(world);
+        let tick = world.resource::<SimulationTime>().tick;
+        {
+            let chronicle = world.resource::<Chronicle>();
+            for ev in chronicle.events.iter().skip(seen_events) {
+                println!(
+                    "EVENT,at={tick},ev_tick={},{}",
+                    ev.tick,
+                    ev.text.replace(',', ";")
+                );
+            }
+            seen_events = chronicle.events.len();
+        }
+        // Exposure tracking: living pops standing in <0.2 pressure.
+        {
+            let pop_states: Vec<(Entity, i32, i32, f32)> = {
+                let mut q = world.query_filtered::<
+                    (
+                        Entity,
+                        &GridPosition,
+                        &scale::layer1::health::Health,
+                    ),
+                    (
+                        With<Pop>,
+                        Without<scale::layer1::social::ship_stowaway::Stowaway>,
+                    ),
+                >();
+                q.iter(world)
+                    .map(|(e, p, h)| (e, p.x, p.y, h.current))
+                    .collect()
+            };
+            if let Some(grid) = world.get_resource::<scale::layer1::pressure::PressureGrid>() {
+                for (e, x, y, hp) in &pop_states {
+                    let p = grid.get(*x, *y);
+                    if p < 0.2 && *hp > 0.0 {
+                        let entered = !expo_last.contains_key(e);
+                        let due = expo_last.get(e).is_some_and(|last| tick - *last >= 20);
+                        if entered || due {
+                            println!(
+                                "EXPO,at={tick},id={},hp={hp:.0},p={p:.2},x={x},y={y}",
+                                e.index()
+                            );
+                            expo_last.insert(*e, tick);
+                        }
+                    } else {
+                        expo_last.remove(e);
+                    }
+                }
+            }
+        }
+        let pops = probe_count_pops(world);
+        if tick % interval == 0 || pops == 0 {
+            probe_print_row(world, tick, pops);
+        }
+        if pops == 0 {
+            println!("PROBE_WIPE,tick={tick}");
+            break;
+        }
+    }
+    println!("PROBE_END");
+}
+
+fn probe_count_pops(world: &mut World) -> usize {
+    let mut q = world.query_filtered::<
+        &GridPosition,
+        (
+            With<Pop>,
+            Without<scale::layer1::social::ship_stowaway::Stowaway>,
+        ),
+    >();
+    q.iter(world).count()
+}
+
+fn probe_print_row(world: &mut World, tick: u64, pops: usize) {
+    let pop_tiles: Vec<(i32, i32)> = {
+        let mut q = world.query_filtered::<
+            &GridPosition,
+            (
+                With<Pop>,
+                Without<scale::layer1::social::ship_stowaway::Stowaway>,
+            ),
+        >();
+        q.iter(world).map(|p| (p.x, p.y)).collect()
+    };
+    let (mut min_p, mut sum_p) = (f32::MAX, 0.0f32);
+    if let Some(grid) = world.get_resource::<scale::layer1::pressure::PressureGrid>() {
+        for (x, y) in &pop_tiles {
+            let p = grid.get(*x, *y);
+            min_p = min_p.min(p);
+            sum_p += p;
+        }
+    }
+    let mean_p = if pop_tiles.is_empty() {
+        -1.0
+    } else {
+        sum_p / pop_tiles.len() as f32
+    };
+    if min_p == f32::MAX {
+        min_p = -1.0;
+    }
+    let (mut ls_n, mut ls_hp, mut ls_on) = (0usize, f32::MAX, 0usize);
+    let (mut min_wall_hp, mut lt30) = (f32::MAX, 0usize);
+    {
+        let mut q = world.query::<(
+            &Building,
+            &scale::layer1::structure::Structure,
+            Option<&scale::layer1::energy::PowerConsumer>,
+        )>();
+        for (b, s, pc) in q.iter(world) {
+            if s.max_hp > 0.0 && s.current_hp / s.max_hp < 0.3 {
+                lt30 += 1;
+            }
+            match b.building_type {
+                BuildingType::LifeSupport => {
+                    ls_n += 1;
+                    ls_hp = ls_hp.min(s.current_hp);
+                    if pc.is_none_or(|p| p.active) {
+                        ls_on += 1;
+                    }
+                }
+                BuildingType::Wall => {
+                    min_wall_hp = min_wall_hp.min(s.current_hp);
+                }
+                _ => {}
+            }
+        }
+    }
+    if ls_hp == f32::MAX {
+        ls_hp = -1.0;
+    }
+    if min_wall_hp == f32::MAX {
+        min_wall_hp = -1.0;
+    }
+    let fires = {
+        let mut q = world.query::<&scale::layer1::fire::Fire>();
+        q.iter(world).count()
+    };
+    let ruins = {
+        let mut q = world.query::<&scale::layer1::ruins::Ruin>();
+        q.iter(world).count()
+    };
+    let (mut src_out, mut cons_on, mut cons_n) = (0.0f32, 0usize, 0usize);
+    {
+        let mut q = world.query::<&scale::layer1::energy::PowerSource>();
+        for s in q.iter(world) {
+            if s.active {
+                src_out += s.output;
+            }
+        }
+    }
+    {
+        let mut q = world.query::<&scale::layer1::energy::PowerConsumer>();
+        for c in q.iter(world) {
+            cons_n += 1;
+            if c.active {
+                cons_on += 1;
+            }
+        }
+    }
+    let (mut repair_actors, mut work_actors) = (0usize, 0usize);
+    {
+        let mut q = world.query::<&scale::layer1::utility_types::PopAction>();
+        for a in q.iter(world) {
+            match a.current {
+                scale::layer1::utility_types::ActionType::Repair => repair_actors += 1,
+                scale::layer1::utility_types::ActionType::Work => work_actors += 1,
+                _ => {}
+            }
+        }
+    }
+    let food = world.resource::<ColonyResources>().food;
+    println!(
+        "CSV,{tick},{pops},{min_p:.3},{mean_p:.3},{ls_n},{ls_hp:.1},{ls_on},{min_wall_hp:.1},{lt30},{fires},{ruins},{src_out:.1},{cons_on},{cons_n},{repair_actors},{work_actors},{food:.1}"
+    );
 }
