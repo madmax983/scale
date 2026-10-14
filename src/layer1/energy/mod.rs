@@ -135,12 +135,13 @@ fn bfs_grid(
     visited: &mut HashSet<(i32, i32)>,
     grid_entities: &mut Vec<Entity>,
     queue: &mut VecDeque<(i32, i32)>,
-) -> (f32, f32) {
+) -> (f32, f32, f32) {
     if visited.insert(start_pos) {
         queue.push_back(start_pos);
     }
 
     let mut total_production = 0.0;
+    let mut total_nameplate_production = 0.0;
     let mut total_demand = 0.0;
 
     while let Some(pos) = queue.pop_front() {
@@ -158,6 +159,7 @@ fn bfs_grid(
                         .get::<crate::layer1::prototyping::Prototype>(entity)
                         .map_or(1.0, |p| p.efficiency_modifier);
                     total_production += source.output * efficiency;
+                    total_nameplate_production += source.output;
                 }
             }
             if let Some(consumer) = world.get::<PowerConsumer>(entity) {
@@ -179,7 +181,7 @@ fn bfs_grid(
             }
         }
     }
-    (total_production, total_demand)
+    (total_production, total_nameplate_production, total_demand)
 }
 
 /// Calculates total production and demand for the grid connected to `start_entity`.
@@ -193,7 +195,7 @@ pub fn calculate_grid_stats(world: &mut World, start_entity: Entity) -> (f32, f3
     let mut visited = HashSet::new();
     let mut grid_entities = Vec::new();
     let mut queue = VecDeque::new();
-    let (prod, demand) = bfs_grid(
+    let (prod, _nameplate, demand) = bfs_grid(
         start_pos,
         &grid_map,
         world,
@@ -257,7 +259,7 @@ pub fn power_grid_system(world: &mut World) {
         buffer.kinetic_batteries.clear();
 
         // BFS for this grid
-        let (total_production, base_demand) = bfs_grid(
+        let (total_production, total_nameplate_production, base_demand) = bfs_grid(
             start_pos,
             &grid_map,
             world,
@@ -309,7 +311,12 @@ pub fn power_grid_system(world: &mut World) {
             1.0
         };
 
-        handle_overload(world, &buffer.grid_entities, total_production, total_demand);
+        handle_overload(
+            world,
+            &buffer.grid_entities,
+            total_nameplate_production,
+            total_demand,
+        );
 
         activate_consumers(world, &buffer.grid_entities, net, supply_ratio);
     }
@@ -421,11 +428,22 @@ fn handle_batteries(
 fn handle_overload(
     world: &mut World,
     grid_entities: &[Entity],
-    total_production: f32,
+    total_nameplate_production: f32,
     total_demand: f32,
 ) {
-    let overload_ratio = if total_production > 0.0 {
-        total_demand / total_production
+    // Overload is a wiring-capacity phenomenon: demand measured against the
+    // grid's installed (nameplate) production, NOT prototype-discounted
+    // output. Prototype inefficiency already manifests as brownout —
+    // probabilistic consumer activation via the supply ratio in
+    // `activate_consumers`. Measuring overload against discounted output
+    // made every unmastered generator a fire hazard at nameplate-balanced
+    // load: the starter grid (Lander 10 nameplate at 0.5 prototype
+    // efficiency = 5 effective, LifeSupport demand 10) sat at ratio 2.0
+    // from tick 0, so `GridOverloadEvent` -> `grid_overload_fire_bridge`
+    // ignited the starter hull in nearly every run and fire destroyed the
+    // interior buildings (LifeSupport included) within ~100 ticks.
+    let overload_ratio = if total_nameplate_production > 0.0 {
+        total_demand / total_nameplate_production
     } else {
         1.0
     };
@@ -671,6 +689,77 @@ mod tests {
 
         let (production, _) = calculate_grid_stats(&mut world, generator);
         assert_eq!(production, 0.0, "Glitchy generator should produce 0 power");
+    }
+
+    fn overload_event_count(world: &World) -> usize {
+        let events = world.resource::<bevy_ecs::event::Events<super::GridOverloadEvent>>();
+        let mut cursor = events.get_cursor();
+        cursor.read(events).count()
+    }
+
+    #[test]
+    fn test_prototype_grid_at_nameplate_balance_never_overloads() {
+        // Regression (vanishing starter buildings): the starter grid pairs a
+        // Lander (10 nameplate, 0.5 prototype efficiency = 5 effective) with
+        // a LifeSupport (demand 10). Measuring overload against the
+        // prototype-discounted output read ratio 2.0 from tick 0, so the
+        // overload -> fire bridge ignited the starter hull in nearly every
+        // run and fire destroyed the interior buildings. Overload is now
+        // measured against nameplate production: this grid is balanced
+        // (10 vs 10) and must never emit an overload event, while the
+        // effective production stays discounted (brownout is preserved).
+        let mut world = World::new();
+        world.init_resource::<bevy_ecs::event::Events<super::GridOverloadEvent>>();
+
+        let generator = world
+            .spawn((
+                PowerSource {
+                    output: 10.0,
+                    active: true,
+                },
+                GridPosition { x: 0, y: 0 },
+                crate::layer1::prototyping::Prototype::default(),
+            ))
+            .id();
+        world.spawn((
+            PowerConsumer {
+                demand: 10.0,
+                active: true,
+            },
+            GridPosition { x: 1, y: 0 },
+        ));
+
+        let (production, demand) = calculate_grid_stats(&mut world, generator);
+        assert_eq!(production, 5.0, "prototype discount still applies to output");
+        assert_eq!(demand, 10.0);
+
+        for _ in 0..300 {
+            super::power_grid_system(&mut world);
+        }
+        assert_eq!(
+            overload_event_count(&world),
+            0,
+            "nameplate-balanced prototype grid must never overload"
+        );
+    }
+
+    #[test]
+    fn test_overload_still_fires_when_demand_exceeds_nameplate() {
+        // The overload mechanic itself is unchanged for genuinely
+        // over-subscribed grids: demand 40 against 10 nameplate is ratio
+        // 4.0, a 12.5% fire chance per call — 300 calls make a miss
+        // effectively impossible (~0.875^300).
+        let mut world = World::new();
+        world.init_resource::<bevy_ecs::event::Events<super::GridOverloadEvent>>();
+        let victim = world.spawn(GridPosition { x: 0, y: 0 }).id();
+
+        for _ in 0..300 {
+            super::handle_overload(&mut world, &[victim], 10.0, 40.0);
+        }
+        assert!(
+            overload_event_count(&world) >= 1,
+            "demand far beyond nameplate capacity must still overload"
+        );
     }
 }
 
