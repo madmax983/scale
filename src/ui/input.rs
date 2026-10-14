@@ -332,6 +332,14 @@ fn handle_normal_mode_quit_or_speed(world: &mut World, key: GameKeyEvent) -> boo
             world.resource_mut::<SimulationTime>().speed = SimSpeed::Faster;
             true
         }
+        GameKeyCode::Char('.') => {
+            // Speed-cycle key: Normal -> Fast -> Faster -> Normal.
+            // '.' is bound nowhere else in any context (verified
+            // against input, shell, and palette handling).
+            let mut time = world.resource_mut::<SimulationTime>();
+            time.speed = time.speed.cycle();
+            true
+        }
         _ => false,
     }
 }
@@ -1083,6 +1091,40 @@ mod tests {
 
         route_input(&mut world, key_event(GameKeyCode::Char('w')));
         assert!((world.resource::<CameraTarget>().y - -1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_period_cycles_sim_speed() {
+        let mut world = World::new();
+        world.insert_resource(GameState::Running);
+        world.insert_resource(SimulationTime::default());
+        world.insert_resource(Viewport::default());
+        world.insert_resource(CameraTarget::default());
+        let mut stack = InputContextStack::default();
+        stack.push(InputContext::Normal);
+        world.insert_resource(stack);
+        world.insert_resource(BuildMode::default());
+        world.insert_resource(DesignationMode::default());
+        world.insert_resource(MenuState::default());
+
+        // '.' cycles Normal -> Fast -> Faster -> Normal.
+        route_input(&mut world, key_event(GameKeyCode::Char('.')));
+        assert_eq!(world.resource::<SimulationTime>().speed, SimSpeed::Fast);
+        route_input(&mut world, key_event(GameKeyCode::Char('.')));
+        assert_eq!(world.resource::<SimulationTime>().speed, SimSpeed::Faster);
+        route_input(&mut world, key_event(GameKeyCode::Char('.')));
+        assert_eq!(world.resource::<SimulationTime>().speed, SimSpeed::Normal);
+
+        // The direct keys still land on their own rungs, and cycling
+        // continues from wherever they left the ladder.
+        route_input(&mut world, key_event(GameKeyCode::Char('3')));
+        assert_eq!(world.resource::<SimulationTime>().speed, SimSpeed::Faster);
+        route_input(&mut world, key_event(GameKeyCode::Char('.')));
+        assert_eq!(world.resource::<SimulationTime>().speed, SimSpeed::Normal);
+        route_input(&mut world, key_event(GameKeyCode::Char('2')));
+        assert_eq!(world.resource::<SimulationTime>().speed, SimSpeed::Fast);
+        route_input(&mut world, key_event(GameKeyCode::Char('1')));
+        assert_eq!(world.resource::<SimulationTime>().speed, SimSpeed::Normal);
     }
 
     #[test]

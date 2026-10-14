@@ -13,7 +13,7 @@ use scale::layer1::GlobalHitStop;
 use scale::setup::setup_world;
 use scale::shared::keyboard::{GameKeyEvent, GameMouseEvent};
 use scale::shared::state::GameState;
-use scale::shared::time::{SimSpeed, SimulationTime, WallTime};
+use scale::shared::time::{SimSpeed, SimulationTime, TickAccumulator, WallTime};
 use scale::simulation::run_simulation_tick;
 use scale::ui::input::{route_root_input, route_root_mouse_input};
 use scale::ui::map::update_render_cache;
@@ -56,8 +56,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyhow::Res
     let mut shell = build_default_shell(Rc::clone(&world), config);
 
     // Main loop
-    let tick_rate = Duration::from_millis(100); // 10 FPS base
-    let mut last_tick = Instant::now();
+    let mut tick_acc = TickAccumulator::new();
     let mut last_frame = Instant::now();
 
     loop {
@@ -92,39 +91,46 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyhow::Res
             break;
         }
 
-        // Simulation tick
-        if last_tick.elapsed() >= tick_rate {
-            // Check Global Hit Stop (Juice Freeze)
-            let mut hit_stop_active = false;
-            if let Some(mut hs) = world.borrow_mut().get_resource_mut::<GlobalHitStop>() {
-                if hs.ticks > 0 {
-                    hs.ticks -= 1;
-                    hit_stop_active = true;
+        // Simulation ticks. The accumulator turns the measured frame
+        // delta into whole ticks at the current SimSpeed's rate
+        // (10/30/50 ticks per second), exact over time; Space
+        // (GameState::Paused) and a 0x SimSpeed both stop the ticks.
+        {
+            let running = *world.borrow().resource::<GameState>() == GameState::Running;
+            let speed = world.borrow().resource::<SimulationTime>().speed;
+            let mut due = if running && speed != SimSpeed::Paused {
+                tick_acc.advance(speed, delta.as_secs_f64())
+            } else {
+                0
+            };
+
+            // Global Hit Stop (Juice Freeze): due ticks first burn
+            // down the freeze, one hit-stop tick per simulation tick.
+            if due > 0 {
+                if let Some(mut hs) = world.borrow_mut().get_resource_mut::<GlobalHitStop>() {
+                    let burn = due.min(hs.ticks);
+                    hs.ticks -= burn;
+                    due -= burn;
                 }
             }
 
-            if !hit_stop_active && *world.borrow().resource::<GameState>() == GameState::Running {
-                let speed = world.borrow().resource::<SimulationTime>().speed;
-                if speed != SimSpeed::Paused {
-                    run_simulation_tick(&mut world.borrow_mut());
-                    // Spec 1382: autosave every 1000 ticks (reserved slot).
-                    {
-                        let mut store = scale::persistence::FileSaveStore::default_dir();
-                        let now_unix = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map_or(0, |d| d.as_secs());
-                        if let Err(e) = scale::persistence::maybe_autosave(
-                            &mut world.borrow_mut(),
-                            &mut store,
-                            now_unix,
-                        ) {
-                            log::error!("Autosave failed: {e}");
-                        }
+            for _ in 0..due {
+                run_simulation_tick(&mut world.borrow_mut());
+                // Spec 1382: autosave every 1000 ticks (reserved slot).
+                {
+                    let mut store = scale::persistence::FileSaveStore::default_dir();
+                    let now_unix = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_secs());
+                    if let Err(e) = scale::persistence::maybe_autosave(
+                        &mut world.borrow_mut(),
+                        &mut store,
+                        now_unix,
+                    ) {
+                        log::error!("Autosave failed: {e}");
                     }
                 }
             }
-
-            last_tick = Instant::now();
         }
 
         // Prepare render data

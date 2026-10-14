@@ -377,7 +377,7 @@ fn controls_section(lines: &mut Vec<Line<'static>>) {
     ));
     lines.push(control(
         "Space",
-        "pause / resume.  1 · 2 · 3 — simulation speed.",
+        "pause / resume.  1 · 2 · 3 — simulation speed (1x · 3x · 5x); . cycles speed.",
     ));
     lines.push(control(
         "Ctrl+K",

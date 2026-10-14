@@ -24,7 +24,7 @@ use scale::shared::keyboard::{GameKeyEvent, GameMouseEvent};
 #[cfg(target_arch = "wasm32")]
 use scale::shared::state::GameState;
 #[cfg(target_arch = "wasm32")]
-use scale::shared::time::{SimSpeed, SimulationTime, WallTime};
+use scale::shared::time::{SimSpeed, SimulationTime, TickAccumulator, WallTime};
 #[cfg(target_arch = "wasm32")]
 use scale::simulation::run_simulation_tick;
 #[cfg(target_arch = "wasm32")]
@@ -354,11 +354,13 @@ fn main() -> std::io::Result<()> {
     });
 
     let frame_count = Rc::new(RefCell::new(0u32));
+    let tick_acc = Rc::new(RefCell::new(TickAccumulator::new()));
 
     terminal.draw_web({
         let world = world;
         let shell = shell;
         let save_bridge = save_bridge;
+        let tick_acc = tick_acc;
         let grid_size = grid_size;
         move |frame| {
             {
@@ -369,14 +371,25 @@ fn main() -> std::io::Result<()> {
                 let mut count = frame_count.borrow_mut();
                 *count += 1;
 
-                if *count >= 6 {
-                    *count = 0;
-                    if *world.resource::<GameState>() == GameState::Running {
-                        let speed = world.resource::<SimulationTime>().speed;
-                        if speed != SimSpeed::Paused {
+                // Speed ladder: the accumulator turns the 60 fps frame
+                // cadence into simulation ticks at the current
+                // SimSpeed's rate (10/30/50 ticks per second), exact
+                // over time. Space (GameState::Paused) and a 0x
+                // SimSpeed both stop the ticks.
+                {
+                    let speed = world.resource::<SimulationTime>().speed;
+                    if *world.resource::<GameState>() == GameState::Running
+                        && speed != SimSpeed::Paused
+                    {
+                        let due = tick_acc.borrow_mut().advance_frame(speed);
+                        for _ in 0..due {
                             run_simulation_tick(&mut world);
                         }
                     }
+                }
+
+                if *count >= 6 {
+                    *count = 0;
                     // Spec 1382: autosave to the reserved slot via the
                     // IndexedDB bridge, and drain bridge completions
                     // into the world's event stream.

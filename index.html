@@ -72,7 +72,9 @@
           tab:       ["Tab", "Tab", false],
           space:     [" ", "Space", false],
           backspace: ["Backspace", "Backspace", false],
-          palette:   ["k", "KeyK", true]
+          palette:   ["k", "KeyK", true],
+          pause:     [" ", "Space", false],
+          speed:     [".", "Period", false]
         };
         function dispatchKey(pair) {
           document.dispatchEvent(new KeyboardEvent("keydown", {
@@ -133,7 +135,8 @@
           actions.className = "actions";
           actions.append(btn("enter", "Enter", "⏎ Enter"), btn("esc", "Escape", "Esc"), btn("tab", "Tab", "Tab"),
                          btn("space", "Space", "Space"), btn("backspace", "Backspace", "⌫"),
-                         btn("palette", "Command palette", "Palette"));
+                         btn("palette", "Command palette", "Palette"),
+                         btn("pause", "Pause or resume", "Pause"), btn("speed", "Cycle simulation speed", "Speed"));
           var kb = document.createElement("button");
           kb.type = "button"; kb.textContent = "⌨ Text"; kb.setAttribute("aria-label", "Open keyboard");
           kb.addEventListener("pointerdown", function (ev) {

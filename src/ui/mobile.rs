@@ -83,7 +83,10 @@ pub const fn cell_to_mouse(cell: (u16, u16)) -> GameMouseEvent {
 /// (switch row/view/building), and Backspace (cancel designation / edit).
 /// The command palette (Ctrl+K) joined later at the user's request: on a
 /// phone there is no keyboard for the chord, and the palette is the
-/// shell's front door to every pane and command.
+/// shell's front door to every pane and command. Pause and Speed joined
+/// with the speed-ladder wiring: Pause re-dispatches Space — the game's
+/// pause toggle — under its own label so the affordance reads on a
+/// phone, and Speed dispatches the `.` speed-cycle key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TouchButton {
     /// Arrow up.
@@ -106,6 +109,10 @@ pub enum TouchButton {
     Backspace,
     /// Command palette (Ctrl+K).
     Palette,
+    /// Pause or resume (the Space press, labeled for its play role).
+    Pause,
+    /// Cycle simulation speed (the `.` press).
+    Speed,
 }
 
 /// The DOM `KeyboardEvent` values a cluster button dispatches in the
@@ -159,7 +166,7 @@ impl DomKeyEventSpec {
 
 impl TouchButton {
     /// Every cluster button, in on-screen layout order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Up,
         Self::Down,
         Self::Left,
@@ -170,6 +177,8 @@ impl TouchButton {
         Self::Space,
         Self::Backspace,
         Self::Palette,
+        Self::Pause,
+        Self::Speed,
     ];
 
     /// The game's own key event for this button — literally the value a
@@ -191,6 +200,12 @@ impl TouchButton {
             // a bare Char('k') is ordinary gameplay input, and bare
             // Char('p') would be adventurer possess, never the palette.
             Self::Palette => GameKeyEvent::new(GameKeyCode::Char('k')).with_ctrl(),
+            // Pause is Space: the same press the cluster's Space button
+            // (and a physical spacebar) produces — Space is the game's
+            // pause toggle in Normal context.
+            Self::Pause => GameKeyEvent::new(GameKeyCode::Char(' ')),
+            // Speed is '.': the speed-cycle key.
+            Self::Speed => GameKeyEvent::new(GameKeyCode::Char('.')),
         }
     }
 
@@ -214,6 +229,8 @@ impl TouchButton {
             Self::Space => DomKeyEventSpec::plain(" ", "Space"),
             Self::Backspace => DomKeyEventSpec::plain("Backspace", "Backspace"),
             Self::Palette => DomKeyEventSpec::with_ctrl("k", "KeyK"),
+            Self::Pause => DomKeyEventSpec::plain(" ", "Space"),
+            Self::Speed => DomKeyEventSpec::plain(".", "Period"),
         }
     }
 
@@ -239,6 +256,8 @@ impl TouchButton {
             Self::Space => "Space",
             Self::Backspace => "Backspace",
             Self::Palette => "Palette",
+            Self::Pause => "Pause",
+            Self::Speed => "Speed",
         }
     }
 }
@@ -582,6 +601,17 @@ mod tests {
                 TouchButton::Palette,
                 GameKeyEvent::new(GameKeyCode::Char('k')).with_ctrl(),
             ),
+            // Pause is the Space press, labeled for what Space does in
+            // play (toggle pause) so the affordance reads on a phone.
+            (
+                TouchButton::Pause,
+                GameKeyEvent::new(GameKeyCode::Char(' ')),
+            ),
+            // Speed is the '.' press — the speed-cycle key.
+            (
+                TouchButton::Speed,
+                GameKeyEvent::new(GameKeyCode::Char('.')),
+            ),
         ];
         for (button, event) in cases {
             assert_eq!(
@@ -601,6 +631,58 @@ mod tests {
         assert_eq!(TouchButton::Tab.dom_key(), ("Tab", "Tab"));
         assert_eq!(TouchButton::Space.dom_key(), (" ", "Space"));
         assert_eq!(TouchButton::Palette.dom_key(), ("k", "KeyK"));
+        assert_eq!(TouchButton::Pause.dom_key(), (" ", "Space"));
+        assert_eq!(TouchButton::Speed.dom_key(), (".", "Period"));
+    }
+
+    #[test]
+    fn test_pause_and_speed_dom_specs() {
+        // Pause dispatches the exact Space spec a physical keyboard
+        // reports — the same spec as the cluster's Space button, since
+        // Space is the game's pause toggle. The separate button exists
+        // so the pause affordance is labeled on touch devices.
+        assert_eq!(
+            TouchButton::Pause.dom_event_spec(),
+            TouchButton::Space.dom_event_spec()
+        );
+        let pause = TouchButton::Pause.dom_event_spec();
+        assert!(!pause.ctrl && !pause.alt && !pause.shift);
+        assert_eq!(TouchButton::Pause.label(), "Pause");
+
+        // Speed dispatches '.' — the speed-cycle key — with the
+        // key/code pair a real keyboard reports for that press, and
+        // no modifiers.
+        let speed = TouchButton::Speed.dom_event_spec();
+        assert_eq!(speed.key, ".");
+        assert_eq!(speed.code, "Period");
+        assert!(!speed.ctrl && !speed.alt && !speed.shift);
+        assert_eq!(TouchButton::Speed.label(), "Speed");
+    }
+
+    #[test]
+    fn test_speed_and_pause_buttons_drive_real_router() {
+        // The Speed button's key event, fed through the real input
+        // router in Normal context, cycles the simulation speed; the
+        // Pause button's event pauses — the touch mirrors of the
+        // physical '.' and Space keys.
+        use crate::shared::state::GameState;
+        use crate::shared::time::{SimSpeed, SimulationTime};
+        use crate::ui::input::{InputContext, InputContextStack};
+
+        let mut world = crate::setup::setup_world();
+        world.insert_resource(GameState::Running);
+        let mut stack = InputContextStack::default();
+        stack.push(InputContext::Normal);
+        world.insert_resource(stack);
+        world.insert_resource(SimulationTime::default());
+
+        crate::ui::input::route_input(&mut world, TouchButton::Speed.key_event());
+        assert_eq!(world.resource::<SimulationTime>().speed, SimSpeed::Fast);
+        crate::ui::input::route_input(&mut world, TouchButton::Speed.key_event());
+        assert_eq!(world.resource::<SimulationTime>().speed, SimSpeed::Faster);
+
+        crate::ui::input::route_input(&mut world, TouchButton::Pause.key_event());
+        assert_eq!(*world.resource::<GameState>(), GameState::Paused);
     }
 
     #[test]

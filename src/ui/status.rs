@@ -41,10 +41,12 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, world: &World) {
     let policies = world.get_resource::<ColonyPolicies>();
     let cycle = world.get_resource::<crate::layer1::day_night::DayNightCycle>();
 
-    // NOTE: Dual pause state check. GameState::Paused is controlled by spacebar,
-    // SimSpeed::Paused exists but is currently not used (no key binds to it).
-    // This allows for future distinction between "paused but still simulating at 0x"
-    // vs "completely frozen". Current behavior: only GameState::Paused matters (main.rs:86).
+    // NOTE: Dual pause state. GameState::Paused is the player's pause
+    // (Space toggles it) and is what stops the frame loops. The
+    // SimulationTime speed is the 1x/3x/5x ladder — 1/2/3 set it, '.'
+    // cycles it — and drives tick cadence in those loops;
+    // SimSpeed::Paused is a programmatic 0x the loops also honor.
+    // The bar renders PAUSED when either source is engaged.
     let paused = *game_state == GameState::Paused || sim_time.speed == SimSpeed::Paused;
 
     let screen_area = frame.area();
@@ -265,6 +267,31 @@ fn build_atmosphere_spans(world: &World) -> Vec<Span<'static>> {
     spans
 }
 
+/// The speed segment of the status bar: ` Speed: Fast ` while
+/// running, a red ` PAUSED ` banner while either pause source is
+/// engaged.
+///
+/// Placed up front with the time spans so that, on narrow terminals,
+/// truncation sheds later, lower-priority segments first and the
+/// speed a player just changed stays visible.
+fn build_speed_span(speed: SimSpeed, paused: bool) -> Span<'static> {
+    if paused {
+        return Span::styled(
+            " PAUSED ",
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        );
+    }
+    let name = match speed {
+        SimSpeed::Paused => "Paused",
+        SimSpeed::Normal => "Normal",
+        SimSpeed::Fast => "Fast",
+        SimSpeed::Faster => "Faster",
+    };
+    Span::styled(format!(" Speed: {name} "), Style::default().fg(Color::White))
+}
+
 fn build_time_spans(
     tick: u64,
     season: Option<Season>,
@@ -478,7 +505,7 @@ fn build_mode_spans(
 #[allow(clippy::too_many_arguments)]
 pub fn get_status_line<'a>(
     tick: u64,
-    _speed: SimSpeed,
+    speed: SimSpeed,
     paused: bool,
     build_mode: &BuildMode,
     designation_mode: &DesignationMode,
@@ -496,11 +523,12 @@ pub fn get_status_line<'a>(
     active_singularity_mass: Option<f32>,
 ) -> Line<'a> {
     // ⚡ Bolt Optimization: Pre-allocate capacity to avoid intermediate allocations in hot UI loop
-    // Total possible spans: 1 (play) + 3 (time) + 1 (separator) + 6 (colony) + 1 (separator) + 6 (resources) + 2 (mode) + 1 (separator) + 1 (location) + 2 (singularity) = 24
-    let mut spans = Vec::with_capacity(24);
+    // Total possible spans: 1 (play) + 1 (speed) + 3 (time) + 1 (separator) + 6 (colony) + 1 (separator) + 6 (resources) + 2 (mode) + 1 (separator) + 1 (location) + 2 (singularity) = 25
+    let mut spans = Vec::with_capacity(25);
 
     spans.push(build_play_pause_span(paused));
     spans.extend(build_time_spans(tick, season, solar_cycle, weather));
+    spans.push(build_speed_span(speed, paused));
     spans.push(Span::styled("  ║  ", Style::default().fg(Color::DarkGray)));
     spans.extend(build_colony_stats_spans(pop_count, morale, efficiency));
     spans.push(Span::styled("  ║  ", Style::default().fg(Color::DarkGray)));
@@ -710,6 +738,85 @@ mod tests {
 
         assert!(status_none.contains("Day 100"));
         assert!(!status_none.contains("📍"));
+    }
+
+    /// Status string for one speed/pause state, with every other
+    /// segment held at a plain colony baseline.
+    fn status_with(speed: SimSpeed, paused: bool) -> String {
+        get_status_string(
+            10,
+            speed,
+            paused,
+            &BuildMode::default(),
+            &DesignationMode::default(),
+            None,
+            5,
+            100.0,
+            0.0,
+            10.0,
+            0.8,
+            1.0,
+            None,
+            None,
+            None,
+            0.0,
+            None,
+        )
+    }
+
+    #[test]
+    fn test_status_bar_shows_current_speed() {
+        assert!(status_with(SimSpeed::Normal, false).contains("Speed: Normal"));
+        assert!(status_with(SimSpeed::Fast, false).contains("Speed: Fast"));
+        assert!(status_with(SimSpeed::Faster, false).contains("Speed: Faster"));
+    }
+
+    #[test]
+    fn test_status_bar_shows_paused_indicator() {
+        // Paused swaps the speed readout for the PAUSED banner,
+        // whichever pause source engaged it (Space / GameState, or a
+        // 0x SimSpeed).
+        assert!(status_with(SimSpeed::Normal, true).contains("PAUSED"));
+        assert!(status_with(SimSpeed::Fast, true).contains("PAUSED"));
+        assert!(status_with(SimSpeed::Paused, true).contains("PAUSED"));
+        // And an unpaused bar never claims to be paused.
+        assert!(!status_with(SimSpeed::Fast, false).contains("PAUSED"));
+    }
+
+    #[test]
+    fn test_status_speed_readout_widths() {
+        let spans_text = |line: &Line<'_>| -> String {
+            line.spans.iter().map(|s| s.content.as_ref()).collect()
+        };
+        let line = || {
+            get_status_line(
+                10,
+                SimSpeed::Fast,
+                false,
+                &BuildMode::default(),
+                &DesignationMode::default(),
+                None,
+                5,
+                100.0,
+                0.0,
+                10.0,
+                0.8,
+                1.0,
+                None,
+                None,
+                None,
+                0.0,
+                None,
+            )
+        };
+        // Wide bar: the speed readout sits up front with the time and
+        // survives whole.
+        let wide = truncate_line(line(), 200);
+        assert!(spans_text(&wide).contains("Speed: Fast"));
+        // Narrow bar: truncation keeps the line within the width and
+        // never panics on the speed spans.
+        let narrow = truncate_line(line(), 24);
+        assert!(narrow.width() <= 24);
     }
 
     #[test]
