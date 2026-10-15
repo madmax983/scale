@@ -330,6 +330,9 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::drone::process_feral_drones
                 .after(crate::layer1::drone::check_drone_connection),
             crate::layer1::drone::process_charge_system.after(arrival_handler_system),
+            // Spec 1385: drone repair execution rides the pop repair
+            // pipeline; it must run after work execution settles.
+            crate::layer1::drone::drone_repair_system.after(work_execution_system),
             update_social_class_system.after(arrival_handler_system),
             class_friction_system.after(update_social_class_system),
             haul_system.after(arrival_handler_system),

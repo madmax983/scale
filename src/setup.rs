@@ -1109,6 +1109,84 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
             .insert((generator_pos.x, generator_pos.y));
     }
 
+    // Spec 1385 (Layer 2 Ready maintenance lane ONLY): a DroneHub and
+    // its starting fleet. The hub takes the starter layout's one free
+    // interior tile, (+1, -1) — every other interior tile already
+    // carries a starter or L2R grant building. It is cardinal-adjacent
+    // to the Lander (+1, 0), a power source, and to the Generator
+    // (0, -1), so it joins the grid through the same center cross as
+    // the LifeSupport. The fleet is 3 drones: exactly one hub's full
+    // complement under the spawner's 3-per-hub cap, so the grant fills
+    // the fleet at tick 0 and the spawner only ever replaces losses.
+    // Drones are the lane's second vacuum counterplay (machines don't
+    // breathe): they repair damaged exterior buildings — LifeSupport
+    // above all — without spending pop HP in vacuum.
+    let drone_hub_pos = crate::layer1::GridPosition {
+        x: layout.center.x + 1,
+        y: layout.center.y - 1,
+    };
+    let drone_hub_entity = if building_at(
+        world,
+        drone_hub_pos,
+        crate::layer1::building::BuildingType::DroneHub,
+    ) {
+        world
+            .query::<(
+                Entity,
+                &crate::layer1::building::Building,
+                &crate::layer1::map::GridPosition,
+            )>()
+            .iter(world)
+            .find(|(_, building, pos)| {
+                building.building_type == crate::layer1::building::BuildingType::DroneHub
+                    && **pos == drone_hub_pos
+            })
+            .map(|(entity, _, _)| entity)
+    } else {
+        let entity = crate::layer1::building::spawn_building(
+            world,
+            drone_hub_pos.x,
+            drone_hub_pos.y,
+            crate::layer1::building::BuildingType::DroneHub,
+            crate::layer1::building::MaterialType::default(),
+        );
+        world
+            .resource_mut::<OccupiedTiles>()
+            .0
+            .insert((drone_hub_pos.x, drone_hub_pos.y));
+        Some(entity)
+    };
+    if let Some(hub_entity) = drone_hub_entity {
+        // Spawn the fleet with the drone_spawner_bridge_system bundle,
+        // except GridConnection starts connected: the hub is powered
+        // below in this same function, and a fleet that reads
+        // disconnected at tick 0 would sit out its first day.
+        for _ in 0..3 {
+            world.spawn((
+                crate::layer1::drone::Drone {
+                    state: crate::layer1::drone::DroneState::Idle,
+                },
+                crate::layer1::drone::ConnectedTo(hub_entity),
+                crate::layer1::drone::GridConnection {
+                    is_connected: true,
+                    time_disconnected: 0,
+                },
+                drone_hub_pos,
+                crate::layer1::utility_ai::PopAction::default(),
+                crate::layer1::drone::DroneBattery {
+                    current: 100.0,
+                    max: 100.0,
+                },
+                crate::layer1::pop::Speed {
+                    base: 1.0,
+                    current: 1.0,
+                    accumulator: 0.0,
+                },
+                crate::layer1::utility_ai::UtilityWeights::default(),
+            ));
+        }
+    }
+
     let lander_pos = crate::layer1::GridPosition {
         x: layout.center.x + STARTER_LANDER_OFFSET.0,
         y: layout.center.y + STARTER_LANDER_OFFSET.1,
@@ -1140,6 +1218,13 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
     {
         if building.building_type == crate::layer1::building::BuildingType::CommandCenter
             && *pos == command_center_pos
+        {
+            consumer.active = true;
+        }
+        // Spec 1385: the DroneHub gets the same belt-and-braces as the
+        // CommandCenter — the fleet's charge point is live at tick 0.
+        if building.building_type == crate::layer1::building::BuildingType::DroneHub
+            && *pos == drone_hub_pos
         {
             consumer.active = true;
         }
@@ -1684,6 +1769,159 @@ mod tests {
             let definition = start_scenario_definition(id);
             assert_eq!(definition.id, id);
         }
+    }
+
+    // Spec 1385: Layer 2 Ready starts with a DroneHub and a fleet of 3.
+    #[test]
+    fn test_layer2_ready_starts_with_drone_hub_and_fleet() {
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Layer2Ready,
+        });
+
+        let hub = world
+            .query::<(Entity, &Building, &crate::layer1::map::GridPosition)>()
+            .iter(&world)
+            .find(|(_, building, _)| building.building_type == BuildingType::DroneHub)
+            .map(|(entity, _, pos)| (entity, *pos));
+        let (hub_entity, hub_pos) = hub.expect("Layer 2 Ready should grant a DroneHub");
+
+        // The fleet count is measured through the Drone query as well,
+        // so a drone missing its link/battery cannot hide.
+        let drone_count = world
+            .query::<&crate::layer1::drone::Drone>()
+            .iter(&world)
+            .count();
+        assert_eq!(drone_count, 3, "Layer 2 Ready fleet should be 3 drones");
+        let drones: Vec<(
+            Entity,
+            crate::layer1::drone::DroneBattery,
+            crate::layer1::map::GridPosition,
+        )> = world
+            .query::<(
+                &crate::layer1::drone::ConnectedTo,
+                &crate::layer1::drone::DroneBattery,
+                &crate::layer1::map::GridPosition,
+            )>()
+            .iter(&world)
+            .map(|(connected, battery, pos)| (connected.0, *battery, *pos))
+            .collect();
+        assert_eq!(drones.len(), 3);
+        for (connected_to, battery, pos) in &drones {
+            assert_eq!(*connected_to, hub_entity);
+            assert!((battery.current - 100.0).abs() < f32::EPSILON);
+            assert_eq!(*pos, hub_pos);
+        }
+
+        // No scenario leakage: Classic starts with no hub and no drones.
+        let mut classic = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Classic,
+        });
+        let classic_hubs = classic
+            .query::<&Building>()
+            .iter(&classic)
+            .filter(|building| building.building_type == BuildingType::DroneHub)
+            .count();
+        let classic_drones = classic
+            .query::<&crate::layer1::drone::Drone>()
+            .iter(&classic)
+            .count();
+        assert_eq!(classic_hubs, 0);
+        assert_eq!(classic_drones, 0);
+    }
+
+    // Spec 1385 schedule-level: in a real Layer 2 Ready simulation, a
+    // drone takes a Repair assignment and a damaged LifeSupport ends
+    // with more HP than it started the run with.
+    #[test]
+    fn test_layer2_ready_drone_repairs_damaged_lifesupport_in_real_schedule() {
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Layer2Ready,
+        });
+        // Same defensive resource inits as run_start_scenario_smoke_ticks.
+        world.init_resource::<crate::layer1::culture::celestial_cemeteries::OrbitalCemetery>();
+        world.init_resource::<bevy_ecs::event::Events<crate::layer1::nature::ecology::HarvestEvent>>();
+        world.init_resource::<Events<crate::layer1::culture::celestial_cemeteries::ClearCemeteryEvent>>();
+        world.init_resource::<Events<crate::layer1::architecture::smart_matter::RaidEvent>>();
+        world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::debt_of_the_dead::DebtInheritedEvent>>();
+        world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::debt_of_the_dead::DebtSocializedEvent>>();
+        world.init_resource::<bevy_ecs::event::Events<crate::layer1::heroic_acts::TriggerHeroicAct>>();
+        world.init_resource::<Events<crate::layer1::culture::memorial_revolt::PetDeathEvent>>();
+        world.init_resource::<Events<crate::layer1::social::pets::PetDeathEvent>>();
+        world.init_resource::<bevy_ecs::event::Events<crate::layer1::administration::sentient_bureaucracy::TaskAdministrativelyOptimizedEvent>>();
+        world.init_resource::<Events<crate::layer1::gravity_funerals::SunBurialRequestEvent>>();
+        world.init_resource::<crate::layer1::environment::bio_acoustic_miasma::MiasmaRecordedSecret>();
+        world.init_resource::<Events<crate::layer1::economy::existential_audit::ExistentialAuditCompletedEvent>>();
+        world.init_resource::<bevy::prelude::Events<crate::layer2::skyhooks::LaunchIntent>>();
+        world.init_resource::<bevy::prelude::Events<crate::layer1::law::justice::CrimeCommittedEvent>>();
+        world.init_resource::<bevy::prelude::Events<crate::layer1::law::embassy::ArrestEvent>>();
+        world.init_resource::<bevy::prelude::Events<crate::layer1::law::embassy::DiplomaticIncidentEvent>>();
+        world.insert_resource(crate::layer3::economy::market_shock::MarketShockMarket {
+            luxury_price: 10.0,
+        });
+        world.insert_resource(crate::layer3::diplomacy::system_sovereignty::ColonyStatus {
+            is_sovereign: false,
+            overlord_id: Some(1),
+        });
+        world.insert_resource(crate::layer3::diplomacy::system_sovereignty::FactionRelations::default());
+        world.init_resource::<bevy::prelude::Events<crate::layer1::pop_memories::FamineEvent>>();
+        world.init_resource::<bevy::prelude::Events<crate::layer2::weather::StormImpactEvent>>();
+        *world.resource_mut::<GameState>() = GameState::Running;
+
+        // Damage the northernmost LifeSupport (the L2R redundant unit)
+        // to half HP.
+        let target = world
+            .query::<(Entity, &Building, &crate::layer1::map::GridPosition)>()
+            .iter(&world)
+            .filter(|(_, building, _)| building.building_type == BuildingType::LifeSupport)
+            .max_by_key(|(_, _, pos)| pos.y)
+            .map(|(entity, _, _)| entity)
+            .expect("Layer 2 Ready should have LifeSupport units");
+        let damaged_hp = {
+            let mut structure = world
+                .get_mut::<crate::layer1::structure::Structure>(target)
+                .expect("LifeSupport should carry a Structure");
+            structure.current_hp = structure.max_hp * 0.5;
+            structure.current_hp
+        };
+
+        let mut repair_seen = false;
+        for _ in 0..300 {
+            crate::simulation::run_simulation_tick(&mut world);
+            if !world.contains_resource::<Events<crate::layer2::communications::signal_decay::RawCommsMessageEvent>>() { world.init_resource::<Events<crate::layer2::communications::signal_decay::RawCommsMessageEvent>>(); }
+            if !world.contains_resource::<Events<crate::layer2::communications::signal_decay::CommsMessageEvent>>() { world.init_resource::<Events<crate::layer2::communications::signal_decay::CommsMessageEvent>>(); }
+            if !world.contains_resource::<Events<crate::layer1::tech::teleporter::psychosis::TeleportEvent>>() { world.init_resource::<Events<crate::layer1::tech::teleporter::psychosis::TeleportEvent>>(); }
+            if !world.contains_resource::<crate::layer1::nature::atmosphere::SmogGrid>() {
+                world.init_resource::<crate::layer1::nature::atmosphere::SmogGrid>();
+            }
+            let any_repairing = world
+                .query_filtered::<&crate::layer1::utility_ai::PopAction, With<crate::layer1::drone::Drone>>()
+                .iter(&world)
+                .any(|action| action.current == crate::layer1::utility_ai::ActionType::Repair);
+            repair_seen |= any_repairing;
+            if repair_seen
+                && world
+                    .get::<crate::layer1::structure::Structure>(target)
+                    .is_some_and(|s| s.current_hp >= s.max_hp)
+            {
+                break;
+            }
+        }
+
+        assert!(
+            repair_seen,
+            "a Layer 2 Ready drone should hold a Repair assignment while a LifeSupport is damaged"
+        );
+        let final_hp = world
+            .get::<crate::layer1::structure::Structure>(target)
+            .expect("damaged LifeSupport should still exist")
+            .current_hp;
+        assert!(
+            final_hp > damaged_hp,
+            "LifeSupport HP should recover from {damaged_hp}, got {final_hp}"
+        );
     }
 
     #[test]

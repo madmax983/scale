@@ -9,7 +9,11 @@
 
 use crate::layer1::building::Building;
 use crate::layer1::energy::PowerConsumer;
+use crate::layer1::execution::components::{AtTarget, MovementTarget};
 use crate::layer1::map::GridPosition;
+use crate::layer1::physics::pressure::SUFFOCATION_PRESSURE_THRESHOLD;
+use crate::layer1::pressure::PressureGrid;
+use crate::layer1::structure::{DeferMaintenance, Structure};
 use crate::layer1::utility_ai::{manhattan_distance, ActionType, PopAction, StartPlan};
 use crate::shared::time::SimulationTime;
 use bevy_ecs::prelude::*;
@@ -36,8 +40,64 @@ pub enum DroneState {
     Idle,
     /// Drone is currently hauling resources.
     Hauling,
+    /// Drone is travelling to or repairing a damaged building (Spec 1385).
+    Repairing,
     /// Drone has lost connection to the Command Center and gone feral.
     Feral,
+}
+
+/// HP of repair work a drone applies per tick (Spec 1385 §4.1).
+///
+/// Deliberately the pop repair rate: a drone is a tireless pop-rate
+/// welder, not a better one — its advantage is that it can stand in
+/// vacuum forever, not that it welds faster.
+pub const DRONE_REPAIR_PER_TICK: f32 = 10.0;
+
+/// One damaged-building candidate for drone repair dispatch (Spec 1385 §4.2).
+#[derive(Debug, Clone, Copy)]
+pub struct RepairCandidate {
+    /// The building entity.
+    pub entity: Entity,
+    /// The building's tile.
+    pub pos: GridPosition,
+    /// `1.0 - current_hp / max_hp`, in `(0.0, 1.0]` for real candidates.
+    pub damage_fraction: f32,
+    /// Tile pressure is below the suffocation threshold: the building
+    /// is exposed to vacuum, where pops pay 1 HP/tick to work.
+    pub exterior: bool,
+}
+
+/// Picks the drone repair target (Spec 1385 §4.2).
+///
+/// Ordering is lexicographic: **exterior first**, then **damage
+/// fraction descending**, then **Manhattan distance ascending**.
+/// Deterministic on full ties (the earlier candidate wins). Candidates
+/// with no damage are ignored; `None` when nothing needs repair.
+pub fn pick_repair_target(candidates: &[RepairCandidate], from: GridPosition) -> Option<Entity> {
+    let mut best: Option<&RepairCandidate> = None;
+    for candidate in candidates {
+        if candidate.damage_fraction <= 0.0 {
+            continue;
+        }
+        let replace = match best {
+            None => true,
+            Some(current) => {
+                if candidate.exterior != current.exterior {
+                    candidate.exterior
+                } else if (candidate.damage_fraction - current.damage_fraction).abs() > f32::EPSILON
+                {
+                    candidate.damage_fraction > current.damage_fraction
+                } else {
+                    manhattan_distance(&from, &candidate.pos)
+                        < manhattan_distance(&from, &current.pos)
+                }
+            }
+        };
+        if replace {
+            best = Some(candidate);
+        }
+    }
+    best.map(|candidate| candidate.entity)
 }
 
 /// Marker component for Drone entities.
@@ -91,19 +151,70 @@ pub struct DroneBattery {
     pub max: f32,
 }
 
-/// Evaluates drone actions.
-/// Prioritizes Charging if battery is low (< 20%).
-/// Otherwise Idles (Placeholder for Hauling).
+/// Evaluates drone actions (Spec 1385 §4.3).
+///
+/// Priority law: **Charge > Repair > Haul**. Charging if battery is
+/// low (< 20%) is absolute and recalls even a repairing drone. Repair
+/// dispatch targets the colony's most urgent damaged building —
+/// exterior (vacuum-exposed) buildings first, then by damage
+/// fraction, then distance — via [`pick_repair_target`]. Hauling is
+/// downstream filler, assigned by `drone_work_bridge_system`.
 #[allow(clippy::type_complexity)]
 pub fn evaluate_drone_actions_system(
     mut commands: Commands,
-    mut drone_query: Query<(Entity, &DroneBattery, &mut PopAction, &GridPosition), With<Drone>>,
+    mut drone_query: Query<
+        (
+            Entity,
+            &mut Drone,
+            &DroneBattery,
+            &mut PopAction,
+            &GridPosition,
+            Option<&GridConnection>,
+            Option<&FeralDrone>,
+            Option<&MovementTarget>,
+        ),
+        With<Drone>,
+    >,
     hub_query: Query<(Entity, &GridPosition, &PowerConsumer), (With<DroneHub>, With<Building>)>,
+    building_query: Query<
+        (
+            Entity,
+            &GridPosition,
+            &Structure,
+            Has<DeferMaintenance>,
+            Has<crate::layer1::heirloom::AncientStructure>,
+        ),
+        With<Building>,
+    >,
+    pressure_grid: Option<Res<PressureGrid>>,
 ) {
-    for (entity, battery, mut action, pos) in &mut drone_query {
+    // Candidate set is colony state, not drone state: build it once.
+    let mut candidates: Vec<RepairCandidate> = Vec::new();
+    for (entity, pos, structure, deferred, ancient) in building_query.iter() {
+        if deferred || ancient || structure.max_hp <= 0.0 {
+            continue;
+        }
+        let damage_fraction = 1.0 - (structure.current_hp / structure.max_hp);
+        if damage_fraction <= 0.0 {
+            continue;
+        }
+        let exterior = pressure_grid
+            .as_deref()
+            .is_some_and(|grid| grid.get(pos.x, pos.y) < SUFFOCATION_PRESSURE_THRESHOLD);
+        candidates.push(RepairCandidate {
+            entity,
+            pos: *pos,
+            damage_fraction,
+            exterior,
+        });
+    }
+
+    for (entity, mut drone, battery, mut action, pos, connection, feral, movement_target) in
+        &mut drone_query
+    {
         let battery_pct = battery.current / battery.max;
 
-        // 1. Charge if low
+        // 1. Charge if low — battery law outranks repair (Spec 1385 §4.3).
         if battery_pct < 0.2 {
             if action.current != ActionType::Charge {
                 // Find nearest active Hub
@@ -122,6 +233,9 @@ pub fn evaluate_drone_actions_system(
                 }
 
                 if let Some(hub) = best_hub {
+                    if action.current == ActionType::Repair {
+                        drone.state = DroneState::Idle;
+                    }
                     action.current = ActionType::Charge;
                     action.current_utility = 1.0;
                     action.ticks_committed = 0;
@@ -144,9 +258,108 @@ pub fn evaluate_drone_actions_system(
             commands.entity(entity).remove::<StartPlan>(); // Stop moving to charger
         }
 
-        // 3. TODO: Haul Logic
-        if action.current == ActionType::Idle {
-            // Placeholder: Stay Idle
+        // 3. Repair dispatch (Spec 1385). Feral drones repair nothing;
+        // disconnected drones hold position instead of freelancing. A
+        // drone with no GridConnection is treated as connected (the
+        // pre-existing spawn shape; disconnection only ever resolves
+        // into Feral, which is checked first).
+        if feral.is_some() || drone.state == DroneState::Feral {
+            continue;
+        }
+        if connection.is_some_and(|c| !c.is_connected) {
+            continue;
+        }
+        if !matches!(
+            action.current,
+            ActionType::Idle | ActionType::Haul | ActionType::Repair
+        ) {
+            continue;
+        }
+
+        match pick_repair_target(&candidates, *pos) {
+            Some(target) => {
+                let already_en_route = action.current == ActionType::Repair
+                    && movement_target.is_some_and(|mt| {
+                        mt.for_action == ActionType::Repair && mt.target_entity == target
+                    });
+                if !already_en_route {
+                    action.current = ActionType::Repair;
+                    action.current_utility = 0.9;
+                    action.ticks_committed = 0;
+                    drone.state = DroneState::Repairing;
+                    commands.entity(entity).insert(StartPlan {
+                        action: ActionType::Repair,
+                        target: Some(target),
+                    });
+                }
+            }
+            None => {
+                // Nothing damaged: release a stale repair assignment.
+                // (Idle/Haul drones are untouched; the bridge owns Haul.)
+                if action.current == ActionType::Repair {
+                    action.current = ActionType::Idle;
+                    action.current_utility = 0.0;
+                    action.ticks_committed = 0;
+                    drone.state = DroneState::Idle;
+                    commands
+                        .entity(entity)
+                        .remove::<StartPlan>()
+                        .remove::<MovementTarget>()
+                        .remove::<AtTarget>();
+                }
+            }
+        }
+
+        // 4. Haul is assigned downstream by drone_work_bridge_system.
+    }
+}
+
+/// Executes drone repair work (Spec 1385 §4.4).
+///
+/// Exclusive system in the shape of `work_execution_system`, because it
+/// calls the same world-shaped repair pipeline: a drone that has
+/// arrived (`AtTarget`) at its repair building applies
+/// [`DRONE_REPAIR_PER_TICK`] through `structure::process_repair`, so
+/// quirks reveal, ancient refusal, and HP capping behave identically
+/// whoever holds the welder. On completion the drone returns to Idle,
+/// mirroring pop work cleanup.
+pub fn drone_repair_system(world: &mut World) {
+    let mut workers: Vec<(Entity, Entity)> = Vec::new();
+    {
+        let mut query = world
+            .query_filtered::<(Entity, &PopAction, &MovementTarget), (With<Drone>, With<AtTarget>)>(
+            );
+        for (entity, action, movement_target) in query.iter(world) {
+            if action.current == ActionType::Repair
+                && movement_target.for_action == ActionType::Repair
+            {
+                workers.push((entity, movement_target.target_entity));
+            }
+        }
+    }
+
+    for (drone_entity, target) in workers {
+        let complete = if world.get_entity(target).is_err() {
+            true
+        } else {
+            crate::layer1::structure::process_repair(world, target, DRONE_REPAIR_PER_TICK)
+        };
+
+        if complete {
+            world
+                .entity_mut(drone_entity)
+                .remove::<MovementTarget>()
+                .remove::<AtTarget>();
+            if let Some(mut action) = world.get_mut::<PopAction>(drone_entity) {
+                action.current = ActionType::Idle;
+                action.current_utility = 0.0;
+                action.ticks_committed = 0;
+            }
+            if let Some(mut drone) = world.get_mut::<Drone>(drone_entity) {
+                if drone.state == DroneState::Repairing {
+                    drone.state = DroneState::Idle;
+                }
+            }
         }
     }
 }

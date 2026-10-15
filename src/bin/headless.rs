@@ -464,6 +464,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "shadow" => handle_shadow_command(world, &parts),
         "tether" => handle_tether_command(world, &parts),
         "tethers" => print_tethers(world),
+        "drones" => print_drones(world),
         "void" => handle_void_command(world, &parts),
         "harpoon" => handle_harpoon_command(world, &parts),
         "launch" => handle_launch_command(world, &parts),
@@ -2928,6 +2929,23 @@ fn print_stats(world: &mut World) {
         (pool, worn, label)
     };
 
+    // Spec 1385: drone fleet size and how many are on repair duty.
+    let (drones_total, drones_repairing) = {
+        let mut total = 0u32;
+        let mut repairing = 0u32;
+        let mut query = world.query::<(
+            &scale::layer1::drone::Drone,
+            &scale::layer1::utility_ai::PopAction,
+        )>();
+        for (_, action) in query.iter(world) {
+            total += 1;
+            if action.current == scale::layer1::utility_ai::ActionType::Repair {
+                repairing += 1;
+            }
+        }
+        (total, repairing)
+    };
+
     let avg_health = if pops > 0 {
         health_sum / pops as f32
     } else {
@@ -3142,7 +3160,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={} suits={} worn={} suit_air={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={}",
         tick,
         pops,
         avg_health,
@@ -3221,6 +3239,8 @@ fn print_stats(world: &mut World) {
         suits_pool,
         suits_worn,
         suit_air_label,
+        drones_total,
+        drones_repairing,
     );
 }
 
@@ -8766,6 +8786,46 @@ fn print_tethers(world: &mut World) {
         &format!(
             "{count} tether arrays standing, total strength {strength:.1}.\nDeorbit: {status}."
         ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Panel: the drone fleet (Spec 1385). `drones` — one line per drone:
+/// position, state, battery, current action; header counts the hubs.
+/// The playtest seam for watching drones repair damaged buildings.
+fn print_drones(world: &mut World) {
+    use scale::layer1::drone::{Drone, DroneBattery, DroneHub};
+    use scale::layer1::map::GridPosition;
+    use scale::layer1::utility_ai::PopAction;
+
+    let hub_count = {
+        let mut query = world.query::<&DroneHub>();
+        query.iter(world).count()
+    };
+
+    let mut lines = vec![format!("{hub_count} drone hub(s) standing.")];
+    let mut query = world.query::<(&Drone, &DroneBattery, &PopAction, &GridPosition)>();
+    let mut index = 0usize;
+    for (drone, battery, action, pos) in query.iter(world) {
+        index += 1;
+        let pct = if battery.max > 0.0 {
+            battery.current / battery.max * 100.0
+        } else {
+            0.0
+        };
+        lines.push(format!(
+            "Drone {index}: ({}, {}) state={:?} battery={pct:.0}% action={:?}",
+            pos.x, pos.y, drone.state, action.current
+        ));
+    }
+    if index == 0 {
+        lines.push("No drones. Build a Drone Hub (30 metal + 10 stone) — or start Layer 2 Ready, which comes with a hub and a fleet of 3.".to_string());
+    }
+
+    print_dashboard_panel(
+        "DRONE FLEET",
+        &lines.join("\n"),
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );

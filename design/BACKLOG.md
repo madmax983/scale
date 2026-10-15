@@ -4,6 +4,7 @@
 - [ ] `1382` Save System — Persistent Colonies (Native Files, Browser IndexedDB) — `specs/1382-save-system.md` — QUEUED NEXT by Mark 2026-10-12 (after in-flight 345): Mark-approved design (IndexedDB saves, localStorage settings crumbs, file export/import)
 - [ ] `1383` Mobile Controls — Touch Play for the WASM Build — `specs/1383-mobile-controls.md` — queued after 1382 at Mark's request 2026-10-12
 - [ ] `1384` EVA Suits — Timed Air for the World Outside the Hull — `specs/1384-eva-suits.md` — QUEUED NEXT by Mark 2026-10-14 (his decided design: suits with timed air, 50/100/200-day ladder across two tech nodes, migrants arrive suited, Classic few/base vs Layer 2 Ready full rack/long bottles)
+- [ ] `1385` Drone Exterior Work — Repair First, and a Fleet for Layer 2 Ready — `specs/1385-drone-exterior-work.md` — Mark's direction 2026-10-14/15 (Item 82): drones as the second vacuum counterplay beside EVA suits; repair dispatch (exterior/vacuum-exposed buildings first, charge and Feral law unchanged), Layer 2 Ready starts with a DroneHub + 3-drone fleet; Machine Awakening lane untouched; mine/chop follow-ups only
 - [ ] `1370` Civilizational Compost — `specs/1370-civilizational-compost.md`
 - [ ] `1371` Panic Spirals — `specs/1371-panic-spirals.md`
 - [ ] `1372` Gravity-Fed Logistics — `specs/1372-gravity-fed-logistics.md`

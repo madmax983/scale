@@ -392,4 +392,383 @@ mod tests {
             "Pop should have taken damage from Feral Drone"
         );
     }
+
+    // ===== Spec 1385: Drone Exterior Work — repair dispatch & execution =====
+
+    use crate::layer1::drone::{
+        drone_repair_system, pick_repair_target, DroneState, GridConnection, RepairCandidate,
+        DRONE_REPAIR_PER_TICK,
+    };
+    use crate::layer1::structure::Structure;
+
+    fn damaged_building(world: &mut World, x: i32, y: i32, hp: f32, kind: BuildingType) -> Entity {
+        world
+            .spawn((
+                Building {
+                    building_type: kind,
+                },
+                GridPosition { x, y },
+                Structure {
+                    current_hp: hp,
+                    max_hp: 100.0,
+                },
+            ))
+            .id()
+    }
+
+    fn plain_drone(world: &mut World, x: i32, y: i32, battery: f32) -> Entity {
+        world
+            .spawn((
+                Drone {
+                    state: DroneState::Idle,
+                },
+                DroneBattery {
+                    current: battery,
+                    max: 100.0,
+                },
+                GridPosition { x, y },
+                PopAction::default(),
+            ))
+            .id()
+    }
+
+    fn eval_schedule() -> Schedule {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(evaluate_drone_actions_system);
+        schedule
+    }
+
+    #[test]
+    fn test_pick_repair_target_prefers_exterior_over_worse_interior_damage() {
+        let mut world = World::new();
+        let interior = world.spawn_empty().id();
+        let exterior = world.spawn_empty().id();
+        let candidates = vec![
+            RepairCandidate {
+                entity: interior,
+                pos: GridPosition { x: 1, y: 0 },
+                damage_fraction: 0.9,
+                exterior: false,
+            },
+            RepairCandidate {
+                entity: exterior,
+                pos: GridPosition { x: 9, y: 9 },
+                damage_fraction: 0.5,
+                exterior: true,
+            },
+        ];
+        assert_eq!(
+            pick_repair_target(&candidates, GridPosition { x: 0, y: 0 }),
+            Some(exterior)
+        );
+    }
+
+    #[test]
+    fn test_pick_repair_target_picks_most_damaged_exterior_then_nearest() {
+        let mut world = World::new();
+        let far = world.spawn_empty().id();
+        let near = world.spawn_empty().id();
+        let worse = world.spawn_empty().id();
+        let origin = GridPosition { x: 0, y: 0 };
+        // Most damaged exterior wins even when farther.
+        let candidates = vec![
+            RepairCandidate {
+                entity: near,
+                pos: GridPosition { x: 1, y: 0 },
+                damage_fraction: 0.5,
+                exterior: true,
+            },
+            RepairCandidate {
+                entity: worse,
+                pos: GridPosition { x: 8, y: 0 },
+                damage_fraction: 0.8,
+                exterior: true,
+            },
+        ];
+        assert_eq!(pick_repair_target(&candidates, origin), Some(worse));
+        // Equal damage: nearest wins.
+        let candidates = vec![
+            RepairCandidate {
+                entity: far,
+                pos: GridPosition { x: 8, y: 0 },
+                damage_fraction: 0.5,
+                exterior: true,
+            },
+            RepairCandidate {
+                entity: near,
+                pos: GridPosition { x: 1, y: 0 },
+                damage_fraction: 0.5,
+                exterior: true,
+            },
+        ];
+        assert_eq!(pick_repair_target(&candidates, origin), Some(near));
+    }
+
+    #[test]
+    fn test_pick_repair_target_none_when_nothing_damaged() {
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let candidates = vec![RepairCandidate {
+            entity,
+            pos: GridPosition { x: 0, y: 0 },
+            damage_fraction: 0.0,
+            exterior: true,
+        }];
+        assert_eq!(
+            pick_repair_target(&candidates, GridPosition { x: 0, y: 0 }),
+            None
+        );
+        assert_eq!(pick_repair_target(&[], GridPosition { x: 0, y: 0 }), None);
+    }
+
+    #[test]
+    fn test_drone_assigned_repair_for_damaged_building() {
+        let mut world = World::new();
+        let building = damaged_building(&mut world, 3, 0, 50.0, BuildingType::Housing);
+        let drone = plain_drone(&mut world, 0, 0, 100.0);
+
+        eval_schedule().run(&mut world);
+
+        let action = world.get::<PopAction>(drone).unwrap();
+        assert_eq!(action.current, ActionType::Repair);
+        assert_eq!(
+            world.get::<Drone>(drone).unwrap().state,
+            DroneState::Repairing
+        );
+        let plan = world
+            .get::<crate::layer1::utility_ai::StartPlan>(drone)
+            .expect("repair assignment must insert a StartPlan");
+        assert_eq!(plan.target, Some(building));
+    }
+
+    #[test]
+    fn test_drone_repair_prefers_exterior_lifesupport_over_interior() {
+        use crate::layer1::pressure::PressureGrid;
+        let mut world = World::new();
+        // Vacuum everywhere except the interior building's tile.
+        let mut grid = PressureGrid::new(20, 20);
+        grid.set(2, 0, 1.0);
+        world.insert_resource(grid);
+        let _interior = damaged_building(&mut world, 2, 0, 10.0, BuildingType::Housing);
+        let exterior = damaged_building(&mut world, 6, 0, 50.0, BuildingType::LifeSupport);
+        let drone = plain_drone(&mut world, 0, 0, 100.0);
+
+        eval_schedule().run(&mut world);
+
+        let plan = world
+            .get::<crate::layer1::utility_ai::StartPlan>(drone)
+            .expect("repair assignment must insert a StartPlan");
+        assert_eq!(plan.target, Some(exterior));
+    }
+
+    #[test]
+    fn test_low_battery_drone_charges_instead_of_repairing() {
+        let mut world = World::new();
+        let _building = damaged_building(&mut world, 3, 0, 50.0, BuildingType::Housing);
+        world.spawn((
+            Building {
+                building_type: BuildingType::DroneHub,
+            },
+            DroneHub,
+            GridPosition { x: 5, y: 5 },
+            PowerConsumer {
+                demand: 10.0,
+                active: true,
+            },
+        ));
+        let drone = plain_drone(&mut world, 0, 0, 10.0);
+
+        eval_schedule().run(&mut world);
+
+        assert_eq!(
+            world.get::<PopAction>(drone).unwrap().current,
+            ActionType::Charge
+        );
+    }
+
+    #[test]
+    fn test_feral_drone_is_never_assigned_repair() {
+        use crate::layer1::drone::FeralDrone;
+        let mut world = World::new();
+        let _building = damaged_building(&mut world, 3, 0, 50.0, BuildingType::Housing);
+        let drone = world
+            .spawn((
+                Drone {
+                    state: DroneState::Feral,
+                },
+                FeralDrone::default(),
+                DroneBattery {
+                    current: 100.0,
+                    max: 100.0,
+                },
+                GridPosition { x: 0, y: 0 },
+                PopAction::default(),
+            ))
+            .id();
+
+        eval_schedule().run(&mut world);
+
+        assert_ne!(
+            world.get::<PopAction>(drone).unwrap().current,
+            ActionType::Repair
+        );
+        assert!(world
+            .get::<crate::layer1::utility_ai::StartPlan>(drone)
+            .is_none());
+    }
+
+    #[test]
+    fn test_disconnected_drone_holds_instead_of_repairing() {
+        let mut world = World::new();
+        let _building = damaged_building(&mut world, 3, 0, 50.0, BuildingType::Housing);
+        let drone = world
+            .spawn((
+                Drone {
+                    state: DroneState::Idle,
+                },
+                GridConnection {
+                    is_connected: false,
+                    time_disconnected: 10,
+                },
+                DroneBattery {
+                    current: 100.0,
+                    max: 100.0,
+                },
+                GridPosition { x: 0, y: 0 },
+                PopAction::default(),
+            ))
+            .id();
+
+        eval_schedule().run(&mut world);
+
+        assert_ne!(
+            world.get::<PopAction>(drone).unwrap().current,
+            ActionType::Repair
+        );
+    }
+
+    #[test]
+    fn test_drone_skips_deferred_and_ancient_structures() {
+        use crate::layer1::structure::DeferMaintenance;
+        let mut world = World::new();
+        let deferred = damaged_building(&mut world, 3, 0, 50.0, BuildingType::Housing);
+        world.entity_mut(deferred).insert(DeferMaintenance);
+        let ancient = damaged_building(&mut world, 4, 0, 50.0, BuildingType::Housing);
+        world
+            .entity_mut(ancient)
+            .insert(crate::layer1::heirloom::AncientStructure);
+        let drone = plain_drone(&mut world, 0, 0, 100.0);
+
+        eval_schedule().run(&mut world);
+
+        assert_ne!(
+            world.get::<PopAction>(drone).unwrap().current,
+            ActionType::Repair
+        );
+    }
+
+    #[test]
+    fn test_drone_repair_restores_hp_and_completes_to_idle() {
+        use crate::layer1::execution::components::{AtTarget, MovementTarget};
+        let mut world = World::new();
+        let building = damaged_building(&mut world, 3, 0, 50.0, BuildingType::Housing);
+        let drone = world
+            .spawn((
+                Drone {
+                    state: DroneState::Repairing,
+                },
+                DroneBattery {
+                    current: 100.0,
+                    max: 100.0,
+                },
+                GridPosition { x: 2, y: 0 },
+                PopAction {
+                    current: ActionType::Repair,
+                    ..Default::default()
+                },
+                MovementTarget {
+                    target_entity: building,
+                    target_position: GridPosition { x: 3, y: 0 },
+                    for_action: ActionType::Repair,
+                },
+                AtTarget,
+            ))
+            .id();
+
+        let ticks = (50.0 / DRONE_REPAIR_PER_TICK) as usize;
+        for _ in 0..ticks {
+            drone_repair_system(&mut world);
+        }
+
+        let structure = world.get::<Structure>(building).unwrap();
+        assert!((structure.current_hp - 100.0).abs() < f32::EPSILON);
+        assert_eq!(
+            world.get::<PopAction>(drone).unwrap().current,
+            ActionType::Idle
+        );
+        assert_eq!(world.get::<Drone>(drone).unwrap().state, DroneState::Idle);
+        assert!(world.get::<MovementTarget>(drone).is_none());
+    }
+
+    #[test]
+    fn test_schedule_drone_travels_and_repairs() {
+        use crate::layer1::erosion::ErosionGrid;
+        use crate::layer1::execution::movement::{movement_system, process_start_plan_system};
+        use crate::layer1::pop::Speed;
+
+        let mut world = World::new();
+        world.insert_resource(crate::layer1::generate_terrain(20, 20));
+        {
+            // Uniform walkable ground: this test is about the repair
+            // pipeline, not pathfinding around random rock.
+            let mut terrain = world.resource_mut::<crate::layer1::terrain::TerrainGrid>();
+            for tile in &mut terrain.tiles {
+                *tile = crate::layer1::terrain::TerrainType::Grass;
+            }
+        }
+        world.insert_resource(ErosionGrid::new(20, 20));
+        world.insert_resource(crate::layer1::building::OccupiedTiles::default());
+        let building = damaged_building(&mut world, 4, 0, 50.0, BuildingType::Housing);
+        let drone = world
+            .spawn((
+                Drone {
+                    state: DroneState::Idle,
+                },
+                DroneBattery {
+                    current: 100.0,
+                    max: 100.0,
+                },
+                GridPosition { x: 0, y: 0 },
+                PopAction::default(),
+                Speed {
+                    base: 1.0,
+                    current: 1.0,
+                    accumulator: 0.0,
+                },
+            ))
+            .id();
+        let _ = drone;
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((
+            evaluate_drone_actions_system,
+            process_start_plan_system,
+            movement_system,
+            drone_repair_system,
+        ));
+        for _ in 0..40 {
+            schedule.run(&mut world);
+            let hp = world.get::<Structure>(building).unwrap().current_hp;
+            if hp >= 100.0 {
+                break;
+            }
+        }
+
+        let structure = world.get::<Structure>(building).unwrap();
+        assert!(
+            structure.current_hp > 50.0,
+            "drone should have travelled and repaired through the real movement pipeline, HP={}",
+            structure.current_hp
+        );
+    }
 }
