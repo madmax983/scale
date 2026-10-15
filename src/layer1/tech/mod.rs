@@ -66,6 +66,10 @@ pub enum Tech {
     VoidWhispers,
     /// Unlocks planetary engineering (`AtmosphericProcessor`).
     Terraforming,
+    /// Closed-cycle breathing: newly issued EVA suits carry 100 days of air (Spec 1384).
+    ClosedCycleBreathing,
+    /// Expedition systems: newly issued EVA suits carry 200 days of air (Spec 1384).
+    ExpeditionSystems,
 }
 
 impl Tech {
@@ -92,6 +96,8 @@ impl Tech {
             Self::Electromagnetism => 35.0,
             Self::VoidWhispers => 100.0,
             Self::Terraforming => 75.0,
+            Self::ClosedCycleBreathing => 40.0,
+            Self::ExpeditionSystems => 75.0,
         }
     }
 
@@ -109,6 +115,8 @@ impl Tech {
             Self::Electromagnetism => "Electromagnetism",
             Self::VoidWhispers => "Void Whispers",
             Self::Terraforming => "Terraforming",
+            Self::ClosedCycleBreathing => "Closed-Cycle Breathing",
+            Self::ExpeditionSystems => "Expedition Systems",
         }
     }
 
@@ -144,6 +152,12 @@ impl Tech {
                 "Forbidden knowledge from the void. Offers great power at a terrible cost."
             }
             Self::Terraforming => "Technologies to modify the planetary atmosphere and climate.",
+            Self::ClosedCycleBreathing => {
+                "Recyclers, scrubbers, and fat bottles: newly issued EVA suits carry 100 days of air."
+            }
+            Self::ExpeditionSystems => {
+                "Full expedition rigs built for the long dark: newly issued EVA suits carry 200 days of air."
+            }
         }
     }
 
@@ -156,9 +170,9 @@ impl Tech {
             Self::Masonry => 5.0,
             Self::MetalWorking | Self::Militia => 10.0,
             Self::SocialStructures | Self::Hydroponics | Self::Electromagnetism => 15.0,
-            Self::Astronomy | Self::Medical => 20.0,
+            Self::Astronomy | Self::Medical | Self::ClosedCycleBreathing => 20.0,
             Self::VoidWhispers => 50.0,
-            Self::Terraforming => 30.0,
+            Self::Terraforming | Self::ExpeditionSystems => 30.0,
         }
     }
 }

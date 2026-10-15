@@ -119,6 +119,41 @@ pub fn populate_ai_buffer(world: &mut World, buffer: &mut UtilityAIBuffer, conte
     populate_cleaning_targets(world, buffer);
     populate_sanctuaries(world, &mut buffer.sanctuaries);
     populate_mobs(world, &mut buffer.mobs);
+    populate_eva_suit_candidates(world, buffer);
+}
+
+/// Spec 1384: loose physical EVA suits (fetch targets) and whether any
+/// pending Work/Repair/Explore candidate sits below the suffocation
+/// threshold (the FetchSuit gate).
+fn populate_eva_suit_candidates(world: &mut World, buffer: &mut UtilityAIBuffer) {
+    buffer.loose_eva_suits.clear();
+    let worn: std::collections::HashSet<Entity> = world
+        .query_filtered::<&crate::layer1::items::Equipment, With<crate::layer1::pop::Pop>>()
+        .iter(world)
+        .filter_map(|eq| eq.body)
+        .collect();
+    buffer.loose_eva_suits.extend(
+        world
+            .query::<(Entity, &GridPosition, &crate::layer1::eva_suit::EvaSuit)>()
+            .iter(world)
+            .filter(|(e, _, _)| !worn.contains(e))
+            .map(|(e, pos, suit)| {
+                let mut c = ScorableCandidate::new(e, *pos);
+                // Better bottles are better targets.
+                c.score_bonus = suit.class.capacity() / 1000.0;
+                c
+            }),
+    );
+    buffer.exterior_suit_pending = false;
+    if let Some(grid) = world.get_resource::<crate::layer1::pressure::PressureGrid>() {
+        let threshold = crate::layer1::pressure::SUFFOCATION_PRESSURE_THRESHOLD;
+        buffer.exterior_suit_pending = buffer
+            .work_designations
+            .iter()
+            .chain(buffer.repair_designations.iter())
+            .chain(buffer.anomalies.iter())
+            .any(|c| grid.get(c.pos.x, c.pos.y) < threshold);
+    }
 }
 
 fn populate_mobs(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
@@ -664,11 +699,28 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
     let mut clothing_query = world.query::<&crate::layer1::items::Clothing>();
     // Populate Carrying Item Type
     let mut item_query = world.query::<&crate::layer1::items::Item>();
+    // Spec 1384: worn-suit flag + per-pop tile pressure for FetchSuit.
+    let mut suit_query = world.query::<&crate::layer1::eva_suit::EvaSuit>();
+    let pressure_snapshot: Vec<(u32, f32)> = world
+        .get_resource::<crate::layer1::pressure::PressureGrid>()
+        .map(|grid| {
+            buffer
+                .pop_data
+                .iter()
+                .map(|d| (d.entity.index(), grid.get(d.pos.x, d.pos.y)))
+                .collect()
+        })
+        .unwrap_or_default();
+    buffer.pop_pressures.clear();
+    buffer.pop_pressures.extend(pressure_snapshot);
 
     for data in &mut buffer.pop_data {
         if let Some(body_entity) = data.equipment.and_then(|eq| eq.body) {
             if let Ok(clothing) = clothing_query.get(world, body_entity) {
                 data.insulation = clothing.insulation;
+            }
+            if suit_query.get(world, body_entity).is_ok() {
+                data.wears_eva_suit = true;
             }
         }
 

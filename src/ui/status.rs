@@ -153,6 +153,10 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, world: &World) {
         .spans
         .extend(build_atmosphere_spans(world));
 
+    // EVA suit segment (Spec 1384): the worst suited bottle in vacuum,
+    // red when below a quarter. Quiet while nobody is out there.
+    status.spans.extend(build_suit_spans(world));
+
     // Reign & sky segments: constellation broadcast, god-mind bit-rot,
     // sovereign legitimacy, and the possessed pop. Quiet unless live.
     status
@@ -265,6 +269,34 @@ fn build_atmosphere_spans(world: &World) -> Vec<Span<'static>> {
         ));
     }
     spans
+}
+
+/// The EVA suit segment (Spec 1384 §4.8): speaks only when a suited
+/// pop in vacuum is below the low-air fraction — `⚠ suit air {days}d`,
+/// red and bold — and stays silent otherwise, per the Phase 2
+/// discipline (the bar speaks only when someone is in danger). The
+/// check is fraction-based, so the line is class-aware (25% is 12.5
+/// days on a Base bottle, 50 on an Expedition bottle).
+fn build_suit_spans(world: &World) -> Vec<Span<'static>> {
+    let Some(status) = world.get_resource::<crate::layer1::eva_suit::ColonySuitStatus>() else {
+        return Vec::new();
+    };
+    let (Some(air), Some(fraction)) = (
+        status.lowest_air_in_vacuum,
+        status.lowest_air_fraction_in_vacuum,
+    ) else {
+        return Vec::new();
+    };
+    if fraction >= crate::layer1::eva_suit::EVA_AIR_LOW_FRACTION {
+        return Vec::new();
+    }
+    let days = air.floor() as i64;
+    vec![Span::styled(
+        format!(" ⚠ suit air {days}d "),
+        Style::default()
+            .fg(Color::Red)
+            .add_modifier(Modifier::BOLD),
+    )]
 }
 
 /// The speed segment of the status bar: ` Speed: Fast ` while

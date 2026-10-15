@@ -192,6 +192,10 @@ pub enum ActionType {
     ///
     /// See [`crate::layer1::phantom_shift::evaluate_phantom_shift`].
     PhantomWork,
+    /// Fetch an EVA suit from the pool or a loose suit before exterior work (Spec 1384).
+    ///
+    /// See [`crate::layer1::actions::clothing::evaluate_fetch_suit`].
+    FetchSuit,
 }
 
 /// Types of hobbies.
@@ -211,7 +215,8 @@ pub enum HobbyType {
 
 impl ActionType {
     /// Total number of action types. Used for array sizing.
-    pub const COUNT: usize = 51;
+    /// 52 since Spec 1384 added `FetchSuit`.
+    pub const COUNT: usize = 52;
 
     /// Converts action type to a unique array index (0..COUNT-1).
     #[must_use]
@@ -268,6 +273,7 @@ impl ActionType {
             Self::PerformAncientRoutine => 47,
             Self::Pollinate => 48,
             Self::PhantomWork => 49,
+            Self::FetchSuit => 50,
         }
     }
 

@@ -415,6 +415,8 @@ pub fn pressure_damage_system(
             &mut crate::layer1::health::Health,
             Option<&crate::layer1::pop::PopName>,
             Has<SuffocationAlerted>,
+            Option<&crate::layer1::items::Equipment>,
+            Option<&crate::layer1::eva_suit::SuitAirAlerted>,
         ),
         (
             With<crate::layer1::pop::Pop>,
@@ -423,6 +425,7 @@ pub fn pressure_damage_system(
             Without<crate::layer1::culture::chronostalker::Phased>,
         ),
     >,
+    mut suit_query: Query<&mut crate::layer1::eva_suit::EvaSuit>,
     grid_opt: Option<Res<PressureGrid>>,
     mut events: EventWriter<crate::layer1::chronicle::AddChronicleEvent>,
 ) {
@@ -431,13 +434,65 @@ pub fn pressure_damage_system(
     let Some(grid) = grid_opt else { return };
     let mut killed = 0;
 
-    for (entity, pos, mut health, name, alerted) in pop_query.iter_mut() {
+    for (entity, pos, mut health, name, alerted, equipment, suit_alerted) in pop_query.iter_mut() {
         if health.current <= 0.0 {
             continue;
         }
 
         let pressure = grid.get(pos.x, pos.y);
         if pressure < SUFFOCATION_PRESSURE_THRESHOLD {
+            // Spec 1384: a worn suit with air covers this tick — the
+            // bottle drains instead of the pop's HP, and the suit-air
+            // chronicle warnings fire here (once per excursion) so
+            // "covered by bottle" and "takes damage" can never drift.
+            let mut covered = false;
+            if let Some(body) = equipment.and_then(|eq| eq.body) {
+                if let Ok(mut suit) = suit_query.get_mut(body) {
+                    if suit.air > 0.0 {
+                        covered = true;
+                        suit.air = (suit.air
+                            - crate::layer1::eva_suit::EVA_AIR_DRAIN_PER_TICK)
+                            .max(0.0);
+                        let label =
+                            name.map_or_else(|| "A colonist".to_string(), |n| n.0.clone());
+                        let mut state = suit_alerted.copied().unwrap_or_default();
+                        let mut changed = false;
+                        if suit.air <= 0.0 && !state.dry_warned {
+                            events.send(crate::layer1::chronicle::AddChronicleEvent {
+                                text: format!("{label}'s suit has run dry."),
+                                importance: EventImportance::Major,
+                            });
+                            state.dry_warned = true;
+                            state.low_warned = true;
+                            changed = true;
+                        } else if suit.air_fraction()
+                            < crate::layer1::eva_suit::EVA_AIR_LOW_FRACTION
+                            && !state.low_warned
+                        {
+                            events.send(crate::layer1::chronicle::AddChronicleEvent {
+                                text: format!(
+                                    "{label}'s suit air is low — {} days of air left.",
+                                    suit.air.floor() as i64
+                                ),
+                                importance: EventImportance::Major,
+                            });
+                            state.low_warned = true;
+                            changed = true;
+                        }
+                        if changed {
+                            commands
+                                .entity(entity)
+                                .try_insert(crate::layer1::eva_suit::SuitAirAlerted {
+                                    low_warned: state.low_warned,
+                                    dry_warned: state.dry_warned,
+                                });
+                        }
+                    }
+                }
+            }
+            if covered {
+                continue;
+            }
             if !alerted {
                 let label = name.map_or_else(|| "A colonist".to_string(), |n| n.0.clone());
                 events.send(crate::layer1::chronicle::AddChronicleEvent {

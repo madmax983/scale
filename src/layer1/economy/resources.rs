@@ -250,6 +250,12 @@ pub struct ColonyResources {
     pub organs: f32,
     /// Maximum organ storage capacity.
     pub max_organs: f32,
+    /// EVA suits in the abstract colony pool (Spec 1384). Colony-issued
+    /// suits materialize into `EvaSuit` entities on fetch, mirroring
+    /// `clothing`; loose physical suits are never pooled.
+    pub eva_suits: f32,
+    /// Maximum EVA suit pool capacity.
+    pub max_eva_suits: f32,
 }
 
 impl Default for ColonyResources {
@@ -312,6 +318,8 @@ impl Default for ColonyResources {
             max_hyper_valuable: 50.0,
             organs: 0.0,
             max_organs: 50.0,
+            eva_suits: 0.0,
+            max_eva_suits: 50.0,
         }
     }
 }
@@ -379,6 +387,8 @@ impl Mul<f32> for ColonyResources {
             organs: (self.organs * rhs).ceil(),
             max_hyper_valuable: self.max_hyper_valuable,
             max_organs: self.max_organs,
+            eva_suits: (self.eva_suits * rhs).ceil(),
+            max_eva_suits: self.max_eva_suits,
         }
     }
 }
@@ -448,6 +458,8 @@ impl ColonyResources {
             max_hyper_valuable: 0.0,
             organs: 0.0,
             max_organs: 0.0,
+            eva_suits: 0.0,
+            max_eva_suits: 0.0,
         }
     }
 
@@ -604,6 +616,13 @@ impl ColonyResources {
         }
     }
 
+    /// Adds EVA suits to the pool, clamping to the maximum capacity (Spec 1384).
+    pub fn add_eva_suits(&mut self, amount: f32) {
+        if amount.is_finite() {
+            self.eva_suits = (self.eva_suits + amount).clamp(0.0, self.max_eva_suits);
+        }
+    }
+
     /// Adds waste, clamping to the maximum capacity.
     pub fn add_waste(&mut self, amount: f32) {
         if amount.is_finite() {
@@ -712,6 +731,7 @@ impl ColonyResources {
             && self.credits >= cost.credits
             && self.memory_cores >= cost.memory_cores
             && self.void_ale >= cost.void_ale
+            && self.eva_suits >= cost.eva_suits
     }
 
     /// Deducts the given cost from the colony's resources.
@@ -741,6 +761,7 @@ impl ColonyResources {
         self.credits -= cost.credits;
         self.memory_cores -= cost.memory_cores;
         self.void_ale -= cost.void_ale;
+        self.eva_suits -= cost.eva_suits;
     }
 
     /// Attempts to deduct the given cost from the colony's resources.

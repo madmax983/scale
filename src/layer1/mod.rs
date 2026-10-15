@@ -234,6 +234,16 @@ pub use pheromone::*;
 pub mod desire_dust;
 pub use desire_dust::*;
 
+/// EVA suits — timed air for the world outside the hull (Spec 1384).
+pub mod eva_suit;
+pub use eva_suit::{
+    issue_capacity, issue_capacity_with_floor, issue_tier, loose_suit_count, migrant_suit_air,
+    suit_air_system, suit_death_recovery_system, suit_rows, suit_stats,
+    update_colony_suit_status_system, ColonySuitStatus, EvaSuit, ScenarioSuitFloor, SuitAirAlerted,
+    SuitClass, SuitRecovered, EVA_AIR_DRAIN_PER_TICK, EVA_AIR_LOW_FRACTION,
+    EVA_MIGRANT_TRANSIT_MAX, EVA_MIGRANT_TRANSIT_MIN, EVA_REFILL_FRACTION_PER_TICK,
+};
+
 /// Heirloom tech system (Spec 070).
 pub mod heirloom;
 pub mod heirloom_tool;

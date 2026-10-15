@@ -171,15 +171,35 @@ pub fn get_refining_recipe(
             },
             0.1, // Fiber waste
         ),
+        // Spec 1384 §4.5: the Tailor turns from clothing to EVA suits
+        // whenever it can — suits are life-critical and expensive
+        // (2 Cloth + 1 Metal each); when materials run short or the
+        // suit pool is full it falls back to the clothing recipe.
         BuildingType::Tailor => (
-            res.cloth >= 1.0 && res.clothing < res.max_clothing,
-            ColonyResources {
-                cloth: 1.0,
-                ..ColonyResources::zeroed()
+            (res.cloth >= 2.0 && res.metal >= 1.0 && res.eva_suits < res.max_eva_suits)
+                || (res.cloth >= 1.0 && res.clothing < res.max_clothing),
+            if res.cloth >= 2.0 && res.metal >= 1.0 && res.eva_suits < res.max_eva_suits {
+                ColonyResources {
+                    cloth: 2.0,
+                    metal: 1.0,
+                    ..ColonyResources::zeroed()
+                }
+            } else {
+                ColonyResources {
+                    cloth: 1.0,
+                    ..ColonyResources::zeroed()
+                }
             },
-            ColonyResources {
-                clothing: 1.0,
-                ..ColonyResources::zeroed()
+            if res.cloth >= 2.0 && res.metal >= 1.0 && res.eva_suits < res.max_eva_suits {
+                ColonyResources {
+                    eva_suits: 1.0,
+                    ..ColonyResources::zeroed()
+                }
+            } else {
+                ColonyResources {
+                    clothing: 1.0,
+                    ..ColonyResources::zeroed()
+                }
             },
             0.1, // Cloth scraps
         ),
@@ -354,6 +374,7 @@ fn apply_finished_refining_jobs(
                     resources.add_tools(output.tools);
                     resources.add_cloth(output.cloth);
                     resources.add_clothing(output.clothing);
+                resources.add_eva_suits(output.eva_suits);
                     resources.add_fuel(output.fuel);
                     true
                 } else {
@@ -744,6 +765,30 @@ mod recycler_production_tests {
             max_nutrient_paste: 50.0,
             ..ColonyResources::default()
         };
+
+        // Spec 1384 §3/§4.5: Tailor prefers suits when it can afford
+        // them, falls back to clothing otherwise.
+        let tailor_res = ColonyResources {
+            cloth: 5.0,
+            metal: 2.0,
+            eva_suits: 0.0,
+            max_eva_suits: 50.0,
+            ..ColonyResources::zeroed()
+        };
+        let (can, input, output, _w) = get_refining_recipe(BuildingType::Tailor, &tailor_res);
+        assert!(can);
+        assert_eq!(input.cloth, 2.0);
+        assert_eq!(input.metal, 1.0);
+        assert_eq!(output.eva_suits, 1.0);
+        let poor_res = ColonyResources {
+            cloth: 1.0,
+            metal: 0.0,
+            max_clothing: 50.0,
+            ..ColonyResources::zeroed()
+        };
+        let (can2, _i2, output2, _w2) = get_refining_recipe(BuildingType::Tailor, &poor_res);
+        assert!(can2, "clothing fallback still refines");
+        assert_eq!(output2.clothing, 1.0);
 
         let (can_refine, input, output, _waste) = get_refining_recipe(BuildingType::Recycler, &res);
         assert!(can_refine);

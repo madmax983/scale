@@ -498,6 +498,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "artifacts" => print_artifacts(world),
         "graves" => print_graves(world),
         "stash" => print_stashes(world),
+        "suits" => print_suits(world),
         "search_rooms" => handle_search_rooms_command(world),
         "sell" => handle_sell_command(world, &parts),
         "museum" => handle_museum_command(world, &parts),
@@ -2917,6 +2918,16 @@ fn print_stats(world: &mut World) {
         "off"
     };
 
+    // Spec 1384: EVA suit pool / worn count / worst suited air in vacuum.
+    let (suits_pool, suits_worn, suit_air_label) = {
+        let (pool, worn, lowest) = scale::layer1::eva_suit::suit_stats(world);
+        let label = lowest.map_or_else(
+            || "none".to_string(),
+            |air| format!("{air:.1}"),
+        );
+        (pool, worn, label)
+    };
+
     let avg_health = if pops > 0 {
         health_sum / pops as f32
     } else {
@@ -3131,7 +3142,7 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={}",
+        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={} suits={} worn={} suit_air={}",
         tick,
         pops,
         avg_health,
@@ -3207,6 +3218,9 @@ fn print_stats(world: &mut World) {
         vacuum,
         ls_unpowered,
         shelter,
+        suits_pool,
+        suits_worn,
+        suit_air_label,
     );
 }
 
@@ -4523,6 +4537,7 @@ fn format_action_type_headless(action: scale::layer1::ActionType) -> String {
         ActionType::HideInRoom => "🚪 Hiding".to_string(),
         ActionType::SadWander => "😢 Wandering Sadly".to_string(),
         ActionType::FetchClothing => "👕 Fetching Clothes".to_string(),
+        ActionType::FetchSuit => "🧑‍🚀 Fetching EVA Suit".to_string(),
         ActionType::Surgery => "🏥 Undergoing Surgery".to_string(),
         ActionType::Charge => "⚡ Charging".to_string(),
         ActionType::Hobby => "🎨 Hobby".to_string(),
@@ -8143,6 +8158,48 @@ fn print_graves(world: &mut World) {
 
 /// Spec 350: list every non-empty private stash — who is hiding what from
 /// the colony inventory, and how much food the official count is missing.
+/// Spec 1384: EVA suit panel — pool, issue tier, worn and loose suits.
+fn print_suits(world: &mut World) {
+    let (pool, worn, lowest) = scale::layer1::eva_suit::suit_stats(world);
+    let loose = scale::layer1::eva_suit::loose_suit_count(world);
+    let tier = {
+        let tech = world.get_resource::<scale::layer1::tech::TechState>();
+        let floor = world
+            .get_resource::<scale::layer1::eva_suit::ScenarioSuitFloor>()
+            .map_or(scale::layer1::eva_suit::SuitClass::Base, |f| f.class());
+        scale::layer1::eva_suit::issue_tier(tech, floor)
+    };
+    let mut lines: Vec<String> = vec![format!(
+        "Pool: {pool} suit(s) ready to issue. Issue tier: {} ({} days of air).",
+        tier.label(),
+        tier.capacity() as i64
+    )];
+    lines.push(format!(
+        "Worn: {worn}. Loose physical suits: {loose}. Lowest air on a suited pop in vacuum: {}.",
+        lowest.map_or_else(|| "none".to_string(), |a| format!("{a:.1} days"))
+    ));
+    let (_, worn_rows, loose_rows) = scale::layer1::eva_suit::suit_rows(world);
+    for (name, class, air) in worn_rows.iter().chain(loose_rows.iter()) {
+        lines.push(format!(
+            "{name}: {} — {air:.1}/{:.1} days of air",
+            class.label(),
+            class.capacity()
+        ));
+    }
+    if worn == 0 && loose == 0 {
+        lines.push(
+            "Nobody is wearing a suit. The Tailor fabricates pool suits from 2 Cloth + 1 Metal."
+                .to_string(),
+        );
+    }
+    print_dashboard_panel(
+        "EVA SUITS",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        None,
+    );
+}
+
 fn print_stashes(world: &mut World) {
     use scale::layer1::pop::PopName;
     use scale::layer1::private_stash::PrivateStash;
@@ -9269,7 +9326,7 @@ fn handle_probe_command(world: &mut World, parts: &[&str]) {
     let mut seen_events = world.resource::<Chronicle>().events.len();
     let mut expo_last: std::collections::HashMap<Entity, u64> = Default::default();
     println!("PROBE_BEGIN n={n} interval={interval}");
-    println!("CSV,tick,pops,min_pop_p,mean_pop_p,ls_n,ls_hp,ls_on,min_wall_hp,lt30,fires,ruins,src_out,cons_on,cons_n,repair_actors,work_actors,food");
+    println!("CSV,tick,pops,min_pop_p,mean_pop_p,ls_n,ls_hp,ls_on,min_wall_hp,lt30,fires,ruins,src_out,cons_on,cons_n,repair_actors,work_actors,food,suits,worn,suit_air");
     for _ in 0..n {
         run_simulation_tick(world);
         let tick = world.resource::<SimulationTime>().tick;
@@ -9442,7 +9499,10 @@ fn probe_print_row(world: &mut World, tick: u64, pops: usize) {
         }
     }
     let food = world.resource::<ColonyResources>().food;
+    // Spec 1384: suit columns for atmosphere-death forensics.
+    let (suits_pool, suits_worn, suit_air) = scale::layer1::eva_suit::suit_stats(world);
+    let suit_air_out = suit_air.map_or(-1.0, |a| a);
     println!(
-        "CSV,{tick},{pops},{min_p:.3},{mean_p:.3},{ls_n},{ls_hp:.1},{ls_on},{min_wall_hp:.1},{lt30},{fires},{ruins},{src_out:.1},{cons_on},{cons_n},{repair_actors},{work_actors},{food:.1}"
+        "CSV,{tick},{pops},{min_p:.3},{mean_p:.3},{ls_n},{ls_hp:.1},{ls_on},{min_wall_hp:.1},{lt30},{fires},{ruins},{src_out:.1},{cons_on},{cons_n},{repair_actors},{work_actors},{food:.1},{suits_pool},{suits_worn},{suit_air_out:.1}"
     );
 }

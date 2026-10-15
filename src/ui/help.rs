@@ -361,6 +361,9 @@ fn vacuum_section(lines: &mut Vec<Line<'static>>) {
         "Panic makes it worse: a frightened colonist runs, and out here running usually means running out of air. Keep the scared ones inside until they settle.",
     ));
     lines.push(body(
+        "An EVA suit changes the arithmetic. A suited colonist outside breathes from the bottle on their back — one day of air for every day outside — and takes no harm while the bottle lasts. Bottles hold 50 days, 100 once your researchers work out Closed-Cycle Breathing, and 200 with Expedition Systems. Colonists dress on their own before stepping out for work when a suit is available — the Tailor sews pool suits from cloth and metal — and hang the suit back up when they come in. The Chronicle calls out a bottle at a quarter, and again when it runs dry. Migrants walk in already wearing expedition rigs, their bottles partly spent by the crossing. A suit is a round trip, not a home: when the bottle empties, the old rules return.",
+    ));
+    lines.push(body(
         "Watch the status bar: it counts anyone standing in vacuum and names the thinnest air any colonist is breathing. When someone is suffocating, the Chronicle says so — once, by name, while there is still time to matter.",
     ));
     lines.push(body(

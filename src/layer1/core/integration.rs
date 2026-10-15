@@ -1648,6 +1648,23 @@ pub fn beacon_migrant_arrival_bridge(
                 crate::layer1::PopBundle::random(spawn_pos.x, spawn_pos.y, &mut rng);
             bundle.traits = traits;
             bundle.arrival = crate::layer1::social::old_guard::Arrival { tick };
+            // Spec 1384 §4.6: migrants arrive wearing a physical
+            // Expedition suit — they crossed vacuum to get here, and
+            // the crossing cost them 30-60 days of bottle.
+            let suit_entity = commands
+                .spawn((
+                    crate::layer1::items::Item::default(),
+                    crate::layer1::eva_suit::EvaSuit {
+                        class: crate::layer1::eva_suit::SuitClass::Expedition,
+                        air: crate::layer1::eva_suit::migrant_suit_air(&mut rng),
+                        durability: 100.0,
+                        max_durability: 100.0,
+                        colony_issued: false,
+                    },
+                    spawn_pos,
+                ))
+                .id();
+            bundle.equipment.body = Some(suit_entity);
             commands.spawn((bundle, RecentArrival { arrival_tick: tick }));
         }
 

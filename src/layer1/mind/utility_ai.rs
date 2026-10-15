@@ -41,9 +41,9 @@
 //! ```
 
 use crate::layer1::actions::{
-    evaluate_clean, evaluate_drafted_behavior, evaluate_fetch_clothing, evaluate_fetch_tool,
-    evaluate_gossip, evaluate_haul, evaluate_listen_to_hum, evaluate_mental_break,
-    evaluate_research, evaluate_shower, evaluate_simple_action,
+    evaluate_clean, evaluate_drafted_behavior, evaluate_fetch_clothing, evaluate_fetch_suit,
+    evaluate_fetch_tool, evaluate_gossip, evaluate_haul, evaluate_listen_to_hum,
+    evaluate_mental_break, evaluate_research, evaluate_shower, evaluate_simple_action,
 };
 use crate::layer1::chemical::evaluate_consume_chemical;
 use crate::layer1::factions::Factions;
@@ -697,6 +697,30 @@ impl<'a> PopDecider<'a> {
                 self.context.temperature_grid,
             ),
             ActionType::FetchClothing,
+            self.context,
+            0.0,
+        );
+
+        // Evaluate FetchSuit (Spec 1384): dress before exterior work.
+        // Panicked pops never reach here — collect_pop_data excludes
+        // Panic from evaluation, so a panicking pop will not stop to dress.
+        let pop_pressure = self
+            .buffer
+            .pop_pressures
+            .get(&self.data.entity.index())
+            .copied()
+            .unwrap_or(1.0);
+        self.evaluator.evaluate_and_consider(
+            evaluate_fetch_suit(
+                pop_pos,
+                self.data.wears_eva_suit,
+                self.context.resources,
+                &self.buffer.stockpiles,
+                &self.buffer.loose_eva_suits,
+                self.buffer.exterior_suit_pending,
+                pop_pressure,
+            ),
+            ActionType::FetchSuit,
             self.context,
             0.0,
         );

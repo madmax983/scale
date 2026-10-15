@@ -79,6 +79,9 @@ mod tests {
             cleaning_targets: vec![],
             sanctuaries: vec![],
             mobs: vec![],
+            loose_eva_suits: vec![],
+            exterior_suit_pending: false,
+            pop_pressures: std::collections::HashMap::new(),
         }
     }
 

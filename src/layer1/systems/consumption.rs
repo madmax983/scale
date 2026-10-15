@@ -112,6 +112,21 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Consumption),
     );
 
+    // Spec 1384: EVA suit air — refill runs before the pressure drain
+    // so a tick straddling the threshold cannot both refill and drain
+    // the same bottle; suit status snapshot feeds STATS/status bar;
+    // death recovery runs before the corpse despawn so a colony suit
+    // returns to the pool instead of vanishing with the body.
+    schedule.add_systems(
+        (
+            crate::layer1::eva_suit::suit_air_system.before(pressure_damage_system),
+            crate::layer1::eva_suit::update_colony_suit_status_system,
+            crate::layer1::eva_suit::suit_death_recovery_system
+                .before(crate::layer1::health::despawn_dead_entities_system),
+        )
+            .in_set(Layer1SystemSet::Consumption),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::addiction::init_addiction_system.after(decay_needs_system),

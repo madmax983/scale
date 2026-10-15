@@ -36,6 +36,10 @@ pub struct ArrivalContext<'w, 's> {
     unequip_events: EventWriter<'w, UnequipEvent>,
     failed_events: EventWriter<'w, crate::layer1::economy::bio_loom::UnequipFailedEvent>,
     time: Res<'w, SimulationTime>,
+    eva_suits: Query<'w, 's, &'static crate::layer1::eva_suit::EvaSuit>,
+    pressure: Option<Res<'w, crate::layer1::pressure::PressureGrid>>,
+    tech_state: Option<Res<'w, crate::layer1::tech::TechState>>,
+    suit_floor: Option<Res<'w, crate::layer1::eva_suit::ScenarioSuitFloor>>,
 }
 
 /// Handles arrival at targets: assigns pops to farms/housing.
@@ -92,7 +96,10 @@ pub fn arrival_handler_system(
             // (Farm, Rest, Work, ...) are intentionally left alone.
             if matches!(
                 mt.for_action,
-                ActionType::SatisfyHunger | ActionType::FetchTool | ActionType::FetchClothing
+                ActionType::SatisfyHunger
+                    | ActionType::FetchTool
+                    | ActionType::FetchClothing
+                    | ActionType::FetchSuit
             ) {
                 commands.entity(pop_entity).insert(PopAction {
                     current: ActionType::Idle,
@@ -120,6 +127,25 @@ fn process_arrival(
     ctx: &mut ArrivalContext,
     is_ostracized: bool,
 ) -> bool {
+    // Spec 1384 §4.4 doff: completing any action (other than FetchSuit
+    // itself) on a pressurized tile takes a worn suit off — colony
+    // suits return to the pool, physical suits drop loose at the tile.
+    // A suited pop whose action completes outdoors keeps the suit.
+    if action != ActionType::FetchSuit {
+        let pressurized = ctx.pressure.as_deref().is_some_and(|grid| {
+            grid.get(pop_pos.x, pop_pos.y)
+                >= crate::layer1::pressure::SUFFOCATION_PRESSURE_THRESHOLD
+        });
+        if pressurized {
+            handle_doff_suit(
+                commands,
+                &mut ctx.resources,
+                equipment_opt,
+                &ctx.eva_suits,
+                pop_pos,
+            );
+        }
+    }
     match action {
         ActionType::ConsumeChemical => {
             handle_consume_chemical_arrival(
@@ -163,6 +189,26 @@ fn process_arrival(
                 &mut ctx.unequip_events,
                 &ctx.bio_suits,
                 &mut ctx.failed_events,
+            );
+            true
+        }
+        ActionType::FetchSuit => {
+            handle_fetch_suit(
+                commands,
+                &mut ctx.resources,
+                pop_entity,
+                pop_pos,
+                target_entity,
+                equipment_opt,
+                &mut ctx.unequip_events,
+                &ctx.bio_suits,
+                &mut ctx.failed_events,
+                &ctx.eva_suits,
+                ctx.tech_state.as_deref(),
+                ctx.suit_floor.as_deref().map_or(
+                    crate::layer1::eva_suit::SuitClass::Base,
+                    |f| f.class(),
+                ),
             );
             true
         }
@@ -403,6 +449,123 @@ pub fn handle_fetch_clothing(
                 ..Default::default()
             });
         }
+    }
+}
+
+/// Spec 1384 §4.4: don a suit on FetchSuit arrival.
+///
+/// If the target is a loose physical suit entity, equip that entity.
+/// Otherwise the target is a stockpile: consume 1 from the colony pool
+/// and materialize a fresh suit at the colony's current issue tier.
+/// Any ordinary clothing in the body slot is despawned (FetchClothing
+/// upgrade semantics); a fused BioSuit (attachment > 75) blocks the
+/// don with an `UnequipFailedEvent`, exactly as for clothing.
+#[allow(clippy::too_many_arguments)]
+pub fn handle_fetch_suit(
+    commands: &mut Commands,
+    resources: &mut ColonyResources,
+    pop_entity: Entity,
+    pop_pos: GridPosition,
+    target_entity: Entity,
+    equipment_opt: &mut Option<Mut<Equipment>>,
+    unequip_events: &mut EventWriter<UnequipEvent>,
+    bio_suits: &Query<&crate::layer1::economy::bio_loom::BioSuit>,
+    failed_events: &mut EventWriter<crate::layer1::economy::bio_loom::UnequipFailedEvent>,
+    eva_suits: &Query<&crate::layer1::eva_suit::EvaSuit>,
+    tech_state: Option<&crate::layer1::tech::TechState>,
+    suit_floor: crate::layer1::eva_suit::SuitClass,
+) {
+    use crate::layer1::eva_suit::{issue_tier, EvaSuit};
+    // Already suited: nothing to do.
+    if let Some(eq) = equipment_opt.as_deref() {
+        if let Some(body) = eq.body {
+            if eva_suits.get(body).is_ok() {
+                return;
+            }
+        }
+    }
+    let loose_target = eva_suits.get(target_entity).is_ok();
+    if !loose_target && resources.eva_suits < 1.0 {
+        return;
+    }
+    // Fused BioSuit check + replaced-garment despawn (FetchClothing semantics).
+    if let Some(eq) = equipment_opt.as_deref() {
+        if let Some(old_entity) = eq.body {
+            if let Ok(suit) = bio_suits.get(old_entity) {
+                if suit.attachment_level > 75.0 {
+                    failed_events.send(
+                        crate::layer1::economy::bio_loom::UnequipFailedEvent {
+                            entity: pop_entity,
+                            reason: "The Bio-Suit has fused with the host's nervous system."
+                                .to_string(),
+                        },
+                    );
+                    return;
+                }
+            }
+            unequip_events.send(UnequipEvent {
+                actor: pop_entity,
+                item: old_entity,
+                slot: "body".to_string(),
+            });
+            commands.entity(old_entity).despawn();
+        }
+    }
+    let suit_entity = if loose_target {
+        target_entity
+    } else {
+        resources.eva_suits -= 1.0;
+        let class = issue_tier(tech_state, suit_floor);
+        commands
+            .spawn((
+                Item::default(),
+                EvaSuit {
+                    class,
+                    air: class.capacity(),
+                    durability: 100.0,
+                    max_durability: 100.0,
+                    colony_issued: true,
+                },
+                pop_pos,
+            ))
+            .id()
+    };
+    if let Some(eq) = equipment_opt {
+        eq.body = Some(suit_entity);
+    } else {
+        commands.entity(pop_entity).insert(Equipment {
+            body: Some(suit_entity),
+            ..Default::default()
+        });
+    }
+}
+
+/// Spec 1384 §4.4: doff a worn suit on arrival at a pressurized tile.
+/// Colony-issued suits return to the pool (+1) and their entity is
+/// consumed; physical suits drop as a fresh loose entity at the
+/// arrival tile with air and durability preserved.
+pub fn handle_doff_suit(
+    commands: &mut Commands,
+    resources: &mut ColonyResources,
+    equipment_opt: &mut Option<Mut<Equipment>>,
+    eva_suits: &Query<&crate::layer1::eva_suit::EvaSuit>,
+    arrival_pos: GridPosition,
+) {
+    let Some(eq) = equipment_opt.as_deref_mut() else {
+        return;
+    };
+    let Some(body) = eq.body else { return };
+    let Ok(suit) = eva_suits.get(body) else {
+        return;
+    };
+    let suit = suit.clone();
+    eq.body = None;
+    if suit.colony_issued {
+        resources.eva_suits += 1.0;
+        commands.entity(body).despawn();
+    } else {
+        commands.entity(body).despawn();
+        commands.spawn((Item::default(), suit, arrival_pos));
     }
 }
 
@@ -706,5 +869,123 @@ mod tests {
 
         let equip = world.get::<crate::layer1::Equipment>(pop).unwrap();
         assert!(equip.tool.is_some());
+    }
+
+    #[test]
+    fn test_fetch_suit_equips_from_pool_and_decrements() {
+        // Spec 1384 §3: pool 2 -> fetch -> pool 1, body slot holds a
+        // full-air suit at the colony issue tier (Base, no tech), and
+        // prior ordinary clothing was despawned (upgrade semantics).
+        let mut world = World::new();
+        world.init_resource::<Events<UnequipEvent>>();
+        world.init_resource::<Events<crate::layer1::economy::bio_loom::UnequipFailedEvent>>();
+        let old_clothing = world
+            .spawn((
+                Item::default(),
+                Clothing {
+                    clothing_type: ClothingType::Tunic,
+                    insulation: 1.0,
+                    durability: 100.0,
+                    max_durability: 100.0,
+                },
+            ))
+            .id();
+        let pop = world
+            .spawn(Equipment {
+                body: Some(old_clothing),
+                ..Default::default()
+            })
+            .id();
+        let stockpile = world.spawn(GridPosition { x: 1, y: 1 }).id();
+        let mut resources = ColonyResources {
+            eva_suits: 2.0,
+            ..Default::default()
+        };
+        let _ = world.run_system_once(
+            move |mut commands: Commands,
+                  bio_suits: Query<&crate::layer1::economy::bio_loom::BioSuit>,
+                  eva_suits: Query<&crate::layer1::eva_suit::EvaSuit>,
+                  mut eq_query: Query<&mut Equipment>,
+                  mut unequip_events: EventWriter<UnequipEvent>,
+                  mut failed_events: EventWriter<
+                crate::layer1::economy::bio_loom::UnequipFailedEvent,
+            >| {
+                let eq = eq_query.get_mut(pop).unwrap();
+                let mut equip_opt = Some(eq);
+                handle_fetch_suit(
+                    &mut commands,
+                    &mut resources,
+                    pop,
+                    GridPosition { x: 1, y: 1 },
+                    stockpile,
+                    &mut equip_opt,
+                    &mut unequip_events,
+                    &bio_suits,
+                    &mut failed_events,
+                    &eva_suits,
+                    None,
+                    crate::layer1::eva_suit::SuitClass::Base,
+                );
+                assert_eq!(resources.eva_suits, 1.0, "pool decremented");
+            },
+        );
+        world.flush();
+        let equip = world.get::<crate::layer1::Equipment>(pop).unwrap();
+        let suit_entity = equip.body.expect("body slot holds the suit");
+        let suit = world
+            .get::<crate::layer1::eva_suit::EvaSuit>(suit_entity)
+            .unwrap();
+        assert_eq!(suit.class, crate::layer1::eva_suit::SuitClass::Base);
+        assert_eq!(suit.air, 50.0);
+        assert!(world.get_entity(old_clothing).is_err(), "old clothing despawned");
+    }
+
+    #[test]
+    fn test_doff_returns_colony_suit_to_pool() {
+        // Spec 1384 §3: interior arrival completing an action doffs a
+        // colony suit back into the pool and clears the body slot.
+        let mut world = World::new();
+        let suit = world
+            .spawn((
+                Item::default(),
+                crate::layer1::eva_suit::EvaSuit {
+                    class: crate::layer1::eva_suit::SuitClass::Base,
+                    air: 33.0,
+                    durability: 100.0,
+                    max_durability: 100.0,
+                    colony_issued: true,
+                },
+            ))
+            .id();
+        let pop = world
+            .spawn(Equipment {
+                body: Some(suit),
+                ..Default::default()
+            })
+            .id();
+        let mut resources = ColonyResources {
+            eva_suits: 1.0,
+            ..Default::default()
+        };
+        let _ = world.run_system_once(
+            move |mut commands: Commands,
+                  eva_suits: Query<&crate::layer1::eva_suit::EvaSuit>,
+                  mut eq_query: Query<&mut Equipment>| {
+                let eq = eq_query.get_mut(pop).unwrap();
+                let mut opt = Some(eq);
+                handle_doff_suit(
+                    &mut commands,
+                    &mut resources,
+                    &mut opt,
+                    &eva_suits,
+                    GridPosition { x: 2, y: 2 },
+                );
+                assert_eq!(resources.eva_suits, 2.0, "pool incremented");
+            },
+        );
+        world.flush();
+        let equip = world.get::<crate::layer1::Equipment>(pop).unwrap();
+        assert!(equip.body.is_none(), "body slot cleared");
+        assert!(world.get_entity(suit).is_err(), "pooled suit entity consumed");
     }
 }

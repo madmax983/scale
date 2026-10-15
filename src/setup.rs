@@ -268,6 +268,9 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(ColonyResources::default());
     // Item 77 Phase 2: atmosphere telegraphing snapshot + shelter order.
     world.insert_resource(crate::layer1::pressure::ColonyAtmosphere::default());
+    // Spec 1384: colony suit status snapshot + scenario issue floor.
+    world.insert_resource(crate::layer1::eva_suit::ColonySuitStatus::default());
+    world.insert_resource(crate::layer1::eva_suit::ScenarioSuitFloor::default());
     world.insert_resource(crate::layer1::pressure::ShelterOrder::default());
     world.insert_resource(crate::shared::random::GlobalRng(rand::rngs::StdRng::from_entropy()));
     world.insert_resource(crate::layer1::social::golden_age::ColonySafety {
@@ -873,7 +876,10 @@ fn apply_start_scenario_state(
         StartScenarioId::GroundSurvival => apply_ground_survival_start(world, layout),
         StartScenarioId::SocialDrama => apply_social_drama_start(world),
         StartScenarioId::Layer2Ready => apply_layer2_ready_start(world, layout),
-        StartScenarioId::Classic => {}
+        // Spec 1384 §4.8: Classic — 3 pool suits, Base issue floor.
+        StartScenarioId::Classic => {
+            world.resource_mut::<ColonyResources>().eva_suits = 3.0;
+        }
     }
 }
 
@@ -884,6 +890,8 @@ fn apply_ground_survival_start(world: &mut World, layout: Option<&StarterColonyL
         resources.wood = 8.0;
         resources.stone = 2.0;
         resources.tools = 1.0;
+        // Spec 1384 §4.8: Ground Survival — 2 pool suits, Base floor.
+        resources.eva_suits = 2.0;
     }
 
     let mut pop_entities: Vec<_> = world
@@ -928,6 +936,8 @@ fn apply_social_drama_start(world: &mut World) {
         resources.food = resources.food.max(12.0);
         resources.tools = resources.tools.max(3.0);
         resources.wood = resources.wood.max(12.0);
+        // Spec 1384 §4.8: Social Drama — 3 pool suits, Base floor.
+        resources.eva_suits = 3.0;
     }
 
     let immigrant_arrival_tick = crate::layer1::social::old_guard::FOUNDER_CUTOFF_YEAR
@@ -984,7 +994,13 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
         resources.metal = resources.metal.max(75.0);
         resources.tools = resources.tools.max(4.0);
         resources.knowledge = resources.knowledge.max(15.0);
+        // Spec 1384 §4.8: Layer 2 Ready — 6 pool suits and a Mk II
+        // issue floor (the preparation lane is already closed-cycle).
+        resources.eva_suits = resources.eva_suits.max(6.0);
     }
+    world.insert_resource(crate::layer1::eva_suit::ScenarioSuitFloor(
+        crate::layer1::eva_suit::SuitClass::Mk2,
+    ));
 
     let Some(layout) = layout else { return };
 

@@ -280,6 +280,10 @@ pub fn build_simulation_schedule() -> Schedule {
 /// Run one simulation tick: all game systems via schedule, then increment tick counter.
 #[allow(clippy::too_many_lines)]
 fn init_simulation_resources(world: &mut World) {
+    // Spec 1384 EVA suits: status snapshot + scenario issue floor
+    // (init only — never clobber a scenario-granted value).
+    world.init_resource::<crate::layer1::eva_suit::ColonySuitStatus>();
+    world.init_resource::<crate::layer1::eva_suit::ScenarioSuitFloor>();
     world.init_resource::<crate::layer1::agriculture::compost::CompostSoil>();
     // Spec 345 Planetary Quirks: centralized global modifiers derived
     // from PlanetaryTraits (init only — never clobber a derived value).

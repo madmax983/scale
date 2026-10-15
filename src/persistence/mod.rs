@@ -51,6 +51,12 @@
 //!   deterministically from the snapshot) and then have every captured
 //!   field overwritten, so they are fully-formed pops — never ghosts —
 //!   but uncaptured flavor components re-randomize from that seed.
+//!   **Spec 1384 exception:** a pop's *worn EVA suit* IS captured
+//!   (class, air, durability, colony-issued flag) and restored into
+//!   the body slot — losing it on load would strip the bottle off a
+//!   pop standing in vacuum and kill them on the first tick. Loose
+//!   physical suits are captured as items. All other equipment stays
+//!   uncaptured.
 //! * Transient render/UI state (selection, camera, menus) — out by spec.
 //!
 //! ## Determinism honesty
@@ -117,7 +123,8 @@ pub mod settings;
 pub use settings::{load_settings, store_settings, SaveSettings, SETTINGS_KEY};
 
 /// Current on-disk save format version. Bump on any snapshot shape change.
-pub const CURRENT_SAVE_VERSION: u32 = 1;
+/// v2 (Spec 1384): EVA suit pool fields, worn-suit payloads, loose-suit items.
+pub const CURRENT_SAVE_VERSION: u32 = 2;
 /// Reserved slot that only the autosave path may write.
 pub const AUTOSAVE_SLOT: &str = "autosave";
 /// Autosave cadence (ticks).
@@ -496,6 +503,10 @@ pub struct ColonyResourcesSave {
     pub max_hyper_valuable: f32,
     pub organs: f32,
     pub max_organs: f32,
+    /// Spec 1384: colony EVA suit pool.
+    pub eva_suits: f32,
+    /// Spec 1384: colony EVA suit pool cap.
+    pub max_eva_suits: f32,
 }
 
 impl From<&ColonyResources> for ColonyResourcesSave {
@@ -558,6 +569,8 @@ impl From<&ColonyResources> for ColonyResourcesSave {
             max_hyper_valuable: r.max_hyper_valuable,
             organs: r.organs,
             max_organs: r.max_organs,
+            eva_suits: r.eva_suits,
+            max_eva_suits: r.max_eva_suits,
         }
     }
 }
@@ -622,6 +635,8 @@ impl From<&ColonyResourcesSave> for ColonyResources {
             max_hyper_valuable: s.max_hyper_valuable,
             organs: s.organs,
             max_organs: s.max_organs,
+            eva_suits: s.eva_suits,
+            max_eva_suits: s.max_eva_suits,
         }
     }
 }
@@ -721,6 +736,24 @@ pub struct PopSave {
     pub relationships: Vec<(u64, f32)>,
     /// (target old_bits, target x, target y, action Debug name).
     pub movement_target: Option<(u64, i32, i32, String)>,
+    /// Spec 1384 (§4/§10): the pop's worn EVA suit, if any — the one
+    /// deliberate exception to the v1 "equipment is not captured"
+    /// rule. A load without a suit would strip the bottle off a pop
+    /// standing in vacuum and kill them on the first tick.
+    pub worn_suit: Option<SuitSave>,
+}
+
+/// One saved EVA suit (worn payload or loose-item payload, Spec 1384).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SuitSave {
+    /// Suit class save name (`base` / `mk2` / `expedition`).
+    pub class: String,
+    /// Remaining bottle days.
+    pub air: f32,
+    /// Current durability.
+    pub durability: f32,
+    /// Whether the suit was colony-issued (pool-backed) or physical.
+    pub colony_issued: bool,
 }
 
 /// One saved building.
@@ -762,6 +795,8 @@ pub struct ItemSave {
     pub item_ref: Option<u64>,
     /// Display name for `Curio(&'static str)`.
     pub curio_name: Option<String>,
+    /// Spec 1384: loose EVA suit payload when this item is a suit.
+    pub suit: Option<SuitSave>,
 }
 
 /// One designation entity.
@@ -1301,6 +1336,17 @@ pub fn capture_snapshot(world: &mut World, saved_at_unix: u64) -> SaveSnapshot {
                 name_of(&mt.for_action),
             )
         });
+        // Spec 1384: worn EVA suit (the persistence exception, §4/§10).
+        let worn_suit = world
+            .get::<crate::layer1::items::Equipment>(e)
+            .and_then(|eq| eq.body)
+            .and_then(|body| world.get::<crate::layer1::eva_suit::EvaSuit>(body))
+            .map(|suit| SuitSave {
+                class: suit.class.save_name().to_string(),
+                air: suit.air,
+                durability: suit.durability,
+                colony_issued: suit.colony_issued,
+            });
         pops.push(PopSave {
             old_bits: e.to_bits(),
             name,
@@ -1320,6 +1366,7 @@ pub fn capture_snapshot(world: &mut World, saved_at_unix: u64) -> SaveSnapshot {
             job,
             relationships,
             movement_target,
+            worn_suit,
         });
     }
 
@@ -1371,11 +1418,20 @@ pub fn capture_snapshot(world: &mut World, saved_at_unix: u64) -> SaveSnapshot {
         });
     }
 
+    // Spec 1384: worn suit entities are captured via PopSave.worn_suit;
+    // they must not double-save as loose items.
+    let worn_suit_entities: HashSet<Entity> = {
+        let mut q = world.query_filtered::<&crate::layer1::items::Equipment, With<Pop>>();
+        q.iter(world).filter_map(|eq| eq.body).collect()
+    };
     let mut items = Vec::new();
     {
         let mut q = world.query::<(Entity, &Item, &GridPosition)>();
         for (e, item, pos) in q.iter(world) {
             if pop_set.contains(&e) || building_set.contains(&e) {
+                continue;
+            }
+            if worn_suit_entities.contains(&e) {
                 continue;
             }
             let (item_type, item_ref, curio_name) = match &item.item_type {
@@ -1390,12 +1446,23 @@ pub fn capture_snapshot(world: &mut World, saved_at_unix: u64) -> SaveSnapshot {
                 }
                 other => (name_of(other), None, None),
             };
+            // Spec 1384: loose physical EVA suits ride as items with a
+            // suit payload (class/air/durability ride along exactly).
+            let suit = world
+                .get::<crate::layer1::eva_suit::EvaSuit>(e)
+                .map(|s| SuitSave {
+                    class: s.class.save_name().to_string(),
+                    air: s.air,
+                    durability: s.durability,
+                    colony_issued: s.colony_issued,
+                });
             items.push(ItemSave {
                 item_type,
                 x: pos.x,
                 y: pos.y,
                 item_ref,
                 curio_name,
+                suit,
             });
         }
     }
@@ -1739,6 +1806,38 @@ pub fn apply_snapshot(world: &mut World, snap: &SaveSnapshot) -> Result<LoadRepo
                 });
             }
         }
+        // Spec 1384: restore the worn suit into the body slot (the
+        // persistence exception — a suited pop in vacuum must not
+        // come back naked).
+        if let Some(suit_save) = &p.worn_suit {
+            if let Some(class) =
+                crate::layer1::eva_suit::SuitClass::from_save_name(&suit_save.class)
+            {
+                let suit_entity = world
+                    .spawn((
+                        Item::default(),
+                        crate::layer1::eva_suit::EvaSuit {
+                            class,
+                            air: suit_save.air,
+                            durability: suit_save.durability,
+                            max_durability: 100.0,
+                            colony_issued: suit_save.colony_issued,
+                        },
+                        GridPosition { x: p.x, y: p.y },
+                    ))
+                    .id();
+                if let Some(mut eq) =
+                    world.get_mut::<crate::layer1::items::Equipment>(entity)
+                {
+                    eq.body = Some(suit_entity);
+                } else {
+                    world.entity_mut(entity).insert(crate::layer1::items::Equipment {
+                        body: Some(suit_entity),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
     }
     // Farm workers / housing residents.
     for b in &snap.buildings {
@@ -1760,6 +1859,30 @@ pub fn apply_snapshot(world: &mut World, snap: &SaveSnapshot) -> Result<LoadRepo
 
     // Items and designations.
     for item in &snap.items {
+        // Spec 1384: loose EVA suits restore with their suit payload,
+        // regardless of how the base item type name resolves.
+        if let Some(suit_save) = &item.suit {
+            if let Some(class) =
+                crate::layer1::eva_suit::SuitClass::from_save_name(&suit_save.class)
+            {
+                world.spawn((
+                    Item::default(),
+                    crate::layer1::eva_suit::EvaSuit {
+                        class,
+                        air: suit_save.air,
+                        durability: suit_save.durability,
+                        max_durability: 100.0,
+                        colony_issued: suit_save.colony_issued,
+                    },
+                    GridPosition {
+                        x: item.x,
+                        y: item.y,
+                    },
+                ));
+                report.items += 1;
+                continue;
+            }
+        }
         let resolved = match item.item_type.as_str() {
             "Corpse" | "MemoryCore" => item.item_ref.and_then(|bits| remap.get(&bits)).map(
                 |&target| {
@@ -2411,7 +2534,7 @@ mod tests {
         let text = String::from_utf8(bytes.clone()).unwrap();
         // format_version is the FIRST field of the serialized snapshot.
         assert!(
-            text.starts_with("{\"format_version\":1"),
+            text.starts_with("{\"format_version\":2"),
             "snapshot JSON must start with format_version, got: {}",
             &text[..text.len().min(60)]
         );
@@ -2631,6 +2754,7 @@ mod tests {
                 job: None,
                 relationships: Vec::new(),
                 movement_target: None,
+                worn_suit: None,
             }],
             buildings: vec![BuildingSave {
                 old_bits: 4343,
@@ -2649,6 +2773,7 @@ mod tests {
                 y: 4,
                 item_ref: Some(4242),
                 curio_name: None,
+                suit: None,
             }],
             designations: vec![DesignationSave {
                 designation_type: "Mine".to_string(),
@@ -2672,5 +2797,78 @@ mod tests {
             digest_before,
             "snapshot with empty/absent fields must round-trip exactly"
         );
+    }
+
+    #[test]
+    fn test_suits_round_trip_through_save() {
+        // Spec 1384 §3/§10: pool count, a worn Mk II at 63.0 air, and
+        // a loose expedition suit at 141.0 air all survive
+        // capture -> apply -> capture identically.
+        use crate::layer1::eva_suit::{EvaSuit, SuitClass};
+        let mut world = bare_world(0, 0.0);
+        {
+            let mut resources = world.resource_mut::<ColonyResources>();
+            resources.eva_suits = 2.0;
+            resources.max_eva_suits = 50.0;
+        }
+        let worn = world
+            .spawn((
+                Item::default(),
+                EvaSuit {
+                    class: SuitClass::Mk2,
+                    air: 63.0,
+                    durability: 100.0,
+                    max_durability: 100.0,
+                    colony_issued: true,
+                },
+                GridPosition { x: 1, y: 1 },
+            ))
+            .id();
+        world.spawn((
+            crate::layer1::pop::Pop,
+            PopName("Suited".to_string()),
+            GridPosition { x: 1, y: 1 },
+            crate::layer1::items::Equipment {
+                body: Some(worn),
+                ..Default::default()
+            },
+        ));
+        world.spawn((
+            Item::default(),
+            EvaSuit {
+                class: SuitClass::Expedition,
+                air: 141.0,
+                durability: 100.0,
+                max_durability: 100.0,
+                colony_issued: false,
+            },
+            GridPosition { x: 4, y: 4 },
+        ));
+        let snap = capture_snapshot(&mut world, 42);
+        assert_eq!(snap.resources.eva_suits, 2.0);
+        let pop_save = snap.pops.iter().find(|p| p.name == "Suited").unwrap();
+        let worn_save = pop_save.worn_suit.clone().expect("worn suit captured");
+        assert_eq!(worn_save.class, "mk2");
+        assert_eq!(worn_save.air, 63.0);
+        let loose_save = snap
+            .items
+            .iter()
+            .find_map(|i| i.suit.clone())
+            .expect("loose suit captured as item");
+        assert_eq!(loose_save.class, "expedition");
+        assert_eq!(loose_save.air, 141.0);
+
+        let mut world2 = bare_world(0, 0.0);
+        apply_snapshot(&mut world2, &snap).unwrap();
+        let after = capture_snapshot(&mut world2, 42);
+        assert_eq!(after.resources.eva_suits, 2.0);
+        let pop_after = after.pops.iter().find(|p| p.name == "Suited").unwrap();
+        assert_eq!(pop_after.worn_suit, pop_save.worn_suit);
+        let loose_after = after
+            .items
+            .iter()
+            .find_map(|i| i.suit.clone())
+            .expect("loose suit restored");
+        assert_eq!(loose_after, loose_save);
     }
 }

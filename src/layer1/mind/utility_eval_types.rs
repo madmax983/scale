@@ -148,6 +148,7 @@ impl PopEvalData {
             existential_crisis: item.existential_crisis.copied(),
             has_temporal_fugue: item.temporal_fugue.is_some(),
             is_fringe: item.cultural_drift.is_some_and(|d| d.is_fringe()),
+            wears_eva_suit: false,
         }
     }
 }
@@ -233,6 +234,8 @@ pub struct PopEvalData {
     pub has_temporal_fugue: bool,
     /// Whether the pop carries the Fringe cultural tag (Spec 290).
     pub is_fringe: bool,
+    /// Whether the pop currently wears an EVA suit (Spec 1384).
+    pub wears_eva_suit: bool,
 }
 
 #[cfg(test)]
@@ -269,6 +272,7 @@ impl PopEvalData {
             existential_crisis: None,
             has_temporal_fugue: false,
             is_fringe: false,
+            wears_eva_suit: false,
         }
     }
 }
@@ -465,6 +469,15 @@ pub struct UtilityAIBuffer {
     pub item_entities: Vec<ScorableCandidate>,
     /// Buffer for stockpile candidates.
     pub stockpiles: Vec<ScorableCandidate>,
+    /// Buffer for loose physical EVA suit candidates (Spec 1384).
+    pub loose_eva_suits: Vec<ScorableCandidate>,
+    /// Whether any Work/Repair/Explore candidate targets a tile below
+    /// the suffocation threshold this tick (Spec 1384 FetchSuit gate).
+    pub exterior_suit_pending: bool,
+    /// Snapshot of pop-tile pressures keyed by entity index for the
+    /// FetchSuit emergency-dash check (Spec 1384). Empty when no
+    /// pressure grid exists (treated as pressurized).
+    pub pop_pressures: std::collections::HashMap<u32, f32>,
     pub stockpile_positions: bevy_utils::HashSet<GridPosition>,
     /// Buffer for anomaly candidates.
     pub anomalies: Vec<ScorableCandidate>,

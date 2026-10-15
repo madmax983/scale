@@ -8,20 +8,62 @@ use crate::layer1::pop::Pop;
 use bevy_ecs::prelude::*;
 
 /// Degrades clothing over time based on usage.
+///
+/// Spec 1384: the body-slot wear path also covers `EvaSuit`
+/// durability (same 0.05/tick rate — a pop who lives in their suit
+/// wears it out in ~2000 ticks, same as clothing; doffing is the
+/// counterplay). A suit that tears while its wearer is below the
+/// suffocation threshold is chronicled, Major.
+#[allow(clippy::type_complexity)]
 pub fn clothing_wear_system(
     mut commands: Commands,
-    mut pop_query: Query<&mut Equipment, With<Pop>>,
+    mut pop_query: Query<
+        (
+            &mut Equipment,
+            Option<&crate::layer1::pop::PopName>,
+            Option<&crate::layer1::map::GridPosition>,
+        ),
+        With<Pop>,
+    >,
     mut clothing_query: Query<&mut Clothing>,
+    mut suit_query: Query<&mut crate::layer1::eva_suit::EvaSuit>,
+    grid_opt: Option<Res<crate::layer1::pressure::PressureGrid>>,
+    mut chronicle: Option<ResMut<Events<crate::layer1::chronicle::AddChronicleEvent>>>,
 ) {
     let decay_amount = 0.05; // Tunable
 
-    for mut eq in &mut pop_query {
+    for (mut eq, name, pos) in &mut pop_query {
         if let Some(entity) = eq.body {
             if let Ok(mut item) = clothing_query.get_mut(entity) {
                 item.durability -= decay_amount;
 
                 if item.durability <= 0.0 {
                     // Break item
+                    commands.entity(entity).despawn();
+                    eq.body = None;
+                }
+            } else if let Ok(mut suit) = suit_query.get_mut(entity) {
+                suit.durability -= decay_amount;
+
+                if suit.durability <= 0.0 {
+                    // Suit torn beyond use.
+                    let in_vacuum = match (pos, grid_opt.as_deref()) {
+                        (Some(p), Some(grid)) => {
+                            grid.get(p.x, p.y)
+                                < crate::layer1::pressure::SUFFOCATION_PRESSURE_THRESHOLD
+                        }
+                        _ => false,
+                    };
+                    if in_vacuum {
+                        if let Some(events) = chronicle.as_deref_mut() {
+                            let label = name
+                                .map_or_else(|| "A colonist".to_string(), |n| n.0.clone());
+                            events.send(crate::layer1::chronicle::AddChronicleEvent {
+                                text: format!("{label}'s suit has torn beyond use."),
+                                importance: crate::layer1::chronicle::EventImportance::Major,
+                            });
+                        }
+                    }
                     commands.entity(entity).despawn();
                     eq.body = None;
                 }
