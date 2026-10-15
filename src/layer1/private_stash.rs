@@ -100,8 +100,12 @@ pub fn stash_creation_system(
     if resources.food < SHORTAGE_FOOD_THRESHOLD {
         for (entity, traits) in query.iter() {
             if (traits.has(Trait::Anxious) || traits.has(Trait::Hoarder)) && resources.food >= 1.0 {
-                // Throttle stash creation with a probability
-                if rng.gen_bool(0.001) {
+                // Throttle stash creation with a probability.
+                // Balance (2026-10-14 baseline): 0.001 produced 3 stashes
+                // across 48 bot colonies (up to 2000 ticks each) — organic
+                // hoarding was effectively invisible. 0.01 targets a few
+                // visible stashes per shortage without noise.
+                if rng.gen_bool(0.01) {
                     resources.food -= 1.0;
                     let mut stash = PrivateStash {
                         owner: Some(entity),
