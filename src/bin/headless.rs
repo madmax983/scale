@@ -31,6 +31,9 @@
 //!   `origin <name>`  - Choose this run's adventurer origin (before first tick;
 //!                      also `--origin=<name>` on the command line)
 //!   `origins`        - List adventurer origins and this run's roster
+//!   `--scenario=<id>` - Choose this run's start scenario on the command line
+//!                      (before world creation; ids: classic, ground_survival,
+//!                      social_drama, layer2_ready; unknown values exit non-zero)
 //!   `help`           - Show this help
 //!   `quit`           - Exit
 //!   `save <slot>`    - Save the colony to a slot (Spec 1382)
@@ -108,6 +111,7 @@ use scale::layer1::{
 };
 use scale::setup::{setup_world_with_config, SetupConfig};
 use scale::shared::log::MessageLog;
+use scale::shared::scenario::StartScenarioId;
 use scale::shared::state::GameState;
 use scale::shared::time::SimulationTime;
 use scale::persistence::{
@@ -198,9 +202,38 @@ fn print_dashboard_panel(
 }
 
 fn main() {
+    // --scenario=<value>: choose this run's start scenario. Unlike
+    // --origin=, the scenario is baked into the world by
+    // setup_world_with_config, so it MUST be parsed before world
+    // creation and passed in via SetupConfig. An unknown value fails
+    // loud (exit 2) rather than silently falling back to Classic —
+    // balance/telemetry runs must never record the wrong scenario.
+    let scenario = if let Some(flag) = std::env::args()
+        .find_map(|a| a.strip_prefix("--scenario=").map(str::to_string))
+    {
+        match StartScenarioId::parse(&flag) {
+            Some(id) => {
+                println!(
+                    "{}",
+                    format!("Scenario chosen: {} ({})", id.name(), id.id()).cyan()
+                );
+                id
+            }
+            None => {
+                eprintln!("Unknown scenario '{flag}'. Available scenarios:");
+                for scenario in StartScenarioId::all() {
+                    eprintln!("  {:14} {}", scenario.id(), scenario.name());
+                }
+                std::process::exit(2);
+            }
+        }
+    } else {
+        StartScenarioId::default()
+    };
+
     let mut world = setup_world_with_config(SetupConfig {
         headless: true,
-        ..Default::default()
+        scenario,
     });
     *world.resource_mut::<GameState>() = GameState::Running;
 
@@ -2842,9 +2875,12 @@ fn handle_import_command(_world: &mut World, parts: &[&str]) {
 /// Prints one compact, machine-parseable stats line for playtest snapshots.
 ///
 /// Format:
-/// `STATS tick=1000 pops=5 avg_health=98.2 avg_morale=0.85 min_pressure=1.00 food=12.0 wood=8.0 stone=2.0 tools=1.0 buildings=17 lifesupport=1 possessed=none sovereign=none legitimacy=0.00 melancholy=0.00 heat=0.0 hull=100 crew=3 loyalty=0.60`
+/// `STATS tick=1000 scenario=classic pops=5 avg_health=98.2 avg_morale=0.85 min_pressure=1.00 food=12.0 wood=8.0 stone=2.0 tools=1.0 buildings=17 lifesupport=1 possessed=none sovereign=none legitimacy=0.00 melancholy=0.00 heat=0.0 hull=100 crew=3 loyalty=0.60`
 fn print_stats(world: &mut World) {
     let tick = world.resource::<SimulationTime>().tick;
+    let scenario = world
+        .get_resource::<scale::shared::scenario::ActiveStartScenario>()
+        .map_or("classic", |active| active.id.id());
     let resources = *world.resource::<ColonyResources>();
 
     let mut pops = 0u32;
@@ -3160,8 +3196,9 @@ fn print_stats(world: &mut World) {
         .unwrap_or(0);
 
     println!(
-        "STATS tick={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={}",
         tick,
+        scenario,
         pops,
         avg_health,
         avg_morale,
