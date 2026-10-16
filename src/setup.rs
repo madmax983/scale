@@ -319,6 +319,11 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<crate::layer1::economy::curio_trade::CulturalLossEvent>>();
     // Spec 343 The Rumor Web: adjacency-spread ledger.
     world.init_resource::<crate::layer1::social::rumor::RumorWebLedger>();
+    // Spec 327 The Stowaway (Item 87): hidden-pop agenda tuning must exist
+    // from setup, not only from init_simulation_resources on the first
+    // tick — headless dispatches commands (stowaway spawn, muster) before
+    // any tick runs, and those helpers read this config unconditionally.
+    world.init_resource::<crate::layer1::social::ship_stowaway::StowawayConfig>();
     world.init_resource::<crate::layer1::social::emotional_contagion::ContagionLedger>();
     // Spec 341 Pop Memory: witness events, episode state, colony identity.
     world.init_resource::<Events<crate::layer1::memory::WitnessEvent>>();

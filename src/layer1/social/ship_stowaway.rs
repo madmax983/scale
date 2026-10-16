@@ -343,6 +343,14 @@ pub fn stowaway_agenda_system(
 /// their elusiveness; the exposed are dragged into the light (Major
 /// chronicle + unrest shock). Returns the names of the newly exposed.
 pub fn muster_sweep(world: &mut World) -> Vec<String> {
+    // Item 87: callable as the FIRST command on a fresh world, before the
+    // first tick runs init_simulation_resources — initialize everything
+    // read below (the same guard the headless fools/scion handlers apply
+    // to their event resources). init_resource never clobbers an
+    // existing (possibly scenario-tuned) resource.
+    world.init_resource::<StowawayConfig>();
+    world.init_resource::<Events<AddChronicleEvent>>();
+    world.init_resource::<Unrest>();
     let config = world.resource::<StowawayConfig>().clone();
     let mut rng = rand::thread_rng();
     let candidates: Vec<(Entity, String, f32)> = {
@@ -506,6 +514,10 @@ pub fn debug_spawn_stowaway(
     world: &mut World,
     agenda_override: Option<StowawayAgenda>,
 ) -> Option<Entity> {
+    // Item 87: first-command guard, as in muster_sweep — StowawayConfig
+    // used to exist only after the first tick initialized it.
+    world.init_resource::<StowawayConfig>();
+    world.init_resource::<Events<AddChronicleEvent>>();
     let config = world.resource::<StowawayConfig>().clone();
     let mut rng = rand::thread_rng();
     let anchors: Vec<(i32, i32)> = {
@@ -972,6 +984,122 @@ mod tests {
             debug_spawn_stowaway(app.world_mut(), None).is_none(),
             "no living pops to blend with — no spawn"
         );
+    }
+
+    /// Item 87 regression: a world in the exact state `setup_world_with_config`
+    /// leaves it before the first simulation tick — the setup-provided
+    /// dependencies (chronicle events, unrest, faction relations) exist, but
+    /// `StowawayConfig` does NOT (it used to be created only by
+    /// `init_simulation_resources` on the first tick). The headless
+    /// `stowaway spawn` / `muster` commands dispatch into these helpers
+    /// before any tick runs, so they must not panic here.
+    fn fresh_world_without_config() -> World {
+        let mut world = World::new();
+        world.init_resource::<Events<AddChronicleEvent>>();
+        world.init_resource::<Unrest>();
+        world.insert_resource(FactionRelations::default());
+        // Deliberately NO StowawayConfig — see above.
+        let mut rng = rand::thread_rng();
+        world.spawn(PopBundle::random(5, 5, &mut rng));
+        world
+    }
+
+    #[test]
+    fn test_debug_spawn_stowaway_first_command_on_fresh_world() {
+        // Arrange
+        let mut world = fresh_world_without_config();
+        assert!(!world.contains_resource::<StowawayConfig>());
+
+        // Act — the very first headless command on a fresh world.
+        let entity = debug_spawn_stowaway(&mut world, Some(StowawayAgenda::Spy));
+
+        // Assert
+        let entity = entity.expect("spawn should succeed with a living colony");
+        assert!(world.get::<Stowaway>(entity).is_some());
+        assert!(world.contains_resource::<StowawayConfig>());
+    }
+
+    #[test]
+    fn test_muster_sweep_first_command_on_fresh_world() {
+        // Arrange
+        let mut world = fresh_world_without_config();
+
+        // Act — muster with nobody hidden, then after a debug spawn.
+        let exposed_empty = muster_sweep(&mut world);
+        debug_spawn_stowaway(&mut world, None).expect("spawn should succeed");
+        let _exposed_after_spawn = muster_sweep(&mut world);
+
+        // Assert — no panic either way; the empty sweep exposes nobody.
+        assert!(exposed_empty.is_empty());
+        assert!(world.contains_resource::<StowawayConfig>());
+    }
+
+    #[test]
+    fn test_stowaway_status_label_first_command_on_fresh_world() {
+        // Arrange
+        let mut world = fresh_world_without_config();
+
+        // Act / Assert — the panel / STATS path is query-only and must
+        // stay panic-free on a fresh world.
+        assert_eq!(stowaway_status_label(&mut world), "clear");
+    }
+
+    #[test]
+    fn test_first_command_debug_spawn_on_bare_world() {
+        // Item 87: `stowaway spawn` as the FIRST headless command on a
+        // fresh world panicked — StowawayConfig was only initialized by
+        // init_simulation_resources on the first tick, and this helper
+        // read it unconditionally. A bare World (no config, no chronicle
+        // events, no tick ever run) must be enough.
+        let mut world = World::new();
+        let mut rng = rand::thread_rng();
+        world.spawn(PopBundle::random(5, 5, &mut rng));
+
+        // Act
+        let spawned = debug_spawn_stowaway(&mut world, Some(StowawayAgenda::Spy));
+
+        // Assert
+        assert!(
+            spawned.is_some(),
+            "debug spawn must succeed as the first command on a fresh world"
+        );
+        assert_eq!(stowaway_status_label(&mut world), "signs");
+    }
+
+    #[test]
+    fn test_first_command_muster_on_bare_world() {
+        // Item 87: `muster` as the first command hit the same panic at
+        // the same StowawayConfig read, even with no stowaways present.
+        let mut world = World::new();
+
+        // Act / Assert (must not panic)
+        let exposed = muster_sweep(&mut world);
+        assert!(exposed.is_empty());
+        assert_eq!(stowaway_status_label(&mut world), "clear");
+    }
+
+    #[test]
+    fn test_first_command_on_setup_world_before_any_tick() {
+        // Item 87, end-to-end: a world from setup_world_with_config (the
+        // headless entry path) must serve stowaway commands before the
+        // first simulation tick runs init_simulation_resources.
+        let mut world = crate::setup::setup_world_with_config(crate::setup::SetupConfig {
+            headless: true,
+            ..Default::default()
+        });
+        assert!(
+            world.contains_resource::<StowawayConfig>(),
+            "setup must initialize StowawayConfig before any tick/command"
+        );
+
+        // Act (no tick has run — these are the first commands)
+        let spawned = debug_spawn_stowaway(&mut world, None);
+        assert!(
+            spawned.is_some(),
+            "a setup world starts with living pops to blend with"
+        );
+        let _ = muster_sweep(&mut world);
+        assert!(!stowaway_status_label(&mut world).is_empty());
     }
 
     #[test]
