@@ -192,11 +192,31 @@ fn effective_map_viewport(world: &World, map_inner: Option<Rect>) -> Viewport {
 
 /// Route mouse input to the appropriate handler based on current context.
 ///
-/// `map_inner` is the inner area of the focused colony map pane (see
-/// [`map_inner_area`]); it lets selection account for the map
-/// centering the renderer applies on panes larger than the world.
-/// Pass `None` when no colony map pane is focused.
+/// `mouse` arrives in absolute terminal cells; `map_inner` is the
+/// inner area of the focused colony map pane (see
+/// [`map_inner_area`]) in that same absolute space. The renderer
+/// draws tiles relative to the inner area's origin, so the click is
+/// rebased by that origin before it is resolved to a tile — without
+/// the rebase every resolution is shifted by exactly the inner
+/// origin (the pane border plus wherever the shell placed the
+/// pane). Clicks that fall outside the inner area (the border, or
+/// another pane while the map keeps focus) name no rendered tile
+/// and are dropped. Pass `None` when no colony map pane is focused;
+/// the click then keeps its raw, unrebased meaning.
 pub fn route_mouse_input(world: &mut World, mouse: GameMouseEvent, map_inner: Option<Rect>) {
+    let mouse = match map_inner {
+        Some(inner) => {
+            if !inner.contains(ratatui::layout::Position {
+                x: mouse.x,
+                y: mouse.y,
+            }) {
+                return;
+            }
+            GameMouseEvent::new(mouse.x - inner.x, mouse.y - inner.y)
+        }
+        None => mouse,
+    };
+
     let context = world.resource::<InputContextStack>().current();
 
     match context {
@@ -210,7 +230,6 @@ pub fn route_mouse_input(world: &mut World, mouse: GameMouseEvent, map_inner: Op
         _ => {}
     }
 }
-
 /// Route top-level mouse input, suppressing gameplay clicks while layout mode is active.
 pub fn route_root_mouse_input(world: &SharedWorld, shell: &UiShell, mouse: GameMouseEvent) {
     let is_main_menu = {
@@ -1365,6 +1384,147 @@ mod tests {
         let mode = world.resource::<DesignationMode>();
         assert_eq!(mode.drag_start.map(|p| (p.x, p.y)), Some((0, 0)));
         assert_eq!((mode.cursor.x, mode.cursor.y), (0, 0));
+    }
+
+    /// A world with a shoreline in column 0: grass down to (0, 5),
+    /// water at (0, 7) — the boundary from the live report, where a
+    /// small constant resolution error swaps the reported terrain.
+    fn shoreline_map_world(context: InputContext) -> World {
+        use crate::layer1::{TerrainGrid, TerrainType};
+        let mut world = World::new();
+        let mut stack = InputContextStack::default();
+        stack.push(context);
+        world.insert_resource(stack);
+        let mut terrain = TerrainGrid {
+            width: 10,
+            height: 8,
+            tiles: vec![TerrainType::Grass; 80],
+        };
+        terrain.set(0, 7, TerrainType::Water);
+        world.insert_resource(terrain);
+        world.insert_resource(Viewport { x: 5, y: 5 });
+        world.insert_resource(Selection::default());
+        world
+    }
+
+    #[test]
+    fn test_route_mouse_click_in_offset_pane_selects_rendered_tile() {
+        // Production geometry: the shell places the colony pane at
+        // (3, 2) with other panes/chrome around it, so the inner
+        // area `route_root_mouse_input` hands us starts at (4, 3),
+        // and mouse events arrive in absolute terminal cells. The
+        // 10x8 world is centered in the 40x20 inner area (camera
+        // re-centers to (-15, -6)), so tile (0, 7) renders at inner
+        // cell (15, 13) = absolute cell (19, 16).
+        let mut world = shoreline_map_world(InputContext::Normal);
+        let inner = map_inner_area(Rect::new(3, 2, 42, 22));
+        assert_eq!(inner, Rect::new(4, 3, 40, 20));
+
+        route_mouse_input(&mut world, mouse_event(19, 16), Some(inner));
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(0, 7)
+        );
+        assert!(
+            crate::ui::selection::inspect_tile(&world, 0, 7).contains("Terrain: Water"),
+            "clicking the rendered water cell must report water"
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_click_in_offset_pane_grass_above_shoreline() {
+        let mut world = shoreline_map_world(InputContext::Normal);
+        let inner = map_inner_area(Rect::new(3, 2, 42, 22));
+
+        // Tile (0, 5) — grass, two rows above the water — renders
+        // at absolute cell (19, 14).
+        route_mouse_input(&mut world, mouse_event(19, 14), Some(inner));
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(0, 5)
+        );
+        assert!(
+            crate::ui::selection::inspect_tile(&world, 0, 5).contains("Terrain: Grass"),
+            "clicking the rendered grass cell must report grass"
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_click_in_offset_pane_selects_rendered_pop() {
+        let mut world = shoreline_map_world(InputContext::Normal);
+        let pop = world.spawn((Pop, GridPosition { x: 0, y: 0 })).id();
+        let inner = map_inner_area(Rect::new(3, 2, 42, 22));
+
+        // Tile (0, 0) renders at absolute cell (19, 9).
+        route_mouse_input(&mut world, mouse_event(19, 9), Some(inner));
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Entity(pop)
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_click_on_pane_border_is_dropped() {
+        let mut world = shoreline_map_world(InputContext::Normal);
+        let inner = map_inner_area(Rect::new(3, 2, 42, 22));
+
+        // The pane's outer corner cell (3, 2) is border, not map:
+        // it names no rendered tile and must select nothing.
+        route_mouse_input(&mut world, mouse_event(3, 2), Some(inner));
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::None
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_margin_click_in_offset_pane_selects_outside_tile() {
+        let mut world = shoreline_map_world(InputContext::Normal);
+        let inner = map_inner_area(Rect::new(3, 2, 42, 22));
+
+        // The inner area's own top-left cell (4, 3) is centering
+        // margin: it still selects the off-map tile (-15, -6),
+        // exactly as with an origin-anchored pane.
+        route_mouse_input(&mut world, mouse_event(4, 3), Some(inner));
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(-15, -6)
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_click_under_tab_strip_pane_selects_rendered_tile() {
+        // A shell tab strip pushes the pane to y = 1, so the inner
+        // origin is (1, 2) — the +1 column / +2 rows signature from
+        // the live report. Tile (0, 7) renders at absolute (16, 15).
+        let mut world = shoreline_map_world(InputContext::Normal);
+        let inner = map_inner_area(Rect::new(0, 1, 42, 22));
+        assert_eq!(inner, Rect::new(1, 2, 40, 20));
+
+        route_mouse_input(&mut world, mouse_event(16, 15), Some(inner));
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(0, 7)
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_designation_in_offset_pane_uses_rendered_tile() {
+        let mut world = shoreline_map_world(InputContext::DesignationMode);
+        world.insert_resource(DesignationMode::default());
+        let inner = map_inner_area(Rect::new(3, 2, 42, 22));
+
+        route_mouse_input(&mut world, mouse_event(19, 16), Some(inner));
+
+        let mode = world.resource::<DesignationMode>();
+        assert_eq!(mode.drag_start.map(|p| (p.x, p.y)), Some((0, 7)));
+        assert_eq!((mode.cursor.x, mode.cursor.y), (0, 7));
     }
 
     #[test]
