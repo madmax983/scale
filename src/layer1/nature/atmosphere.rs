@@ -492,22 +492,33 @@ pub fn simulate_diffusion_system(
 /// Applies damage from high smog levels.
 pub fn apply_smog_damage_system(
     grid: Res<AtmosphereGrid>,
+    mut commands: Commands,
     mut query: Query<
         (
+            Entity,
             &GridPosition,
             &mut Health,
             Option<&crate::layer1::economy::items::Equipment>,
         ),
         With<Pop>,
     >,
+    time: Option<Res<crate::shared::time::SimulationTime>>,
 ) {
-    for (pos, mut health, equipment) in &mut query {
+    let tick = time.map_or(0, |t| t.tick);
+    for (entity, pos, mut health, equipment) in &mut query {
         let smog_level = grid.get(pos.x, pos.y);
         if smog_level > 150.0 {
             let has_mask = equipment.is_some_and(|e| e.mask.is_some());
             if !has_mask && !health.has_rust_lung {
                 // Suffocation / Toxicity
                 health.take_damage(1.0);
+                // Item 84: attribute the damage source at the moment of damage.
+                crate::layer1::biology::death_attribution::record_damage(
+                    &mut commands,
+                    entity,
+                    crate::layer1::biology::death_attribution::CAUSE_TOXIC_SMOG,
+                    tick,
+                );
             }
         }
     }

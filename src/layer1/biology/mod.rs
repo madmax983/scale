@@ -15,6 +15,7 @@ pub mod gene_bank;
 pub mod genetics;
 pub mod grafting;
 pub mod gut_biome;
+pub mod death_attribution;
 pub mod health;
 pub mod invasive;
 pub mod medical;

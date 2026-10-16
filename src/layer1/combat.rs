@@ -285,6 +285,15 @@ pub fn execute_attack(world: &mut World, attacker: Entity, target: Entity) {
     };
     health.take_damage(actual_damage);
 
+    // Item 84: attribute the damage source at the moment of damage.
+    if actual_damage > 0.0 {
+        crate::layer1::biology::death_attribution::note_damage_world(
+            world,
+            target,
+            crate::layer1::biology::death_attribution::CAUSE_COMBAT,
+        );
+    }
+
     apply_hit_stop_and_juice(world, attacker, target, actual_damage, is_crit);
 }
 

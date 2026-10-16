@@ -187,21 +187,33 @@ pub fn starvation_damage_system(world: &mut World) {
         .map_or(0, |t| t.tick);
 
     let mut query = world.query::<(
+        Entity,
         &Needs,
         &mut Health,
         Option<&mut Memories>,
         Option<&crate::layer1::mind::temporal_fugue::TemporalFugue>,
     )>();
-    for (needs, mut health, mut memories, fugue) in query.iter_mut(world) {
+    let mut damaged: Vec<Entity> = Vec::new();
+    for (entity, needs, mut health, mut memories, fugue) in query.iter_mut(world) {
         if needs.hunger <= 0.0 && fugue.is_none() {
             // Ludwig: Grace Period - Starving should feel urgent but not instant death.
             // 0.2 damage per tick -> 500 ticks (50s) to die.
             health.take_damage(0.2);
+            damaged.push(entity);
 
             if let Some(mem) = memories.as_mut() {
                 mem.add(MemoryType::StarvationTrauma, tick);
             }
         }
+    }
+    // Item 84: record the damage source so a starvation death is
+    // attributed to starvation, not "Causes unknown".
+    for entity in damaged {
+        crate::layer1::biology::death_attribution::note_damage_world(
+            world,
+            entity,
+            crate::layer1::biology::death_attribution::CAUSE_STARVATION,
+        );
     }
 }
 

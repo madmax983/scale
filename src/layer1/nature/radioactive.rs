@@ -164,13 +164,30 @@ pub fn radiation_system(
 }
 
 /// System to apply damage from radiation sickness.
-pub fn sickness_damage_system(mut query: Query<(&mut Health, &RadiationSickness)>) {
-    for (mut health, sick) in &mut query {
+pub fn sickness_damage_system(
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Health, &RadiationSickness)>,
+    time: Option<Res<crate::shared::time::SimulationTime>>,
+) {
+    let tick = time.map_or(0, |t| t.tick);
+    for (entity, mut health, sick) in &mut query {
+        let mut damaged = false;
         if sick.severity > 50.0 {
             health.take_damage(0.1); // Slow death
+            damaged = true;
         }
         if sick.severity > 90.0 {
             health.take_damage(0.5); // Fast death
+            damaged = true;
+        }
+        if damaged {
+            // Item 84: attribute the damage source at the moment of damage.
+            crate::layer1::biology::death_attribution::record_damage(
+                &mut commands,
+                entity,
+                crate::layer1::biology::death_attribution::CAUSE_RADIATION_SICKNESS,
+                tick,
+            );
         }
     }
 }

@@ -66,10 +66,13 @@ pub fn volatile_decay_system(
 /// System that processes explosion events and applies damage.
 #[allow(clippy::cast_sign_loss)]
 pub fn handle_explosion_system(
+    mut commands: Commands,
     mut events: EventReader<ExplosionEvent>,
     mut structures: Query<(&GridPosition, &mut Structure)>,
-    mut healths: Query<(&GridPosition, &mut Health)>,
+    mut healths: Query<(Entity, &GridPosition, &mut Health)>,
+    time: Option<Res<crate::shared::time::SimulationTime>>,
 ) {
+    let tick = time.map_or(0, |t| t.tick);
     for event in events.read() {
         // Damage Structures
         for (pos, mut structure) in &mut structures {
@@ -79,9 +82,18 @@ pub fn handle_explosion_system(
         }
 
         // Damage Living Entities (Pops, Fauna, etc.)
-        for (pos, mut health) in &mut healths {
+        for (entity, pos, mut health) in &mut healths {
             if event.center.distance_chebyshev(*pos) <= event.radius {
                 health.take_damage(event.damage);
+                // Item 84: attribute the damage source at the moment of damage.
+                if event.damage > 0.0 {
+                    crate::layer1::biology::death_attribution::record_damage(
+                        &mut commands,
+                        entity,
+                        crate::layer1::biology::death_attribution::CAUSE_EXPLOSION,
+                        tick,
+                    );
+                }
             }
         }
     }

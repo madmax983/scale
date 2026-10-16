@@ -428,10 +428,12 @@ pub fn pressure_damage_system(
     mut suit_query: Query<&mut crate::layer1::eva_suit::EvaSuit>,
     grid_opt: Option<Res<PressureGrid>>,
     mut events: EventWriter<crate::layer1::chronicle::AddChronicleEvent>,
+    time: Option<Res<crate::shared::time::SimulationTime>>,
 ) {
     use crate::layer1::chronicle::EventImportance;
 
     let Some(grid) = grid_opt else { return };
+    let tick = time.map_or(0, |t| t.tick);
     let mut killed = 0;
 
     for (entity, pos, mut health, name, alerted, equipment, suit_alerted) in pop_query.iter_mut() {
@@ -504,6 +506,16 @@ pub fn pressure_damage_system(
                 commands.entity(entity).try_insert(SuffocationAlerted);
             }
             health.take_damage(1.0);
+            // Item 84: record the source on every suffocation tick, so a
+            // death finished by another system in the same tick window
+            // still attributes to the breach; the explicit DeathCause
+            // below remains authoritative when this system lands the kill.
+            crate::layer1::biology::death_attribution::record_damage(
+                &mut commands,
+                entity,
+                crate::layer1::biology::death_attribution::CAUSE_ATMOSPHERIC_BREACH,
+                tick,
+            );
             if health.current <= 0.0 {
                 commands
                     .entity(entity)

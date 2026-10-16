@@ -158,6 +158,15 @@ pub fn fauna_behavior_system(world: &mut World) {
         if let Some(mut health) = world.get_mut::<Health>(target) {
             health.take_damage(damage);
 
+            // Item 84: attribute the damage source at the moment of damage.
+            if damage > 0.0 {
+                crate::layer1::biology::death_attribution::note_damage_world(
+                    world,
+                    target,
+                    crate::layer1::biology::death_attribution::CAUSE_WILDLIFE,
+                );
+            }
+
             // Ludwig: "Juice" logic for Fauna attacks
             let hit_stop_ticks = if damage >= 10.0 {
                 6

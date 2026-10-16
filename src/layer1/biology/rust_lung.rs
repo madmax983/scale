@@ -4,19 +4,40 @@ use bevy_ecs::prelude::*;
 
 /// Applies toxic gas damage to a Pop, unless they have RustLung immunity.
 pub fn apply_toxic_gas_damage(world: &mut World, pop_id: Entity, damage: f32) {
+    let mut dealt = false;
     if let Some(mut health) = world.get_mut::<Health>(pop_id) {
         if !health.has_rust_lung {
             health.take_damage(damage);
+            dealt = damage > 0.0;
         }
+    }
+    if dealt {
+        // Item 84: attribute the damage source at the moment of damage.
+        crate::layer1::biology::death_attribution::note_damage_world(
+            world,
+            pop_id,
+            crate::layer1::biology::death_attribution::CAUSE_TOXIC_GAS,
+        );
     }
 }
 
 /// A system that runs every tick to degrade the health of Pops with RustLung.
-pub fn rust_lung_degradation_system(mut query: Query<&mut Health, With<Pop>>) {
-    for mut health in query.iter_mut() {
+pub fn rust_lung_degradation_system(
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Health), With<Pop>>,
+    time: Option<Res<crate::shared::time::SimulationTime>>,
+) {
+    let tick = time.map_or(0, |t| t.tick);
+    for (entity, mut health) in query.iter_mut() {
         if health.has_rust_lung {
             // Degrades health slightly over time
             health.take_damage(0.01);
+            crate::layer1::biology::death_attribution::record_damage(
+                &mut commands,
+                entity,
+                crate::layer1::biology::death_attribution::CAUSE_RUST_LUNG,
+                tick,
+            );
         }
     }
 }

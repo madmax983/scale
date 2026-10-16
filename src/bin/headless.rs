@@ -462,6 +462,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "help" | "h" | "?" => print_help(),
         "status" | "s" => print_status(world),
         "stats" => print_stats(world),
+        "deaths" => print_deaths(world),
         "pops" | "p" => print_pops(world),
         "ghosts" => print_ghost_audit(world),
         "stowaway" => handle_stowaway_command(world, &parts),
@@ -3195,8 +3196,13 @@ fn print_stats(world: &mut World) {
         .map(|l| l.len())
         .unwrap_or(0);
 
+    // Item 84: death ledger totals for STATS (full breakdown: `deaths`).
+    let (deaths_total, deaths_unknown) = world
+        .get_resource::<scale::layer1::biology::death_attribution::DeathLedger>()
+        .map_or((0, 0), |ledger| (ledger.total, ledger.unknown_count()));
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={}",
         tick,
         scenario,
         pops,
@@ -3278,6 +3284,8 @@ fn print_stats(world: &mut World) {
         suit_air_label,
         drones_total,
         drones_repairing,
+        deaths_total,
+        deaths_unknown,
     );
 }
 
@@ -6114,6 +6122,15 @@ fn print_stories(world: &mut World) {
     print_dashboard_table("ORAL TRADITION (STORIES)", table);
 }
 
+/// Item 84: the colony's book of the dead — totals by attributed
+/// cause plus the recent deaths, from the DeathLedger resource.
+fn print_deaths(world: &mut World) {
+    println!(
+        "{}",
+        scale::layer1::biology::death_attribution::format_deaths_report(world)
+    );
+}
+
 fn print_chronicle(world: &mut World) {
     let chronicle = world.resource::<Chronicle>();
 
@@ -6313,6 +6330,11 @@ fn print_help() {
                     "Spec 347: apply stockpile resources to the active Great Work's current stage",
                 ),
                 ("chronicle", "c, history", "Show colony history events"),
+                (
+                    "deaths",
+                    "",
+                    "Item 84: death ledger — totals by attributed cause + recent deaths",
+                ),
                 #[cfg(feature = "nova")]
                 (
                     "stories",

@@ -61,8 +61,9 @@ pub fn diffuse_geome_hazards_system(
 /// Applies damage to entities with Health that are standing on GeomeHazards.
 #[allow(clippy::type_complexity)]
 pub fn environmental_damage_system(
+    mut commands: Commands,
     mut health_query: Query<
-        (&GridPosition, &mut crate::layer1::health::Health),
+        (Entity, &GridPosition, &mut crate::layer1::health::Health),
         (
             Without<crate::layer1::hive_mind_integration::IntegratedCollective>,
             // The phased Chronostalker walks between moments: nothing
@@ -71,15 +72,39 @@ pub fn environmental_damage_system(
         ),
     >,
     hazard_query: Query<(&GridPosition, &GeomeHazard)>,
+    terrain: Option<Res<TerrainGrid>>,
+    time: Option<Res<crate::shared::time::SimulationTime>>,
 ) {
+    let tick = time.map_or(0, |t| t.tick);
     let mut hazard_map = HashMap::new();
     for (pos, hazard) in hazard_query.iter() {
         *hazard_map.entry(*pos).or_insert(0.0) += hazard.damage_per_tick;
     }
 
-    for (health_pos, mut health) in health_query.iter_mut() {
+    for (entity, health_pos, mut health) in health_query.iter_mut() {
         if let Some(damage) = hazard_map.get(health_pos) {
             health.take_damage(*damage);
+            // Item 84: name the terrain hazard that dealt the damage.
+            let cause = match terrain.as_deref().and_then(|grid| {
+                grid.get(
+                    usize::try_from(health_pos.x).ok()?,
+                    usize::try_from(health_pos.y).ok()?,
+                )
+            }) {
+                Some(TerrainType::MagmaRock) => {
+                    crate::layer1::biology::death_attribution::CAUSE_MAGMA
+                }
+                Some(TerrainType::SporeBloom) => {
+                    crate::layer1::biology::death_attribution::CAUSE_SPORE_BLOOM
+                }
+                _ => crate::layer1::biology::death_attribution::CAUSE_HAZARDOUS_TERRAIN,
+            };
+            crate::layer1::biology::death_attribution::record_damage(
+                &mut commands,
+                entity,
+                cause,
+                tick,
+            );
         }
     }
 }

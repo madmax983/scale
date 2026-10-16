@@ -182,6 +182,12 @@ pub fn apply_meal_effect(world: &mut World, pop: Entity, effect: MealEffect) {
             if let Some(mut health) = world.get_mut::<crate::layer1::health::Health>(pop) {
                 health.take_damage(10.0);
             }
+            // Item 84: attribute the damage source at the moment of damage.
+            crate::layer1::biology::death_attribution::note_damage_world(
+                world,
+                pop,
+                crate::layer1::biology::death_attribution::CAUSE_FOOD_POISONING,
+            );
         }
         MealEffect::Hallucination => {
             world

@@ -526,6 +526,11 @@ pub fn handle_pop_death_system(
 
     for (entity, pos_opt, name_opt, cause_opt) in query.iter() {
         let name = name_opt.map_or_else(|| "Unknown".to_string(), |n| n.0.clone());
+        // Item 84: in the full schedule, `attribute_death_causes_system`
+        // (biology::death_attribution) has already resolved a specific
+        // DeathCause for every Dead pop before this handler runs, so the
+        // fallback below is only a canary for bare worlds that run this
+        // handler alone — the DeathLedger counts it when it leaks.
         let reason = cause_opt
             .map(|cause| cause.0.clone())
             .unwrap_or_else(|| "Causes unknown".to_string());

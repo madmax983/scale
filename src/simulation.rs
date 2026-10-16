@@ -351,6 +351,8 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::culture::sovereign::SporeSuppression>();
     // The Corsair (adventurer origin)
     world.init_resource::<crate::layer1::culture::corsair::CorsairState>();
+    // Item 84 death attribution: the colony's book of the dead.
+    world.init_resource::<crate::layer1::biology::death_attribution::DeathLedger>();
     // Spec 272 The Martyrdom Effect: fervor state, enemy-strike ledger, casus belli.
     world.init_resource::<crate::layer1::social::martyrdom::Martyrdom>();
     world.init_resource::<crate::layer1::social::martyrdom::LastEnemyStrike>();

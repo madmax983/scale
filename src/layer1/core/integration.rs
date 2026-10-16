@@ -591,9 +591,12 @@ pub fn vermin_morale_system(
 /// Bridges the Fire system (Environment) and Pop Health system (Simulation).
 pub fn fire_damage_pops_system(
     fire_query: Query<(&GridPosition, &Fire)>,
-    mut pop_query: Query<(&GridPosition, &mut Health), With<Pop>>,
+    mut commands: Commands,
+    mut pop_query: Query<(Entity, &GridPosition, &mut Health), With<Pop>>,
     mut fire_tiles: Local<HashSet<GridPosition>>,
+    time: Option<Res<crate::shared::time::SimulationTime>>,
 ) {
+    let tick = time.map_or(0, |t| t.tick);
     // 1. Identify dangerous tiles
     // ⚡ Bolt Optimization: Reuse Local HashSet to prevent per-frame allocation
     fire_tiles.clear();
@@ -604,11 +607,18 @@ pub fn fire_damage_pops_system(
     }
 
     // 2. Apply damage to pops on those tiles
-    for (pos, mut health) in &mut pop_query {
+    for (entity, pos, mut health) in &mut pop_query {
         if fire_tiles.contains(pos) {
             // Apply 5.0 damage per tick (20 ticks to die)
             let damage = 5.0;
             health.take_damage(damage);
+            // Item 84: attribute the damage source at the moment of damage.
+            crate::layer1::biology::death_attribution::record_damage(
+                &mut commands,
+                entity,
+                crate::layer1::biology::death_attribution::CAUSE_FIRE,
+                tick,
+            );
         }
     }
 }

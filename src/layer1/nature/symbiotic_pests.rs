@@ -507,6 +507,12 @@ pub fn apply_vermin_fever(world: &mut World, pop: Entity) {
     if let Some(mut health) = world.get_mut::<Health>(pop) {
         health.current = (health.current - DISEASE_HEALTH_DAMAGE).max(0.0);
     }
+    // Item 84: attribute the damage source at the moment of damage.
+    crate::layer1::biology::death_attribution::note_damage_world(
+        world,
+        pop,
+        crate::layer1::biology::death_attribution::CAUSE_VERMIN_FEVER,
+    );
 }
 
 // ---------------------------------------------------------------------------

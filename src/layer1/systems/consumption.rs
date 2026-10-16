@@ -195,8 +195,17 @@ pub fn register(schedule: &mut Schedule) {
 
     schedule.add_systems(
         (
+            // Item 84 death attribution: resolve a DeathCause for every
+            // freshly-dead pop before the handler reads it, and fold the
+            // emitted PopDied events into the DeathLedger after.
+            crate::layer1::biology::death_attribution::attribute_death_causes_system
+                .after(crate::layer1::health::check_health_status_system)
+                .before(crate::layer1::entities::pop::handle_pop_death_system),
             crate::layer1::entities::pop::handle_pop_death_system
                 .after(crate::layer1::health::check_health_status_system),
+            crate::layer1::biology::death_attribution::death_ledger_system
+                .after(crate::layer1::entities::pop::handle_pop_death_system)
+                .before(crate::layer1::health::despawn_dead_entities_system),
             crate::layer1::fauna::handle_fauna_death_system
                 .after(crate::layer1::health::check_health_status_system),
             crate::layer1::entities::pop::handle_witness_death_system

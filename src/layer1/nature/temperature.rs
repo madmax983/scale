@@ -375,8 +375,11 @@ pub fn thermal_damage_system(
     mut pops: Query<(Entity, &mut Health, &GridPosition, &Equipment), With<Pop>>,
     clothing_query: Query<&Clothing>,
     mut thermal_damage_events: EventWriter<ThermalDamageEvent>,
+    mut commands: Commands,
+    time: Option<Res<crate::shared::time::SimulationTime>>,
 ) {
     let Some(grid) = grid else { return };
+    let tick = time.map_or(0, |t| t.tick);
 
     for (entity, mut health, pos, equipment) in &mut pops {
         if pos.x < 0 || pos.y < 0 {
@@ -406,6 +409,13 @@ pub fn thermal_damage_system(
             // Damage scales with severity?
             // Spec says "0.5 damage".
             health.take_damage(0.5);
+            // Item 84: attribute the damage source at the moment of damage.
+            crate::layer1::biology::death_attribution::record_damage(
+                &mut commands,
+                entity,
+                crate::layer1::biology::death_attribution::CAUSE_HYPOTHERMIA,
+                tick,
+            );
             thermal_damage_events.send(ThermalDamageEvent {
                 entity,
                 amount: 0.5,
@@ -413,6 +423,12 @@ pub fn thermal_damage_system(
         } else if temp > heat_tolerance {
             // Heatstroke
             health.take_damage(0.5);
+            crate::layer1::biology::death_attribution::record_damage(
+                &mut commands,
+                entity,
+                crate::layer1::biology::death_attribution::CAUSE_HEATSTROKE,
+                tick,
+            );
             thermal_damage_events.send(ThermalDamageEvent {
                 entity,
                 amount: 0.5,
