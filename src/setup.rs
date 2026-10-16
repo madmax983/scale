@@ -1260,6 +1260,16 @@ fn add_start_scenario_intro_event(world: &mut World, scenario_id: StartScenarioI
                 "Layer 2 Ready: an orbital charter and a live command deck put the colony's eyes on the system before the dust has even settled.".to_string(),
                 crate::layer1::chronicle::EventImportance::Major,
             );
+            // Layer 2 legibility pass: the flavor line above promises a
+            // prepared colony; this second entry reads the actual
+            // manifest into the record — the drone crew, the suit pool,
+            // the redundant Life Support — because nothing else in the
+            // game names the kit a Layer 2 Ready keeper starts with.
+            world.resource_mut::<Chronicle>().add_event(
+                0,
+                "The Layer 2 manifest, read into the record: three drones wake on their hub — an autonomous crew that takes the vacuum-side repairs first; keep the hub powered — with six Mk II suits in the pool and a second Life Support already breathing in reserve.".to_string(),
+                crate::layer1::chronicle::EventImportance::Major,
+            );
         }
         StartScenarioId::Classic => {}
     }
@@ -2289,6 +2299,56 @@ mod tests {
                 .iter()
                 .any(|event| event.text.contains("orbital charter")),
             "Layer 2 Ready should add a distinct startup chronicle entry"
+        );
+    }
+
+    // Layer 2 legibility pass: alongside the flavor line, tick 0 must
+    // orient a Layer 2 Ready keeper to the concrete kit they were just
+    // handed — the autonomous drone crew, the suit pool, the redundant
+    // Life Support — because nothing else in the game names it.
+    #[test]
+    fn test_layer2_ready_intro_names_drone_crew_and_kit() {
+        let world = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Layer2Ready,
+        });
+
+        let chronicle = world.resource::<Chronicle>();
+        let orientation = chronicle
+            .events
+            .iter()
+            .find(|event| event.text.contains("three drones"))
+            .expect("Layer 2 Ready should name its drone crew in a tick-0 chronicle entry");
+        assert_eq!(orientation.tick, 0, "orientation must land at tick 0");
+        assert_eq!(
+            orientation.importance,
+            crate::layer1::chronicle::EventImportance::Major
+        );
+        assert!(
+            orientation.text.contains("hub"),
+            "orientation should point at the drone hub"
+        );
+        assert!(
+            orientation.text.contains("suits"),
+            "orientation should name the suit pool"
+        );
+        assert!(
+            orientation.text.contains("Life Support"),
+            "orientation should name the redundant Life Support"
+        );
+
+        // No scenario leakage: Classic founders get no drone orientation.
+        let classic = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Classic,
+        });
+        let classic_chronicle = classic.resource::<Chronicle>();
+        assert!(
+            !classic_chronicle
+                .events
+                .iter()
+                .any(|event| event.text.contains("three drones")),
+            "Classic must not receive the Layer 2 Ready drone orientation"
         );
     }
 

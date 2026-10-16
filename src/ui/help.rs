@@ -1,9 +1,10 @@
 //! Field Guide — onboarding notes for the newly landed keeper.
 //!
 //! The Field Guide is a shell pane (plugin type `field-guide`, palette
-//! command "Open Field Guide") that teaches a new player four things:
-//! what the map glyphs mean, what to do in the first ten minutes, which
-//! keys do what, and that the weird stuff is intentional.
+//! command "Open Field Guide") that teaches a new player what the map
+//! glyphs mean, what to do in the first ten minutes, how air and vacuum
+//! work, what the drones and the system above are doing, which keys do
+//! what — and that the weird stuff is intentional.
 //!
 //! Content rules (do not break these when editing):
 //! * Every glyph in the legend comes from the map renderer's own
@@ -126,6 +127,7 @@ pub fn guide_lines() -> Vec<Line<'static>> {
     legend_section(&mut lines);
     first_minutes_section(&mut lines);
     vacuum_section(&mut lines);
+    layer2_drones_section(&mut lines);
     controls_section(&mut lines);
     weird_stuff_section(&mut lines);
     lines.push(blank());
@@ -372,6 +374,42 @@ fn vacuum_section(lines: &mut Vec<Line<'static>>) {
     lines.push(blank());
 }
 
+fn layer2_drones_section(lines: &mut Vec<Line<'static>>) {
+    lines.push(header("LAYER 2 & DRONES"));
+    lines.push(body(
+        "The colony's second workforce does not breathe. Drones are battery-driven hands: no hunger, no morale, no sleep. They work until the battery says otherwise, and then they go and charge.",
+    ));
+    lines.push(body(
+        "They choose their own work, in this order, always: charge, then repair, then haul. A drone below a fifth of its battery drops everything — even a repair half-welded — and makes for the nearest powered DroneHub.",
+    ));
+    lines.push(body(format!(
+        "On the colony map the hub wears a '{}', and a powered hub replaces lost drones one at a time, up to three per hub.",
+        get_building_char(BuildingType::DroneHub)
+    )));
+    lines.push(body(
+        "Repairs outrank hauling, and a building standing in vacuum outranks every other repair — then the most damaged, then the nearest. That ordering is mercy with a serial number: every patch a drone welds outside is a patch no colonist has to make in a suit, breathing bottle air. Drones are tireless, not faster: they weld at a colonist's pace, standing in vacuum forever.",
+    ));
+    lines.push(body(
+        "They will not touch ancient structures, nor anything the colony has flagged to leave unmaintained. Some things are not theirs to fix.",
+    ));
+    lines.push(body(
+        "The hub only feeds a drone while the hub itself has power, and a drone answers through that link. Leave the hub dead long enough — thousands of heartbeats — and the drone forgets whose it is. That is a feral drone: it repairs nothing, hoards what it can carry, and attacks colonists. Keep the power on.",
+    ));
+    lines.push(body(
+        "Above the colony, the system turns whether you watch it or not. Press Tab to flip between the colony and the system, or open the map as a pane: Ctrl+K, then 'Open System Map'. The System Survey workspace keeps it in front of you. The system shows itself only to a colony with a powered Command Center — lose the deck's power and the view snaps back to the dirt.",
+    ));
+    lines.push(body(
+        "What you will see: the sun at the center, the system's bodies on their orbits, and fleets — drawn at the world they orbit, or strung between worlds while they cross. A grey '?' is a contact your sensors cannot name, which out there is its own kind of sentence.",
+    ));
+    lines.push(body(
+        "Read the traffic like weather. Traders come down to trade. A blockade means nobody is trading with anyone. Repo fleets collect on debts the colony left unpaid, and they collect in buildings. Orphan fleets drift, looking for a new allegiance; ghost fleets keep older appointments. And some things out there eat worlds, given time.",
+    ));
+    lines.push(body(
+        "Here is the part the last keeper underlined twice: the fleets fly themselves. No helm out there takes your orders — your levers are down here: stores laid in, debts paid, suits sewn, drones charged, walls standing. The system map is not a helm. It is how you see it coming.",
+    ));
+    lines.push(blank());
+}
+
 fn controls_section(lines: &mut Vec<Line<'static>>) {
     lines.push(header("CONTROLS"));
     lines.push(control(
@@ -590,6 +628,46 @@ mod tests {
         assert!(text.contains("Life Support"), "air source missing");
         assert!(text.contains("Power Pole"), "power chain missing");
         assert!(text.contains("suffocating"), "suffocation warning missing");
+    }
+
+    #[test]
+    fn guide_teaches_layer2_and_drones() {
+        // Layer 2 legibility pass: the guide must teach the drone
+        // priority ladder, the powered-hub rule, the feral warning, and
+        // how to open the system map — systems a keeper (above all a
+        // Layer 2 Ready keeper, who starts with a live fleet) is handed
+        // with no other explanation anywhere in the game.
+        let text = all_text();
+        assert!(
+            text.contains("LAYER 2 & DRONES"),
+            "layer 2 & drones section missing"
+        );
+        assert!(
+            text.contains("charge, then repair, then haul"),
+            "drone priority ladder missing"
+        );
+        assert!(text.contains("DroneHub"), "drone hub missing");
+        assert!(
+            text.contains("the hub wears a"),
+            "drone hub glyph teaching missing"
+        );
+        assert!(text.contains("feral"), "feral drone warning missing");
+        assert!(
+            text.contains("Open System Map"),
+            "guide must name the system map palette command"
+        );
+        assert!(
+            text.contains("System Survey"),
+            "guide must name the system survey workspace"
+        );
+        assert!(
+            text.contains("Command Center"),
+            "system view power gate missing"
+        );
+        assert!(
+            text.contains("fly themselves"),
+            "guide must be honest that fleets are not player-flown"
+        );
     }
 
     #[test]
