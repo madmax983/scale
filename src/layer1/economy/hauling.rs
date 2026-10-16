@@ -118,11 +118,15 @@ fn handle_pickup(world: &mut World, pop_entity: Entity, pos: GridPosition) {
 
     if let Some((item_entity, item_data)) = item_to_pickup {
         // Pickup Resource
-        world.entity_mut(pop_entity).insert(Carrying {
-            resource_type: item_data.resource_type,
-            amount: item_data.amount,
-        });
-        world.despawn(item_entity);
+        if let Ok(mut pop) = world.get_entity_mut(pop_entity) {
+            pop.insert(Carrying {
+                resource_type: item_data.resource_type,
+                amount: item_data.amount,
+            });
+        }
+        if world.get_entity(item_entity).is_ok() {
+            world.despawn(item_entity);
+        }
     } else {
         // 2. Try to find Generic Item
         let generic_item_to_pickup = {
@@ -135,18 +139,17 @@ fn handle_pickup(world: &mut World, pop_entity: Entity, pos: GridPosition) {
 
         if let Some(item_entity) = generic_item_to_pickup {
             // Pickup Item
-            world
-                .entity_mut(pop_entity)
-                .insert(CarryingItem(item_entity));
-            world.entity_mut(item_entity).remove::<GridPosition>();
+            if let Ok(mut pop) = world.get_entity_mut(pop_entity) {
+                pop.insert(CarryingItem(item_entity));
+            }
+            if let Ok(mut item) = world.get_entity_mut(item_entity) {
+                item.remove::<GridPosition>();
+            }
         }
     }
 
     // Clear movement state regardless of success (if item gone, we retry next tick)
-    world
-        .entity_mut(pop_entity)
-        .remove::<AtTarget>()
-        .remove::<MovementTarget>();
+    clear_hauler_target(world, pop_entity);
 }
 
 fn handle_drop_off(world: &mut World, pop_entity: Entity, carrying: Carrying, pos: GridPosition) {
@@ -164,17 +167,37 @@ fn handle_drop_off(world: &mut World, pop_entity: Entity, carrying: Carrying, po
     if is_stockpile {
         let mut resources = world.resource_mut::<ColonyResources>();
         resources.add_resource(&carrying.resource_type, carrying.amount);
-        world.entity_mut(pop_entity).remove::<Carrying>();
+        remove_carrying(world, pop_entity);
     }
 
     clear_hauler_target(world, pop_entity);
 }
 
+/// Fail-safe hauler-target cleanup (Item 86): the pop snapshot in
+/// `haul_system` can go stale if the pop is despawned mid-processing, so
+/// never use `world.entity_mut` (which panics on a dead entity) here.
 fn clear_hauler_target(world: &mut World, pop_entity: Entity) {
-    world
-        .entity_mut(pop_entity)
-        .remove::<AtTarget>()
-        .remove::<MovementTarget>();
+    if let Ok(mut pop) = world.get_entity_mut(pop_entity) {
+        pop.remove::<AtTarget>().remove::<MovementTarget>();
+    }
+}
+
+/// Fail-safe removal of the resource-carrying state.
+fn remove_carrying(world: &mut World, pop_entity: Entity) {
+    if let Ok(mut pop) = world.get_entity_mut(pop_entity) {
+        pop.remove::<Carrying>();
+    }
+}
+
+/// Fail-safe removal of the item-carrying state: used when a carried item
+/// turns out to have been despawned by another system (spoilage/decay,
+/// artifact sale, consumption, ...) while the hauler still referenced it.
+/// The hauler simply drops the stale errand and can pick a new job.
+fn clear_carried_item(world: &mut World, pop_entity: Entity) {
+    clear_hauler_target(world, pop_entity);
+    if let Ok(mut pop) = world.get_entity_mut(pop_entity) {
+        pop.remove::<CarryingItem>();
+    }
 }
 
 fn try_drop_off_permit(
@@ -209,7 +232,7 @@ fn try_drop_off_permit(
     };
 
     if delivered {
-        world.entity_mut(pop_entity).remove::<Carrying>();
+        remove_carrying(world, pop_entity);
     } else {
         world.spawn((
             ResourceItem {
@@ -218,7 +241,7 @@ fn try_drop_off_permit(
             },
             pos,
         ));
-        world.entity_mut(pop_entity).remove::<Carrying>();
+        remove_carrying(world, pop_entity);
     }
 
     clear_hauler_target(world, pop_entity);
@@ -247,11 +270,13 @@ fn try_target_permit_building(world: &mut World, pop_entity: Entity, pos: GridPo
     }
 
     if let Some((target_entity, target_pos)) = best_permit {
-        world.entity_mut(pop_entity).insert(MovementTarget {
-            target_entity,
-            target_position: target_pos,
-            for_action: ActionType::Haul,
-        });
+        if let Ok(mut pop) = world.get_entity_mut(pop_entity) {
+            pop.insert(MovementTarget {
+                target_entity,
+                target_position: target_pos,
+                for_action: ActionType::Haul,
+            });
+        }
         true
     } else {
         false
@@ -395,12 +420,10 @@ fn try_drop_off_gene_bank(
         bank.store_sample(data);
     }
 
-    world.despawn(item_entity.0);
-    world.entity_mut(pop_entity).remove::<CarryingItem>();
-    world
-        .entity_mut(pop_entity)
-        .remove::<AtTarget>()
-        .remove::<MovementTarget>();
+    if world.get_entity(item_entity.0).is_ok() {
+        world.despawn(item_entity.0);
+    }
+    clear_carried_item(world, pop_entity);
 
     true
 }
@@ -429,15 +452,16 @@ fn try_drop_off_inventory(
     };
 
     let Some(item) = world.get::<Item>(item_entity.0) else {
-        clear_hauler_target(world, pop_entity);
-        world.entity_mut(pop_entity).remove::<CarryingItem>();
+        // Stale carried item (Item 86): it was despawned while carried.
+        // Clear the hauler's state and move on — never panic.
+        clear_carried_item(world, pop_entity);
         return;
     };
 
     let item_type = item.item_type;
     let is_photophobic = world
-        .entity(item_entity.0)
-        .contains::<crate::layer1::environment::photophobic::Photophobic>();
+        .get_entity(item_entity.0)
+        .is_ok_and(|e| e.contains::<crate::layer1::environment::photophobic::Photophobic>());
 
     let inv_item = InventoryItem {
         item_type,
@@ -456,15 +480,16 @@ fn try_drop_off_inventory(
 
     if success {
         if is_photophobic {
-            world.entity_mut(item_entity.0).remove::<GridPosition>();
-            world.entity_mut(item_entity.0).insert(
-                crate::layer1::environment::photophobic::Parent(container_entity),
-            );
-        } else {
+            if let Ok(mut item) = world.get_entity_mut(item_entity.0) {
+                item.remove::<GridPosition>();
+                item.insert(crate::layer1::environment::photophobic::Parent(
+                    container_entity,
+                ));
+            }
+        } else if world.get_entity(item_entity.0).is_ok() {
             world.despawn(item_entity.0);
         }
-        clear_hauler_target(world, pop_entity);
-        world.entity_mut(pop_entity).remove::<CarryingItem>();
+        clear_carried_item(world, pop_entity);
     } else {
         drop_item_on_ground(world, pop_entity, item_entity, pos);
     }
@@ -476,13 +501,18 @@ fn drop_item_on_ground(
     item_entity: CarryingItem,
     pos: GridPosition,
 ) {
-    world.entity_mut(item_entity.0).insert(pos);
-    world
-        .entity_mut(item_entity.0)
-        .remove::<crate::layer1::environment::photophobic::Parent>();
+    // Item 86: the carried item may have been despawned by another system
+    // (spoilage/decay, artifact sale, consumption, ...) while the hauler
+    // still referenced it. `world.entity_mut` panics on a dead entity —
+    // that was the stochastic long-run haul panic at this site. Fail safe:
+    // re-ground the item only if it still exists, and always clear the
+    // hauler's carrying/target state so it can pick a new job.
+    if let Ok(mut item) = world.get_entity_mut(item_entity.0) {
+        item.insert(pos);
+        item.remove::<crate::layer1::environment::photophobic::Parent>();
+    }
 
-    clear_hauler_target(world, pop_entity);
-    world.entity_mut(pop_entity).remove::<CarryingItem>();
+    clear_carried_item(world, pop_entity);
 }
 
 fn handle_drop_off_item(
@@ -504,6 +534,14 @@ fn find_and_target_stockpile_item(
     pos: GridPosition,
     carrying_item: CarryingItem,
 ) {
+    // Item 86: a carried item despawned by another system leaves a stale
+    // reference — clear it instead of targeting a stockpile for a ghost
+    // (which would then panic on arrival in `drop_item_on_ground`).
+    if world.get_entity(carrying_item.0).is_err() {
+        clear_carried_item(world, pop_entity);
+        return;
+    }
+
     let item_type = world.get::<Item>(carrying_item.0).map(|i| i.item_type);
 
     if matches!(item_type, Some(ItemType::Waste)) {
@@ -585,11 +623,13 @@ fn set_hauler_target(
     target: Option<(Entity, GridPosition)>,
 ) -> bool {
     if let Some((target_entity, target_pos)) = target {
-        world.entity_mut(pop_entity).insert(MovementTarget {
-            target_entity,
-            target_position: target_pos,
-            for_action: ActionType::Haul,
-        });
+        if let Ok(mut pop) = world.get_entity_mut(pop_entity) {
+            pop.insert(MovementTarget {
+                target_entity,
+                target_position: target_pos,
+                for_action: ActionType::Haul,
+            });
+        }
         true
     } else {
         false
@@ -635,11 +675,7 @@ fn find_and_target_item(world: &mut World, pop_entity: Entity, pos: GridPosition
     };
 
     if let Some((target_entity, target_pos)) = target {
-        world.entity_mut(pop_entity).insert(MovementTarget {
-            target_entity,
-            target_position: target_pos,
-            for_action: ActionType::Haul,
-        });
+        set_hauler_target(world, pop_entity, Some((target_entity, target_pos)));
     }
 }
 
@@ -1030,6 +1066,175 @@ mod tests {
 
         // Verify pop empty
         assert!(world.get::<Carrying>(pop).is_none());
+    }
+
+    // --- Item 86 regression: stale carried item (despawned while carried) ---
+    //
+    // A carried generic item can be despawned by another system (spoilage /
+    // decay, artifact sale, consumption) while the hauler's `CarryingItem`
+    // still references it. Every haul path must fail safe: no panic, and the
+    // hauler's carrying/target state is cleared so it can pick a new job.
+
+    fn spawn_stale_carrier(
+        world: &mut World,
+        pos: GridPosition,
+        at_target: bool,
+    ) -> (Entity, Entity) {
+        let item = world
+            .spawn((
+                Item {
+                    item_type: ItemType::Manual,
+                },
+                GridPosition { x: pos.x, y: pos.y },
+            ))
+            .id();
+        let pop = world
+            .spawn((
+                Pop,
+                pos,
+                PopAction {
+                    current: ActionType::Haul,
+                    ..Default::default()
+                },
+                CarryingItem(item),
+            ))
+            .id();
+        if at_target {
+            world
+                .entity_mut(pop)
+                .insert(crate::layer1::execution::AtTarget);
+        }
+        // The carried item is despawned by some other system while the
+        // hauler still references it.
+        world.despawn(item);
+        (pop, item)
+    }
+
+    fn stale_carrier_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        world.insert_resource(crate::layer1::factions::Factions::default());
+        world.insert_resource(ColonyResources::default());
+        world
+    }
+
+    #[test]
+    fn test_drop_item_on_ground_stale_item_clears_hauler() {
+        let mut world = stale_carrier_world();
+        let pos = GridPosition { x: 3, y: 3 };
+        let (pop, item) = spawn_stale_carrier(&mut world, pos, true);
+
+        // Direct call into the panicking helper (trunk hauling.rs:479).
+        super::drop_item_on_ground(&mut world, pop, CarryingItem(item), pos);
+
+        assert!(
+            world.get::<CarryingItem>(pop).is_none(),
+            "Stale CarryingItem should be cleared"
+        );
+        assert!(
+            world
+                .get::<crate::layer1::execution::AtTarget>(pop)
+                .is_none(),
+            "AtTarget should be cleared"
+        );
+        assert!(
+            world
+                .get::<crate::layer1::execution::MovementTarget>(pop)
+                .is_none(),
+            "MovementTarget should be cleared"
+        );
+    }
+
+    #[test]
+    fn test_haul_system_stale_carried_item_at_target_no_container() {
+        let mut world = stale_carrier_world();
+        let pos = GridPosition { x: 3, y: 3 };
+        // No container / gene bank / stockpile at the drop tile: the drop
+        // falls through to drop_item_on_ground.
+        let (pop, _item) = spawn_stale_carrier(&mut world, pos, true);
+
+        haul_system(&mut world);
+
+        assert!(world.get::<CarryingItem>(pop).is_none());
+        assert!(world
+            .get::<crate::layer1::execution::AtTarget>(pop)
+            .is_none());
+    }
+
+    #[test]
+    fn test_haul_system_stale_carried_item_at_gene_bank() {
+        let mut world = stale_carrier_world();
+        let pos = GridPosition { x: 3, y: 3 };
+        // Gene bank (but no Inventory) at the drop tile: try_drop_off_gene_bank
+        // must fail safe on the stale item and the fall-through must not panic.
+        world.spawn((
+            Building {
+                building_type: BuildingType::GeneBank,
+            },
+            crate::layer1::gene_bank::GeneBank::default(),
+            pos,
+        ));
+        let (pop, _item) = spawn_stale_carrier(&mut world, pos, true);
+
+        haul_system(&mut world);
+
+        assert!(world.get::<CarryingItem>(pop).is_none());
+        assert!(world
+            .get::<crate::layer1::execution::AtTarget>(pop)
+            .is_none());
+    }
+
+    #[test]
+    fn test_haul_system_stale_carried_item_with_container_clears() {
+        use crate::layer1::inventory::Inventory;
+
+        let mut world = stale_carrier_world();
+        let pos = GridPosition { x: 3, y: 3 };
+        world.spawn((
+            Building {
+                building_type: BuildingType::Stockpile,
+            },
+            Inventory::default(),
+            pos,
+        ));
+        let (pop, _item) = spawn_stale_carrier(&mut world, pos, true);
+
+        haul_system(&mut world);
+
+        assert!(world.get::<CarryingItem>(pop).is_none());
+        assert!(world
+            .get::<crate::layer1::execution::AtTarget>(pop)
+            .is_none());
+    }
+
+    #[test]
+    fn test_haul_system_stale_carried_item_seeking_target_clears() {
+        let mut world = stale_carrier_world();
+        let pos = GridPosition { x: 0, y: 0 };
+        // A stockpile exists to target: a live carried item would target it,
+        // but a stale one must be dropped from the hauler's state instead of
+        // being hauled forever (or panicking on arrival).
+        world.spawn((
+            Building {
+                building_type: BuildingType::Stockpile,
+            },
+            Stockpile::default(),
+            GridPosition { x: 10, y: 0 },
+        ));
+        let (pop, _item) = spawn_stale_carrier(&mut world, pos, false);
+
+        haul_system(&mut world);
+
+        assert!(
+            world.get::<CarryingItem>(pop).is_none(),
+            "Stale CarryingItem should be cleared while seeking a target"
+        );
+        assert!(
+            world
+                .get::<crate::layer1::execution::MovementTarget>(pop)
+                .is_none(),
+            "Hauler should not target a stockpile for a stale item"
+        );
     }
 
     #[test]
