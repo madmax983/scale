@@ -2890,12 +2890,17 @@ fn print_stats(world: &mut World) {
     // Collect pop positions first (query borrows world mutably), then do the
     // pressure lookups with a separate shared borrow — the two can't overlap.
     let pop_tiles: Vec<(i32, i32)> = {
+        // Census definition (Item 85): `pops=` counts Pop + Health +
+        // GridPosition, excluding hidden stowaways (Spec 327) and Dead
+        // pops awaiting despawn. `panicking_count` uses this exact base
+        // filter plus Panic, so `panicking <= pops` always holds.
         let mut query = world.query_filtered::<
             (&GridPosition, &scale::layer1::health::Health),
             (
                 With<Pop>,
                 // Spec 327: the census never counts stowaways.
                 Without<scale::layer1::social::ship_stowaway::Stowaway>,
+                Without<scale::layer1::health::Dead>,
             ),
         >();
         query
@@ -4044,7 +4049,18 @@ fn print_panics(world: &mut World) {
     use scale::layer1::psychology::panic_spirals::Panic;
 
     let mut rows: Vec<String> = Vec::new();
-    let mut q = world.query_filtered::<(Entity, Option<&PopName>, &GridPosition, &Panic), With<Pop>>();
+    // Same census population as STATS `pops=`/`panicking=` (Item 85):
+    // hidden stowaways are not listed here either — the panel must not
+    // leak (or out-count) the census it feeds.
+    let mut q = world.query_filtered::<
+        (Entity, Option<&PopName>, &GridPosition, &Panic),
+        (
+            With<Pop>,
+            With<scale::layer1::health::Health>,
+            Without<scale::layer1::social::ship_stowaway::Stowaway>,
+            Without<scale::layer1::health::Dead>,
+        ),
+    >();
     for (entity, name, pos, panic) in q.iter(world) {
         let name = name.map_or_else(|| "?".to_string(), |n| n.0.clone());
         rows.push(format!(

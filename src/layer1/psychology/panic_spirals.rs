@@ -33,7 +33,9 @@ use crate::layer1::execution::components::{AtTarget, MovementTarget};
 use crate::layer1::fauna::{Fauna, FaunaState};
 use crate::layer1::map::GridPosition;
 use crate::layer1::nature::fire::Fire;
+use crate::layer1::health::{Dead, Health};
 use crate::layer1::pop::{Pop, PopName};
+use crate::layer1::social::ship_stowaway::Stowaway;
 use crate::layer1::psychology::traits::{Trait, Traits};
 use crate::layer1::utility_types::{ActionType, PopAction};
 
@@ -496,9 +498,33 @@ pub fn spawn_terrifying(world: &mut World, x: i32, y: i32, kind: TerrifyingKind)
 }
 
 /// Count currently panicking pops (headless STATS `panicking=`).
+///
+/// This is a *census* count: it uses exactly the population the headless
+/// STATS `pops=` field reports — entities with [`Pop`], [`Health`] and a
+/// [`GridPosition`], excluding hidden [`Stowaway`] pops (Spec 327: the
+/// census never counts stowaways) and [`Dead`] pops awaiting despawn —
+/// plus the [`Panic`] component. `panicking=` is therefore always a true
+/// subset count of `pops=` (`panicking <= pops`).
+///
+/// The previous filter (`With<Pop>, With<Panic>` only) counted panicking
+/// stowaways that `pops=` deliberately hides, and any health-less /
+/// position-less `Pop` entity, so a scare near hidden stowaways reported
+/// e.g. `panicking=17` against `pops=15` (Item 85). Stowaways still panic
+/// and flee like anyone else — the panic *systems* are unchanged; only
+/// this instrument was lying about which population it counted.
 #[must_use]
 pub fn panicking_count(world: &mut World) -> usize {
-    let mut q = world.query_filtered::<Entity, (With<Pop>, With<Panic>)>();
+    let mut q = world.query_filtered::<
+        Entity,
+        (
+            With<Pop>,
+            With<Panic>,
+            With<Health>,
+            With<GridPosition>,
+            Without<Stowaway>,
+            Without<Dead>,
+        ),
+    >();
     q.iter(world).count()
 }
 
@@ -543,6 +569,9 @@ mod tests {
                 Pop,
                 PopName("Testy".to_string()),
                 GridPosition { x, y },
+                // Production pops always carry Health via PopBundle; the
+                // census (STATS pops= / panicking=) requires it (Item 85).
+                Health::default(),
                 PopAction::default(),
                 Traits::default(),
             ))
@@ -1043,6 +1072,82 @@ mod tests {
             .entity_mut(a)
             .insert(Panic::new(GridPosition { x: 0, y: 0 }));
 
+        assert_eq!(panicking_count(&mut world), 1);
+    }
+
+    /// The STATS census population, replicating the headless `pops=`
+    /// filter exactly: Pop + Health + GridPosition, no stowaways, not dead.
+    fn census_pop_count(world: &mut World) -> usize {
+        let mut q = world.query_filtered::<
+            Entity,
+            (
+                With<Pop>,
+                With<Health>,
+                With<GridPosition>,
+                Without<Stowaway>,
+                Without<Dead>,
+            ),
+        >();
+        q.iter(world).count()
+    }
+
+    #[test]
+    fn test_panicking_count_never_exceeds_census_pops() {
+        // Regression (Item 85): the balance loop observed STATS
+        // `panicking=17` against `pops=15`. Reproduce that exact shape:
+        // 15 census pops, ALL panicking, plus 2 panicking stowaways —
+        // full PopBundle pops the census deliberately hides (Spec 327).
+        // The old filter (With<Pop> + With<Panic> only) counted 17.
+        use crate::layer1::social::ship_stowaway::StowawayAgenda;
+
+        let mut world = setup();
+        for i in 0..15 {
+            let pop = spawn_pop(&mut world, i, 1);
+            world
+                .entity_mut(pop)
+                .insert(Panic::new(GridPosition { x: 0, y: 0 }));
+        }
+        for i in 0..2 {
+            let stowaway = spawn_pop(&mut world, 20 + i, 1);
+            world.entity_mut(stowaway).insert((
+                Stowaway::new(StowawayAgenda::Spy, "Test Faction", 0.0, 100),
+                Panic::new(GridPosition { x: 0, y: 0 }),
+            ));
+        }
+
+        assert_eq!(census_pop_count(&mut world), 15);
+        assert_eq!(panicking_count(&mut world), 15);
+        assert!(panicking_count(&mut world) <= census_pop_count(&mut world));
+    }
+
+    #[test]
+    fn test_panicking_count_excludes_healthless_and_dead_pops() {
+        // The other two ways the old count escaped the census: a
+        // Pop+Panic entity with no Health (never counted by `pops=`,
+        // whose query requires Health) and a Dead pop awaiting despawn.
+        let mut world = setup();
+        let counted = spawn_pop(&mut world, 1, 1);
+        world
+            .entity_mut(counted)
+            .insert(Panic::new(GridPosition { x: 0, y: 0 }));
+
+        let healthless = world
+            .spawn((
+                Pop,
+                PopName("Ghost".to_string()),
+                GridPosition { x: 2, y: 2 },
+                Panic::new(GridPosition { x: 0, y: 0 }),
+            ))
+            .id();
+        let _ = healthless;
+
+        let dead = spawn_pop(&mut world, 3, 3);
+        world.entity_mut(dead).insert((
+            Dead,
+            Panic::new(GridPosition { x: 0, y: 0 }),
+        ));
+
+        assert_eq!(census_pop_count(&mut world), 1);
         assert_eq!(panicking_count(&mut world), 1);
     }
 
