@@ -141,14 +141,26 @@ pub fn route_root_input(world: &SharedWorld, shell: &mut UiShell, key: GameKeyEv
     // Layout Mode command). Only the gameplay context is popped; the
     // shell's own mode is left untouched. In the Normal context a
     // bare Esc keeps its designed shell meaning (PluginInput ->
-    // Layout), so it is not intercepted there.
+    // Layout) — with one exception: an active selection is an
+    // innermost layer of its own. Esc peels it first (the Normal
+    // handler clears it, returning the Inspector to the colony
+    // dashboard); only when nothing is selected does Esc fall
+    // through to the shell flip. Without this, a clicked tile was a
+    // one-way door: the detail view could never be left.
     let is_bare_escape = matches!(key.code, GameKeyCode::Esc)
         && !key.modifiers.ctrl
         && !key.modifiers.alt
         && !key.modifiers.shift;
     if is_bare_escape {
-        let context = world.borrow().resource::<InputContextStack>().current();
-        if context_has_own_escape(context) {
+        let (context, selection_active) = {
+            let world = world.borrow();
+            (
+                world.resource::<InputContextStack>().current(),
+                world.resource::<Selection>().is_selected(),
+            )
+        };
+        let selection_is_innermost_layer = context == InputContext::Normal && selection_active;
+        if context_has_own_escape(context) || selection_is_innermost_layer {
             route_input(&mut world.borrow_mut(), key);
             return;
         }
@@ -2058,6 +2070,75 @@ mod tests {
         assert_eq!(
             world.borrow().resource::<InputContextStack>().current(),
             InputContext::Normal
+        );
+    }
+
+    /// Regression (one-way door): with a tile selected in the Normal
+    /// context, a bare Esc must peel the selection off — returning the
+    /// Inspector to the colony dashboard — instead of flipping the
+    /// shell into Layout mode and stranding the detail view. The
+    /// gameplay handler already clears a selection on Esc; the key
+    /// simply never reached it because the shell claimed Esc first.
+    #[test]
+    fn esc_in_normal_context_with_selection_clears_selection_without_flipping_shell() {
+        let (world, mut shell) = setup_shell_world_for_test();
+        world
+            .borrow_mut()
+            .resource_mut::<Selection>()
+            .select_tile(3, 3);
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        assert_eq!(
+            world.borrow().resource::<Selection>().target(),
+            SelectionTarget::None,
+            "Esc should clear the active selection"
+        );
+        assert!(
+            !shell.is_layout_mode(),
+            "an Esc that clears a selection is consumed; it must not flip the shell to Layout"
+        );
+        assert_eq!(
+            *world.borrow().resource::<GameState>(),
+            GameState::Running,
+            "clearing a selection must not quit the game"
+        );
+    }
+
+    /// Precedence pin: Esc layering stops at the active context. In
+    /// DirectControl, Esc releases possession (via the Input resource)
+    /// even while a selection exists — the selection must survive the
+    /// key handler untouched.
+    #[test]
+    fn esc_in_direct_control_with_selection_still_reaches_unpossess_without_clearing() {
+        let (world, mut shell) = setup_shell_world_for_test();
+        {
+            let mut world_ref = world.borrow_mut();
+            world_ref
+                .resource_mut::<InputContextStack>()
+                .push(InputContext::DirectControl);
+            world_ref.resource_mut::<Selection>().select_tile(3, 3);
+            if world_ref.get_resource::<Input>().is_none() {
+                world_ref.insert_resource(Input::default());
+            }
+        }
+
+        route_root_input(&world, &mut shell, key_event(GameKeyCode::Esc));
+
+        let world_ref = world.borrow();
+        assert!(
+            world_ref.resource::<Input>().just_pressed(KeyCode::Esc),
+            "Esc should be pressed into the Input resource so \
+             handle_direct_input_system can release possession"
+        );
+        assert_eq!(
+            world_ref.resource::<Selection>().target(),
+            SelectionTarget::Tile(3, 3),
+            "the key handler must not clear the selection while possessing"
+        );
+        assert!(
+            !shell.is_layout_mode(),
+            "Esc in direct control must not flip the shell into Layout mode"
         );
     }
 }

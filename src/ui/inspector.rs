@@ -23,14 +23,24 @@ use crate::layer1::biology::health::Health;
 use crate::layer1::day_night::DayNightCycle;
 use crate::layer1::energy::load_limits::PowerCable;
 use crate::layer1::energy::{Battery, PowerConsumer, PowerSource};
+use crate::layer1::entities::blob::{Blob, BlobNode};
+use crate::layer1::entities::drone::{Drone, FeralDrone};
+use crate::layer1::entities::mascot::Mascot;
+use crate::layer1::entities::the_visitor::TheVisitor;
+use crate::layer1::entities::vermin::Vermin;
+use crate::layer1::entities::visitor::Visitor;
+use crate::layer1::environment::geomes::GeomeHazard;
 use crate::layer1::environment::light_pollution::SkyGlow;
 use crate::layer1::fauna::NocturnalFauna;
+use crate::layer1::funeral::{Corpse, Grave};
+use crate::layer1::nature::symbiotic_pests::Vermin as PestVermin;
 use crate::layer1::observatory::Observatory;
 use crate::layer1::olfactory::{ScentEmitter, ScentMap};
 use crate::layer1::psychology::dreams::DreamJournal;
 use crate::layer1::purity::PurityMap;
 use crate::layer1::rituals::{MachineSpirit, Quirk, QuirkType};
 use crate::layer1::social::old_guard::{Arrival, Generation};
+use crate::layer1::terrain::TerrainType;
 use crate::layer1::utility_types::UtilityWeights;
 use crate::layer1::{
     building::Building,
@@ -530,6 +540,39 @@ fn get_echo_line(world: &World, x: i32, y: i32) -> Option<Line<'static>> {
     })
 }
 
+/// Line naming a geome hazard that shares the tile (magma, toxic
+/// spores). The hazard is an entity overlaid on the tile; the tile
+/// inspector is where its danger belongs, since clicks select the
+/// tile rather than the hazard itself.
+fn get_hazard_line(world: &World, x: i32, y: i32) -> Option<Line<'static>> {
+    let damage = world.iter_entities().find_map(|e| {
+        let hazard = e.get::<GeomeHazard>()?;
+        let pos = e.get::<GridPosition>()?;
+        if pos.x == x && pos.y == y {
+            Some(hazard.damage_per_tick)
+        } else {
+            None
+        }
+    })?;
+
+    let label = world
+        .resource::<TerrainGrid>()
+        .get(x as usize, y as usize)
+        .map_or("hazardous ground", |t| match t {
+            TerrainType::MagmaRock => "magma",
+            TerrainType::SporeBloom => "toxic spores",
+            _ => "hazardous ground",
+        });
+
+    Some(Line::from(vec![
+        Span::raw("Hazard: "),
+        Span::styled(
+            format!("{label} — {damage:.0} damage/tick to anyone standing here"),
+            Style::default().fg(Color::Red),
+        ),
+    ]))
+}
+
 fn render_tile_inspector(frame: &mut Frame, area: Rect, world: &World, x: i32, y: i32) {
     let terrain = world.resource::<TerrainGrid>();
 
@@ -548,6 +591,7 @@ fn render_tile_inspector(frame: &mut Frame, area: Rect, world: &World, x: i32, y
     let purity_line = get_purity_line(world, x, y, terrain_type);
     let echo_line = get_echo_line(world, x, y);
     let scent_line = get_scent_line(world, x, y);
+    let hazard_line = get_hazard_line(world, x, y);
 
     let mut constraints = vec![
         Constraint::Length(1), // Header
@@ -566,7 +610,12 @@ fn render_tile_inspector(frame: &mut Frame, area: Rect, world: &World, x: i32, y
         constraints.push(Constraint::Length(1));
     }
 
+    if hazard_line.is_some() {
+        constraints.push(Constraint::Length(1));
+    }
+
     constraints.push(Constraint::Min(1)); // Visual
+    constraints.push(Constraint::Length(1)); // Back hint
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -605,8 +654,18 @@ fn render_tile_inspector(frame: &mut Frame, area: Rect, world: &World, x: i32, y
         current_idx += 1;
     }
 
+    if let Some(line) = hazard_line {
+        frame.render_widget(Paragraph::new(line), layout[current_idx]);
+        current_idx += 1;
+    }
+
     let visual_idx = current_idx;
     render_tile_visual(frame, layout[visual_idx], char, color);
+
+    frame.render_widget(
+        Paragraph::new("Esc: back to colony view").style(Style::default().fg(Color::DarkGray)),
+        layout[visual_idx + 1],
+    );
 }
 
 fn render_tile_visual(frame: &mut Frame, area: Rect, char: &str, color: Color) {
@@ -647,8 +706,37 @@ fn get_entity_header(world: &World, entity: Entity) -> (String, Color) {
             b.building_type.label().to_string(),
             get_building_color(b.building_type, material),
         )
+    } else if world.get::<FeralDrone>(entity).is_some() {
+        ("Feral Drone".to_string(), Color::Red)
+    } else if world.get::<Drone>(entity).is_some() {
+        ("Drone".to_string(), Color::Cyan)
+    } else if let Some(corpse) = world.get::<Corpse>(entity) {
+        (format!("Corpse of {}", corpse.name), Color::Gray)
+    } else if let Some(grave) = world.get::<Grave>(entity) {
+        match grave.corpse_name.as_ref().filter(|_| grave.occupied) {
+            Some(name) => (format!("Grave of {name}"), Color::Gray),
+            None => ("Grave".to_string(), Color::Gray),
+        }
+    } else if let Some(mascot) = world.get::<Mascot>(entity) {
+        (format!("{} (Mascot)", mascot.name), Color::LightMagenta)
+    } else if world.get::<TheVisitor>(entity).is_some() {
+        ("The Visitor".to_string(), Color::Magenta)
+    } else if world.get::<Visitor>(entity).is_some() {
+        ("Visitor".to_string(), Color::LightGreen)
+    } else if world.get::<Blob>(entity).is_some() || world.get::<BlobNode>(entity).is_some() {
+        ("Blob".to_string(), Color::Green)
+    } else if let Some(pest) = world.get::<PestVermin>(entity) {
+        (pest.species.label().to_string(), Color::Rgb(150, 200, 50))
+    } else if world.get::<Vermin>(entity).is_some() {
+        ("Vermin".to_string(), Color::Rgb(150, 200, 50))
+    } else if world.get::<Health>(entity).is_some() {
+        // Last resort for a living thing with no dedicated label.
+        // Click selection only routes the kinds above (plus Pops and
+        // Buildings) here, so this is defense in depth, not a path
+        // the player should ever see.
+        ("Creature".to_string(), Color::White)
     } else {
-        ("Entity".to_string(), Color::White)
+        ("Unidentified Object".to_string(), Color::White)
     }
 }
 
@@ -957,6 +1045,12 @@ fn render_entity_inspector(frame: &mut Frame, area: Rect, world: &World, entity:
     push_entity_components(&mut layout, world, entity);
     push_power_diagnostics(&mut layout, world, entity);
     push_mind_info(&mut layout, world, entity);
+    layout.push(1, |f, a| {
+        f.render_widget(
+            Paragraph::new("Esc: back to colony view").style(Style::default().fg(Color::DarkGray)),
+            a,
+        );
+    });
 
     if layout.constraints.is_empty() {
         return;
@@ -2162,5 +2256,239 @@ mod tests {
         assert!(full_text.contains("Recent Meals:"));
         assert!(full_text.contains("Potato"));
         assert!(full_text.contains("Meat"));
+    }
+
+    fn inspector_text(world: &World, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                render_inspector(f, f.area(), world);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut full_text = String::with_capacity(buffer.area.area() as usize);
+        for c in &buffer.content {
+            full_text.push_str(c.symbol());
+        }
+        full_text
+    }
+
+    #[test]
+    fn test_inspector_render_magma_tile_shows_hazard_line() {
+        use crate::layer1::environment::geomes::GeomeHazard;
+        use crate::layer1::terrain::{TerrainGrid, TerrainType};
+
+        let mut world = World::new();
+        let mut tiles = vec![TerrainType::Grass; 100];
+        tiles[55] = TerrainType::MagmaRock; // (5, 5)
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles,
+        });
+        // The hazard entity the geome system spawns on magma tiles.
+        world.spawn((
+            GeomeHazard {
+                damage_per_tick: 10.0,
+            },
+            GridPosition { x: 5, y: 5 },
+        ));
+        world.insert_resource(Selection::default());
+        world.resource_mut::<Selection>().select_tile(5, 5);
+
+        let full_text = inspector_text(&world, 40, 20);
+
+        assert!(full_text.contains("Magma Rock"));
+        assert!(
+            full_text.contains("Hazard:"),
+            "tile inspector should name the hazard sharing the tile"
+        );
+        assert!(full_text.contains("10"));
+    }
+
+    #[test]
+    fn test_inspector_render_drone_header_names_drone() {
+        use crate::layer1::entities::drone::Drone;
+
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let drone = world
+            .spawn((Drone::default(), GridPosition { x: 1, y: 1 }))
+            .id();
+        world.resource_mut::<Selection>().select_entity(drone);
+
+        let full_text = inspector_text(&world, 40, 20);
+
+        assert!(
+            full_text.contains("Drone"),
+            "drone inspector should be headed 'Drone', not the bare fallback"
+        );
+        assert!(full_text.contains("Esc: back to colony view"));
+    }
+
+    #[test]
+    fn test_inspector_render_corpse_header_names_the_dead() {
+        use crate::layer1::funeral::Corpse;
+
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let corpse = world
+            .spawn((
+                Corpse {
+                    name: "Ada".to_string(),
+                    decay: 0.1,
+                },
+                GridPosition { x: 3, y: 3 },
+            ))
+            .id();
+        world.resource_mut::<Selection>().select_entity(corpse);
+
+        let full_text = inspector_text(&world, 40, 20);
+
+        assert!(
+            full_text.contains("Corpse of Ada"),
+            "corpse inspector should name the deceased"
+        );
+    }
+
+    #[test]
+    fn test_inspector_after_clear_returns_to_colony_dashboard() {
+        use crate::layer1::terrain::{TerrainGrid, TerrainType};
+
+        let mut world = World::new();
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Grass; 100],
+        });
+        world.insert_resource(ColonyResources::default());
+        world.insert_resource(Selection::default());
+        world.resource_mut::<Selection>().select_tile(1, 1);
+
+        let tile_text = inspector_text(&world, 40, 20);
+        assert!(tile_text.contains("Terrain:"));
+        assert!(
+            tile_text.contains("Esc: back to colony view"),
+            "tile inspector should hint the way back to the dashboard"
+        );
+
+        world.resource_mut::<Selection>().clear();
+
+        let dashboard_text = inspector_text(&world, 40, 40);
+        assert!(
+            dashboard_text.contains("Status"),
+            "cleared selection should render the colony dashboard"
+        );
+        assert!(!dashboard_text.contains("Terrain:"));
+    }
+
+    #[test]
+    fn test_inspector_render_feral_drone_header() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let drone = world
+            .spawn((
+                Drone::default(),
+                FeralDrone::default(),
+                GridPosition { x: 1, y: 1 },
+            ))
+            .id();
+        world.resource_mut::<Selection>().select_entity(drone);
+
+        assert!(inspector_text(&world, 40, 20).contains("Feral Drone"));
+    }
+
+    #[test]
+    fn test_inspector_render_grave_header_names_the_buried() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let grave = world
+            .spawn((
+                Grave {
+                    occupied: true,
+                    corpse_name: Some("Ada".to_string()),
+                },
+                GridPosition { x: 1, y: 1 },
+            ))
+            .id();
+        world.resource_mut::<Selection>().select_entity(grave);
+
+        assert!(inspector_text(&world, 40, 20).contains("Grave of Ada"));
+    }
+
+    #[test]
+    fn test_inspector_render_mascot_header() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let mascot = world
+            .spawn((
+                Mascot {
+                    name: "Pesto".to_string(),
+                },
+                GridPosition { x: 1, y: 1 },
+            ))
+            .id();
+        world.resource_mut::<Selection>().select_entity(mascot);
+
+        let text = inspector_text(&world, 40, 20);
+        assert!(text.contains("Pesto"));
+        assert!(text.contains("Mascot"));
+    }
+
+    #[test]
+    fn test_inspector_render_visitor_header() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let visitor = world
+            .spawn((Visitor::default(), GridPosition { x: 1, y: 1 }))
+            .id();
+        world.resource_mut::<Selection>().select_entity(visitor);
+
+        assert!(inspector_text(&world, 40, 20).contains("Visitor"));
+    }
+
+    #[test]
+    fn test_inspector_render_the_visitor_header() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let visitor = world
+            .spawn((TheVisitor::default(), GridPosition { x: 1, y: 1 }))
+            .id();
+        world.resource_mut::<Selection>().select_entity(visitor);
+
+        assert!(inspector_text(&world, 40, 20).contains("The Visitor"));
+    }
+
+    #[test]
+    fn test_inspector_render_blob_header() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let blob = world.spawn((Blob, GridPosition { x: 1, y: 1 })).id();
+        world.resource_mut::<Selection>().select_entity(blob);
+
+        assert!(inspector_text(&world, 40, 20).contains("Blob"));
+    }
+
+    #[test]
+    fn test_inspector_render_pest_vermin_header_names_species() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let rat = world
+            .spawn((PestVermin::grain_rat(), GridPosition { x: 1, y: 1 }))
+            .id();
+        world.resource_mut::<Selection>().select_entity(rat);
+
+        assert!(inspector_text(&world, 40, 20).contains("Grain Rat"));
+    }
+
+    #[test]
+    fn test_inspector_render_marker_vermin_header() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let vermin = world.spawn((Vermin, GridPosition { x: 1, y: 1 })).id();
+        world.resource_mut::<Selection>().select_entity(vermin);
+
+        assert!(inspector_text(&world, 40, 20).contains("Vermin"));
     }
 }

@@ -1,3 +1,11 @@
+use crate::layer1::entities::blob::{Blob, BlobNode};
+use crate::layer1::entities::drone::Drone;
+use crate::layer1::entities::mascot::Mascot;
+use crate::layer1::entities::the_visitor::TheVisitor;
+use crate::layer1::entities::vermin::Vermin;
+use crate::layer1::entities::visitor::Visitor;
+use crate::layer1::funeral::{Corpse, Grave};
+use crate::layer1::nature::symbiotic_pests::Vermin as PestVermin;
 use crate::layer1::{
     building::Building, fertility::FertilityGrid, health::Health, needs::Needs, pop::Pop,
     GridPosition, TerrainGrid, Viewport,
@@ -104,6 +112,10 @@ pub fn inspect_entity(world: &World, entity: Entity) -> String {
         "Pop"
     } else if let Some(b) = world.get::<Building>(entity) {
         b.building_type.label()
+    } else if world.get::<Drone>(entity).is_some() {
+        "Drone"
+    } else if world.get::<Corpse>(entity).is_some() {
+        "Corpse"
     } else {
         "Entity"
     };
@@ -147,6 +159,26 @@ pub fn handle_selection_input(world: &mut World, key: GameKeyEvent) {
     }
 }
 
+/// Whether an entity is worth inspecting in its own right when its
+/// tile is clicked: drones, corpses, mascots, visitors, and other
+/// notable presences. Anything positioned that is neither this, a
+/// Pop, nor a Building is a pure tile overlay (e.g. a `GeomeHazard`
+/// spawned on the tile it endangers) and must never hijack the
+/// click from the tile beneath it — clicking magma should inspect
+/// the magma tile, not a nameless hazard entity.
+fn is_click_notable(world: &World, entity: Entity) -> bool {
+    world.get::<Drone>(entity).is_some()
+        || world.get::<Corpse>(entity).is_some()
+        || world.get::<Grave>(entity).is_some()
+        || world.get::<Mascot>(entity).is_some()
+        || world.get::<Visitor>(entity).is_some()
+        || world.get::<TheVisitor>(entity).is_some()
+        || world.get::<Blob>(entity).is_some()
+        || world.get::<BlobNode>(entity).is_some()
+        || world.get::<Vermin>(entity).is_some()
+        || world.get::<PestVermin>(entity).is_some()
+}
+
 /// Handle mouse click for selection.
 pub fn handle_selection_click(world: &mut World, mouse: GameMouseEvent, viewport: &Viewport) {
     let (world_x, world_y) = screen_to_world(mouse.x, mouse.y, viewport);
@@ -156,7 +188,7 @@ pub fn handle_selection_click(world: &mut World, mouse: GameMouseEvent, viewport
     // and multiple loops, doing a single pass to track the best candidate in each category.
     let mut selected_pop = None;
     let mut selected_building = None;
-    let mut selected_any = None;
+    let mut selected_notable = None;
 
     let mut query = world.query::<(Entity, &GridPosition)>();
     for (entity, pos) in query.iter(world) {
@@ -165,14 +197,15 @@ pub fn handle_selection_click(world: &mut World, mouse: GameMouseEvent, viewport
                 selected_pop = Some(entity);
             } else if selected_building.is_none() && world.get::<Building>(entity).is_some() {
                 selected_building = Some(entity);
-            } else if selected_any.is_none() {
-                selected_any = Some(entity);
+            } else if selected_notable.is_none() && is_click_notable(world, entity) {
+                selected_notable = Some(entity);
             }
         }
     }
 
-    // Prioritize: Pop > Building > Any
-    let selected_entity = selected_pop.or(selected_building).or(selected_any);
+    // Prioritize: Pop > Building > notable entity > the tile itself.
+    // Pure overlays (hazards and friends) fall through to the tile.
+    let selected_entity = selected_pop.or(selected_building).or(selected_notable);
 
     // Update selection
     let mut selection = world.resource_mut::<Selection>();
@@ -447,5 +480,145 @@ mod tests {
         schedule.run(&mut world);
 
         assert!(world.get::<Observed>(pop).is_none());
+    }
+
+    #[test]
+    fn test_click_on_hazard_tile_selects_tile_not_hazard_entity() {
+        use crate::layer1::environment::geomes::GeomeHazard;
+
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        // A magma-style hazard entity shares the tile it endangers; it
+        // is an overlay on the tile, not a thing to inspect.
+        world.spawn((
+            GeomeHazard {
+                damage_per_tick: 10.0,
+            },
+            GridPosition { x: 5, y: 5 },
+        ));
+
+        let viewport = Viewport::default();
+        handle_selection_click(&mut world, GameMouseEvent::new(5, 5), &viewport);
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(5, 5),
+            "clicking a hazard's tile should select the tile, not the hazard entity"
+        );
+    }
+
+    #[test]
+    fn test_click_on_drone_selects_the_drone() {
+        use crate::layer1::entities::drone::Drone;
+
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let drone = world
+            .spawn((Drone::default(), GridPosition { x: 2, y: 2 }))
+            .id();
+
+        let viewport = Viewport::default();
+        handle_selection_click(&mut world, GameMouseEvent::new(2, 2), &viewport);
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Entity(drone),
+            "drones are notable entities and stay click-selectable"
+        );
+    }
+
+    #[test]
+    fn test_click_on_corpse_selects_the_corpse() {
+        use crate::layer1::funeral::Corpse;
+
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let corpse = world
+            .spawn((
+                Corpse {
+                    name: "Ada".to_string(),
+                    decay: 0.1,
+                },
+                GridPosition { x: 4, y: 1 },
+            ))
+            .id();
+
+        let viewport = Viewport::default();
+        handle_selection_click(&mut world, GameMouseEvent::new(4, 1), &viewport);
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Entity(corpse),
+            "corpses are notable entities and stay click-selectable"
+        );
+    }
+
+    #[test]
+    fn test_click_on_standalone_grave_selects_the_grave() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        // Death-site graves are standalone entities (no Building):
+        // the grave component rides on the tile where the pop died.
+        let grave = world
+            .spawn((
+                Grave {
+                    occupied: true,
+                    corpse_name: Some("Ada".to_string()),
+                },
+                GridPosition { x: 6, y: 2 },
+            ))
+            .id();
+
+        let viewport = Viewport::default();
+        handle_selection_click(&mut world, GameMouseEvent::new(6, 2), &viewport);
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Entity(grave),
+            "standalone graves are notable entities and stay click-selectable"
+        );
+    }
+
+    #[test]
+    fn test_click_on_pest_vermin_selects_the_vermin() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let rat = world
+            .spawn((PestVermin::grain_rat(), GridPosition { x: 7, y: 7 }))
+            .id();
+
+        let viewport = Viewport::default();
+        handle_selection_click(&mut world, GameMouseEvent::new(7, 7), &viewport);
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Entity(rat),
+            "pest vermin are notable entities and stay click-selectable"
+        );
+    }
+
+    #[test]
+    fn test_click_prefers_actor_over_notable_over_tile() {
+        use crate::layer1::entities::drone::Drone;
+
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let drone = world
+            .spawn((Drone::default(), GridPosition { x: 3, y: 3 }))
+            .id();
+        let pop = world.spawn((Pop, GridPosition { x: 3, y: 3 })).id();
+
+        let viewport = Viewport::default();
+        handle_selection_click(&mut world, GameMouseEvent::new(3, 3), &viewport);
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Entity(pop),
+            "a pop sharing a tile with a drone should win the click"
+        );
+        assert_ne!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Entity(drone)
+        );
     }
 }
