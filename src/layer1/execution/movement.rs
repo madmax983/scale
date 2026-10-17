@@ -4,7 +4,7 @@ use crate::layer1::admin::{AdminProvider, Office};
 use crate::layer1::building::{Building, BuildingType, OccupiedTiles};
 use crate::layer1::defense::Gate;
 use crate::layer1::erosion::{ErosionGrid, MOVEMENT_EROSION_AMOUNT};
-use crate::layer1::execution::components::{AtTarget, MovementTarget};
+use crate::layer1::execution::components::{AtTarget, DetourPath, MovementTarget};
 use crate::layer1::farm::Farm;
 use crate::layer1::housing::Housing;
 use crate::layer1::map::GridPosition;
@@ -18,6 +18,7 @@ use crate::layer1::traits::{get_trait_move_speed_modifier, Traits};
 use crate::layer1::utility_types::{ActionType, StartPlan};
 use bevy_ecs::prelude::*;
 use ratatui::style::Color;
+use std::collections::VecDeque;
 
 /// Removes pops from farms/housing when they switch to a different action.
 ///
@@ -89,7 +90,8 @@ pub fn process_start_plan_system(
             .entity(pop_entity)
             .remove::<StartPlan>()
             .remove::<MovementTarget>()
-            .remove::<AtTarget>();
+            .remove::<AtTarget>()
+            .remove::<DetourPath>();
 
         // If there's no target, skip (e.g., Idle action)
         let Some(target_entity) = target else {
@@ -151,14 +153,25 @@ pub fn movement_system(
             Option<&Role>,
             Option<&MentalFog>,
             Option<&crate::layer1::biology::health::Health>,
+            Option<&mut DetourPath>,
         ),
         (Without<AtTarget>, Without<Building>),
     >,
     mut ctx: MovementContext,
     mut commands: Commands,
 ) {
-    for (pop_entity, mut current_pos, mt, mut speed_opt, traits, hit_stop, role, fog, health) in
-        &mut pops
+    for (
+        pop_entity,
+        mut current_pos,
+        mt,
+        mut speed_opt,
+        traits,
+        hit_stop,
+        role,
+        fog,
+        health,
+        detour,
+    ) in &mut pops
     {
         process_single_movement(
             pop_entity,
@@ -171,6 +184,7 @@ pub fn movement_system(
                 role,
                 fog,
                 health,
+                detour,
             },
             &mut ctx,
             &mut commands,
@@ -184,6 +198,7 @@ struct MovementComponents<'a> {
     role: Option<&'a Role>,
     fog: Option<&'a MentalFog>,
     health: Option<&'a crate::layer1::biology::health::Health>,
+    detour: Option<Mut<'a, DetourPath>>,
 }
 
 fn process_single_movement(
@@ -201,6 +216,7 @@ fn process_single_movement(
         role,
         fog,
         health,
+        mut detour,
     } = components;
     // Ludwig: Check Hit Stop
     if let Some(hs) = hit_stop {
@@ -240,36 +256,79 @@ fn process_single_movement(
         role.copied(),
     ) {
         commands.entity(pop_entity).insert(AtTarget);
+        commands.entity(pop_entity).remove::<DetourPath>();
         return;
     }
 
     // Check if already at target (for non-work actions requiring exact position)
     if *current_pos == target_pos {
         commands.entity(pop_entity).insert(AtTarget);
+        commands.entity(pop_entity).remove::<DetourPath>();
         return;
     }
 
     let (primary, secondary) = calculate_next_positions(*current_pos, target_pos);
 
-    // Selection Phase: Find first walkable candidate
-    let chosen_pos = try_get_walkable_pos(
-        primary,
+    // Selection Phase, in order:
+    // 1. Follow a committed DetourPath (Item 94) if one is active
+    //    (peek only — the step is consumed after the move succeeds).
+    // 2. The greedy primary/secondary candidates.
+    // 3. If both greedy candidates fail, plan a detour; it is stored
+    //    as a DetourPath only after this tick's move succeeds, so a
+    //    failed speed check never loses a step.
+    let mut chosen_pos = follow_detour_step(
+        &mut detour,
+        target_pos,
         &ctx.terrain,
         ctx.occupied_tiles.as_deref(),
         &ctx.buildings,
         pop_entity,
         role.copied(),
-    )
-    .or_else(|| {
-        try_get_walkable_pos(
+    );
+    let from_active_detour = chosen_pos.is_some();
+    if chosen_pos.is_none() {
+        chosen_pos = try_get_walkable_pos(
+            primary,
+            &ctx.terrain,
+            ctx.occupied_tiles.as_deref(),
+            &ctx.buildings,
+            pop_entity,
+            role.copied(),
+        );
+    }
+    if chosen_pos.is_none() {
+        chosen_pos = try_get_walkable_pos(
             secondary,
             &ctx.terrain,
             ctx.occupied_tiles.as_deref(),
             &ctx.buildings,
             pop_entity,
             role.copied(),
-        )
-    });
+        );
+    }
+    let mut planned_detour: Option<VecDeque<GridPosition>> = None;
+    if chosen_pos.is_none() {
+        // Item 94: both greedy candidates failed. When the pop is
+        // aligned with its target on one axis, calculate_next_positions
+        // only ever offered ONE candidate (the other axis is None), so
+        // a single unwalkable tile wedged the pop forever while its
+        // speed accumulator grew and no decider re-plan could displace
+        // a high-utility action. Plan a bounded BFS detour (see
+        // detour_path) and COMMIT to it instead of waiting.
+        if let Some(path) = detour_path(
+            *current_pos,
+            target_pos,
+            &ctx.terrain,
+            ctx.occupied_tiles.as_deref(),
+            &ctx.buildings,
+            pop_entity,
+            role.copied(),
+        ) {
+            let steps: VecDeque<GridPosition> = path.into();
+            chosen_pos = steps.front().copied();
+            planned_detour = Some(steps);
+        }
+    }
 
     let Some(new_pos) = chosen_pos else {
         return;
@@ -300,10 +359,28 @@ fn process_single_movement(
     current_pos.x = new_pos.x;
     current_pos.y = new_pos.y;
 
+    // Item 94: the move succeeded — now consume/commit detour state.
+    // (Doing this before the speed check would lose a step whenever
+    // the accumulator was short, leaving the pop one tile behind its
+    // stored path.)
+    if from_active_detour {
+        if let Some(d) = detour.as_mut() {
+            let _ = d.steps.pop_front();
+        }
+    }
+    if let Some(mut steps) = planned_detour {
+        let _ = steps.pop_front(); // the step just taken
+        commands.entity(pop_entity).insert(DetourPath {
+            target: target_pos,
+            steps,
+        });
+    }
+
     apply_erosion(&mut ctx.erosion, new_pos);
 
     if new_pos == target_pos {
         commands.entity(pop_entity).insert(AtTarget);
+        commands.entity(pop_entity).remove::<DetourPath>();
     }
 
     // Check post-move adjacency for work
@@ -318,6 +395,7 @@ fn process_single_movement(
         role.copied(),
     ) {
         commands.entity(pop_entity).insert(AtTarget);
+        commands.entity(pop_entity).remove::<DetourPath>();
     }
 }
 
@@ -534,6 +612,180 @@ pub(crate) fn calculate_next_positions(
     } else {
         (move_y, None)
     }
+}
+
+/// Item 94: peek at the next step of the pop's committed
+/// [`DetourPath`], or abandon the detour if it no longer applies.
+///
+/// Returns the front step WITHOUT consuming it (the caller consumes
+/// it only after the move actually succeeds). Returns `None` — and
+/// clears the component — when the detour's target no longer matches
+/// the current movement target, when its steps are exhausted, or when
+/// the next stored step has become unwalkable; movement then falls
+/// back to greedy candidates and, if those fail, a fresh plan.
+fn follow_detour_step(
+    detour: &mut Option<Mut<DetourPath>>,
+    target: GridPosition,
+    terrain: &TerrainGrid,
+    occupied: Option<&OccupiedTiles>,
+    buildings: &Query<(
+        &GridPosition,
+        &Building,
+        Option<&Gate>,
+        Option<&AccessControl>,
+    )>,
+    pop_entity: Entity,
+    pop_role: Option<Role>,
+) -> Option<GridPosition> {
+    let (clear, next) = {
+        let d = detour.as_ref()?;
+        if d.target != target || d.steps.is_empty() {
+            (true, None)
+        } else {
+            let next = d.steps[0];
+            if is_tile_walkable(
+                terrain, occupied, buildings, next.x, next.y, pop_entity, pop_role,
+            ) {
+                (false, Some(next))
+            } else {
+                (true, None)
+            }
+        }
+    };
+    if clear {
+        *detour = None;
+        return None;
+    }
+    next
+}
+
+/// Item 94 detour plan: a shortest walkable path from `current` to
+/// `target`, found with bounded breadth-first search. The path
+/// excludes `current` and ends at the goal tile.
+///
+/// This is the sidestep-with-lookahead fix for the greedy wedge, and
+/// the lookahead is why the caller COMMITS the whole path as a
+/// [`DetourPath`] instead of taking one sidestep and re-deciding
+/// greedily next tick: greedy re-decision oscillates. (Measured on
+/// the first version of this fix, which replanned per tick: a pop at
+/// (5,5) detouring around rock at (5,6) bounced (6,5) <-> (5,5)
+/// forever, because from the sidestep tile the greedy horizontal
+/// step back into the blocked column is walkable and is preferred.)
+/// Following stored steps cannot reverse like that.
+///
+/// Goal: `target` itself when it is walkable; otherwise any walkable
+/// tile Manhattan-adjacent to it (the stopping condition work-style
+/// actions already use for unwalkable building/item tiles).
+///
+/// Fails closed (`None`) when no goal is reachable within
+/// `MAX_DETOUR_VISITED` visited tiles — a genuinely enclosed target
+/// leaves the pop waiting exactly as before, never teleporting and
+/// never entering an unwalkable tile. The search only runs when both
+/// greedy candidates failed, so unobstructed movement pays nothing.
+pub(crate) fn detour_path(
+    current: GridPosition,
+    target: GridPosition,
+    terrain: &TerrainGrid,
+    occupied: Option<&OccupiedTiles>,
+    buildings: &Query<(
+        &GridPosition,
+        &Building,
+        Option<&Gate>,
+        Option<&AccessControl>,
+    )>,
+    pop_entity: Entity,
+    pop_role: Option<Role>,
+) -> Option<Vec<GridPosition>> {
+    /// Upper bound on tiles one detour search may visit. The standard
+    /// map is 80x50 = 4000 tiles, so this covers the whole map while
+    /// keeping a wedged pop's detour planning bounded.
+    const MAX_DETOUR_VISITED: usize = 4096;
+
+    // Snapshot building collision data once: is_tile_walkable would
+    // rebuild this Vec for every one of the (potentially thousands
+    // of) BFS nodes.
+    let building_info: Vec<BuildingCollisionInfo> = buildings
+        .iter()
+        .map(|(pos, building, _gate, access_opt)| {
+            BuildingCollisionInfo::from_query_item(pos, building, access_opt)
+        })
+        .collect();
+    let walkable = |p: GridPosition| {
+        is_tile_walkable_data(
+            terrain,
+            occupied,
+            &building_info,
+            p.x,
+            p.y,
+            pop_entity,
+            pop_role,
+        )
+    };
+
+    let target_walkable = walkable(target);
+    let is_goal = |p: GridPosition| {
+        if target_walkable {
+            p == target
+        } else {
+            p.distance_manhattan(target) == 1
+        }
+    };
+    if is_goal(current) {
+        return None;
+    }
+
+    use std::collections::{HashMap, VecDeque};
+    let mut parent: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
+    let mut queue: VecDeque<GridPosition> = VecDeque::new();
+    parent.insert((current.x, current.y), (current.x, current.y));
+    queue.push_back(current);
+
+    while let Some(node) = queue.pop_front() {
+        if node != current && is_goal(node) {
+            // Reconstruct the full path (excluding `current`).
+            let mut path = Vec::new();
+            let mut cur = node;
+            while cur != current {
+                path.push(cur);
+                let p = parent[&(cur.x, cur.y)];
+                cur = GridPosition { x: p.0, y: p.1 };
+            }
+            path.reverse();
+            return Some(path);
+        }
+        if parent.len() >= MAX_DETOUR_VISITED {
+            return None;
+        }
+        // Explore neighbours closest-to-target first so equal-length
+        // shortest paths prefer the natural around-the-obstacle route.
+        let mut neighbours = [
+            GridPosition {
+                x: node.x + 1,
+                y: node.y,
+            },
+            GridPosition {
+                x: node.x - 1,
+                y: node.y,
+            },
+            GridPosition {
+                x: node.x,
+                y: node.y + 1,
+            },
+            GridPosition {
+                x: node.x,
+                y: node.y - 1,
+            },
+        ];
+        neighbours.sort_by_key(|p| p.distance_manhattan(target));
+        for next in neighbours {
+            if parent.contains_key(&(next.x, next.y)) || !walkable(next) {
+                continue;
+            }
+            parent.insert((next.x, next.y), (node.x, node.y));
+            queue.push_back(next);
+        }
+    }
+    None
 }
 
 fn calculate_movement_cost(

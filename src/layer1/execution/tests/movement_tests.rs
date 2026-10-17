@@ -197,11 +197,23 @@ fn test_movement_blocked_by_rock() {
         ))
         .id();
 
+    // Item 94: the rock tile itself must never be entered, but a
+    // 1-tile obstacle no longer wedges the pop forever — the first
+    // step is the detour sidestep and the pop arrives around it.
     world.run_system_once(movement_system).unwrap();
 
     let pos = world.get::<GridPosition>(pop).unwrap();
-    assert_eq!(pos.x, 0);
-    assert_eq!(pos.y, 0);
+    assert_eq!(
+        (pos.x, pos.y),
+        (0, 1),
+        "pop should sidestep, not enter rock"
+    );
+
+    let path = run_movement_collecting_path(&mut world, pop, 20);
+    assert!(!path.contains(&(1, 0)), "path={path:?}");
+    let pos = world.get::<GridPosition>(pop).unwrap();
+    assert_eq!((pos.x, pos.y), (5, 0), "path={path:?}");
+    assert!(world.get::<AtTarget>(pop).is_some());
 }
 
 #[test]
@@ -228,11 +240,22 @@ fn test_movement_blocked_by_water() {
         ))
         .id();
 
+    // Item 94: same as rock — water is never entered, but the pop
+    // detours around a 1-tile obstacle instead of wedging forever.
     world.run_system_once(movement_system).unwrap();
 
     let pos = world.get::<GridPosition>(pop).unwrap();
-    assert_eq!(pos.x, 0);
-    assert_eq!(pos.y, 0);
+    assert_eq!(
+        (pos.x, pos.y),
+        (0, 1),
+        "pop should sidestep, not enter water"
+    );
+
+    let path = run_movement_collecting_path(&mut world, pop, 20);
+    assert!(!path.contains(&(1, 0)), "path={path:?}");
+    let pos = world.get::<GridPosition>(pop).unwrap();
+    assert_eq!((pos.x, pos.y), (5, 0), "path={path:?}");
+    assert!(world.get::<AtTarget>(pop).is_some());
 }
 
 #[test]
@@ -547,4 +570,162 @@ fn test_movement_winter_snow_blocks_first_step_summer_moves() {
     assert_eq!((pos.x, pos.y), (0, 0), "winter snow should delay the step");
     let speed = world.get::<Speed>(pop).unwrap();
     assert!((speed.accumulator - 0.6).abs() < 0.001);
+}
+
+// --- Item 94: greedy movement detour (RED before fix) ---
+// A pop aligned with its target on one axis gets only ONE candidate
+// step from calculate_next_positions (the other axis is None). If that
+// single tile is unwalkable the pop wedged forever. These tests drive
+// the REAL movement_system, not the helper in isolation.
+
+fn detour_world(obstacle: (i32, i32)) -> World {
+    let mut world = setup_world();
+    let mut terrain = world.resource_mut::<TerrainGrid>();
+    let idx = (obstacle.1 * 10 + obstacle.0) as usize;
+    terrain.tiles[idx] = TerrainType::Rock;
+    drop(terrain);
+    world
+}
+
+fn run_movement_collecting_path(
+    world: &mut World,
+    pop: Entity,
+    max_ticks: usize,
+) -> Vec<(i32, i32)> {
+    let mut path = Vec::new();
+    for _ in 0..max_ticks {
+        world.run_system_once(movement_system).unwrap();
+        let pos = world.get::<GridPosition>(pop).unwrap();
+        path.push((pos.x, pos.y));
+        if world.get::<AtTarget>(pop).is_some() {
+            break;
+        }
+    }
+    path
+}
+
+#[test]
+fn test_movement_detours_around_rock_on_vertical_path() {
+    // dx == 0 case: pop (5,5) -> target (5,8), rock at (5,6) is the
+    // ONLY greedy candidate. FetchTool mirrors the high-utility
+    // fetch actions named in the item-94 report.
+    let mut world = detour_world((5, 6));
+    let pop = world
+        .spawn((
+            Pop,
+            GridPosition { x: 5, y: 5 },
+            Speed {
+                base: 1.0,
+                current: 1.0,
+                accumulator: 0.0,
+            },
+            MovementTarget {
+                target_entity: Entity::from_raw(1),
+                target_position: GridPosition { x: 5, y: 8 },
+                for_action: ActionType::FetchTool,
+            },
+        ))
+        .id();
+    let path = run_movement_collecting_path(&mut world, pop, 20);
+    assert!(
+        !path.contains(&(5, 6)),
+        "pop must never step onto the rock, path={path:?}"
+    );
+    let pos = world.get::<GridPosition>(pop).unwrap();
+    assert_eq!(
+        (pos.x, pos.y),
+        (5, 8),
+        "wedged pop must detour around the 1-tile obstacle and arrive, path={path:?}"
+    );
+    assert!(world.get::<AtTarget>(pop).is_some());
+}
+
+#[test]
+fn test_movement_detours_around_rock_on_horizontal_path() {
+    // Symmetric dy == 0 case: pop (5,5) -> target (8,5), rock (6,5).
+    let mut world = detour_world((6, 5));
+    let pop = world
+        .spawn((
+            Pop,
+            GridPosition { x: 5, y: 5 },
+            Speed {
+                base: 1.0,
+                current: 1.0,
+                accumulator: 0.0,
+            },
+            MovementTarget {
+                target_entity: Entity::from_raw(1),
+                target_position: GridPosition { x: 8, y: 5 },
+                for_action: ActionType::FetchSuit,
+            },
+        ))
+        .id();
+    let path = run_movement_collecting_path(&mut world, pop, 20);
+    assert!(!path.contains(&(6, 5)), "path={path:?}");
+    let pos = world.get::<GridPosition>(pop).unwrap();
+    assert_eq!((pos.x, pos.y), (8, 5), "path={path:?}");
+    assert!(world.get::<AtTarget>(pop).is_some());
+}
+
+#[test]
+fn test_movement_detours_when_both_greedy_steps_blocked() {
+    // Diagonal case: both primary (6,5) and secondary (5,6) blocked.
+    let mut world = setup_world();
+    {
+        let mut terrain = world.resource_mut::<TerrainGrid>();
+        terrain.tiles[5 * 10 + 6] = TerrainType::Rock;
+        terrain.tiles[6 * 10 + 5] = TerrainType::Rock;
+    }
+    let pop = world
+        .spawn((
+            Pop,
+            GridPosition { x: 5, y: 5 },
+            MovementTarget {
+                target_entity: Entity::from_raw(1),
+                target_position: GridPosition { x: 7, y: 7 },
+                for_action: ActionType::Work,
+            },
+        ))
+        .id();
+    let path = run_movement_collecting_path(&mut world, pop, 30);
+    assert!(
+        !path.contains(&(6, 5)) && !path.contains(&(5, 6)),
+        "path={path:?}"
+    );
+    let pos = world.get::<GridPosition>(pop).unwrap();
+    assert_eq!((pos.x, pos.y), (7, 7), "path={path:?}");
+    assert!(world.get::<AtTarget>(pop).is_some());
+}
+
+#[test]
+fn test_movement_enclosed_target_fails_closed_without_entering_rock() {
+    // Target ringed by rock is genuinely unreachable: the pop must
+    // not teleport, enter rock, or claim arrival.
+    let mut world = setup_world();
+    {
+        let mut terrain = world.resource_mut::<TerrainGrid>();
+        for (x, y) in [(7, 8), (9, 8), (8, 7), (8, 9)] {
+            terrain.tiles[(y * 10 + x) as usize] = TerrainType::Rock;
+        }
+    }
+    let pop = world
+        .spawn((
+            Pop,
+            GridPosition { x: 5, y: 8 },
+            MovementTarget {
+                target_entity: Entity::from_raw(1),
+                target_position: GridPosition { x: 8, y: 8 },
+                for_action: ActionType::FetchTool,
+            },
+        ))
+        .id();
+    let path = run_movement_collecting_path(&mut world, pop, 20);
+    for rock in [(7, 8), (9, 8), (8, 7), (8, 9)] {
+        assert!(
+            !path.contains(&rock),
+            "entered rock {rock:?}, path={path:?}"
+        );
+    }
+    assert!(!path.contains(&(8, 8)), "path={path:?}");
+    assert!(world.get::<AtTarget>(pop).is_none());
 }
