@@ -38,8 +38,36 @@
 //!   Those systems have their own suites.
 //! * Tools are zeroed so the founders' fetch-tools errand does not
 //!   dominate early ticks; work proceeds at improvised efficiency.
+//! * EVA suits are removed (pool zeroed, loose suits swept by the
+//!   janitor): Spec 1384's FetchSuit scores 0.97 — above Work's 0.5
+//!   plus the decider's 0.15 switch threshold — whenever ANY
+//!   designation or anomaly anywhere sits in vacuum (a global gate),
+//!   so in roughly half of generated worlds it preempts the inserted
+//!   Work plan on the first evaluation tick. The pop then walks to a
+//!   stockpile to dress instead of working, and if the single greedy
+//!   movement step toward the stockpile is blocked it can wait there
+//!   forever (item-92 forensics, 2026-10-16: 5/12 failures, every one
+//!   with zero ForestryProgress ever created — the executor was
+//!   running; the plan never survived to reach it). Suits have their
+//!   own suites (spec 1384); here they are an ambient system owned by
+//!   another spec, isolated like fauna and panic above. The same
+//!   forensics found a rarer second preemptor (~1/15 runs): Repair
+//!   (0.6 base, scaled by damage depth) beats the threshold when a
+//!   weathered structure stands near the work site, so
+//!   `run_until_consumed` also keeps structures topped up and sweeps
+//!   Repair designations — repair is the sibling test's subject, not
+//!   this one's. Colony clothing is zeroed for the same reason
+//!   (FetchClothing's 0.95 nakedness band). And because the decider
+//!   re-evaluates every tick, no inserted plan is self-sustaining in
+//!   a live world: `run_until_consumed` re-pins the plan whenever a
+//!   preemptor has stripped it (worker left with no MovementTarget).
+//!   That restores the arrangement only — arrival, execution, and
+//!   yield still happen entirely through the production schedule,
+//!   and if the executor were missing the re-pinned pop would stand
+//!   at the designation forever and the assertion would still fire.
 
 use crate::layer1::administration::designation::{try_designate, Designation, DesignationType};
+use crate::layer1::biology::health::Health;
 use crate::layer1::culture::funeral::Corpse;
 use crate::layer1::economy::ResourceItem;
 use crate::layer1::entities::pop::PopBundle;
@@ -49,7 +77,6 @@ use crate::layer1::map::GridPosition;
 use crate::layer1::mind::sleep_debt::ForcedComa;
 use crate::layer1::physics::pressure::PressureGrid;
 use crate::layer1::pop::Pop;
-use crate::layer1::biology::health::Health;
 use crate::layer1::psychology::needs::Needs;
 use crate::layer1::psychology::panic_spirals::{Panic, Terrifying};
 use crate::layer1::resources::ColonyResources;
@@ -71,9 +98,31 @@ fn test_world() -> World {
         let mut res = world.resource_mut::<ColonyResources>();
         res.food = 500.0;
         res.tools = 0.0;
+        res.clothing = 0.0;
+        res.eva_suits = 0.0;
     }
     remove_ambient_threats(&mut world);
     world
+}
+
+/// Despawns loose (unworn) EVA suit entities: the FetchSuit fetch
+/// targets. Worn suits are left alone — no pop in these tests starts
+/// suited, and the workforce is replaced before the phases begin.
+fn remove_loose_suits(world: &mut World) {
+    let worn: Vec<Entity> = {
+        let mut q = world.query::<&crate::layer1::items::Equipment>();
+        q.iter(world).filter_map(|eq| eq.body).collect()
+    };
+    let loose: Vec<Entity> = {
+        let mut q = world.query::<(Entity, &crate::layer1::eva_suit::EvaSuit)>();
+        q.iter(world)
+            .map(|(e, _)| e)
+            .filter(|e| !worn.contains(e))
+            .collect()
+    };
+    for e in loose {
+        world.despawn(e);
+    }
 }
 
 /// Despawns fauna and `Terrifying` entities (ambient terror sources
@@ -93,6 +142,7 @@ fn remove_ambient_threats(world: &mut World) {
     for e in terrifying {
         world.despawn(e);
     }
+    remove_loose_suits(world);
 }
 
 /// Test-harness janitor: sweeps corpses and clears Panic / ForcedComa
@@ -115,6 +165,10 @@ fn keep_workforce_functional(world: &mut World) {
         e.remove::<Panic>();
         e.remove::<ForcedComa>();
     }
+    // Keep the EVA isolation (see module docs): no suit pool to draw
+    // from and no loose suits to fetch, so FetchSuit can never score.
+    world.resource_mut::<ColonyResources>().eva_suits = 0.0;
+    remove_loose_suits(world);
     // Top up needs: with hunger/rest/hygiene full, the needs actions
     // sit at their utility floors, so the decider's choice is governed
     // by the work candidates' distance — which the arrangement (pops
@@ -190,11 +244,7 @@ fn fresh_workforce(world: &mut World, count: usize, site: (i32, i32)) {
 /// nearest first, restricted to tiles inside the colony's pressure
 /// envelope (pressure >= 0.3), with a highest-pressure fallback if no
 /// tile qualifies. See the module docs for why the filter matters.
-fn nearest_tiles_to_pops(
-    world: &mut World,
-    terrain: TerrainType,
-    count: usize,
-) -> Vec<(i32, i32)> {
+fn nearest_tiles_to_pops(world: &mut World, terrain: TerrainType, count: usize) -> Vec<(i32, i32)> {
     let positions: Vec<GridPosition> = {
         let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
         q.iter(world).copied().collect()
@@ -215,8 +265,11 @@ fn nearest_tiles_to_pops(
         }
     }
     tiles.sort();
-    let mut picked: Vec<(i32, i32)> =
-        tiles.into_iter().take(count).map(|(_, x, y)| (x, y)).collect();
+    let mut picked: Vec<(i32, i32)> = tiles
+        .into_iter()
+        .take(count)
+        .map(|(_, x, y)| (x, y))
+        .collect();
     if picked.is_empty() {
         let mut best: Option<(i32, i32)> = None;
         let mut best_p = f32::MIN;
@@ -248,13 +301,50 @@ fn designation_at(world: &mut World, pos: GridPosition) -> Option<Entity> {
 
 /// Runs the live schedule (janitor each tick) until `des` is consumed
 /// or the tick budget runs out; consumption is asserted by the caller.
-fn run_until_consumed(world: &mut World, des: Entity, max_ticks: usize) {
+fn run_until_consumed(
+    world: &mut World,
+    worker: Entity,
+    des: Entity,
+    target: (i32, i32),
+    max_ticks: usize,
+) {
     for _ in 0..max_ticks {
         if world.get_entity(des).is_err() {
             return;
         }
         keep_workforce_functional(world);
+        suppress_repair_candidates(world);
+        // Re-pin the arranged plan if a preemptor stripped it (see
+        // module docs): a worker with no MovementTarget at all has
+        // lost the plan; a worker still travelling or working keeps
+        // its current target untouched.
+        if world.get_entity(worker).is_ok() && world.get::<MovementTarget>(worker).is_none() {
+            assign_work_plan(world, worker, des, target);
+        }
         run_simulation_tick(world);
+    }
+}
+
+/// Keeps the Repair band empty during the designation phases: tops
+/// every structure to full HP (so no repair candidates are offered)
+/// and sweeps any Repair designations. Used only by
+/// `run_until_consumed` — the sibling repair test drives repair
+/// organically and must keep its damaged structures, so this is NOT
+/// part of the shared janitor.
+fn suppress_repair_candidates(world: &mut World) {
+    let mut q = world.query::<&mut Structure>();
+    for mut s in q.iter_mut(world) {
+        s.current_hp = s.max_hp;
+    }
+    let repairs: Vec<Entity> = {
+        let mut q = world.query::<(Entity, &Designation)>();
+        q.iter(world)
+            .filter(|(_, d)| d.designation_type == DesignationType::Repair)
+            .map(|(e, _)| e)
+            .collect()
+    };
+    for e in repairs {
+        world.despawn(e);
     }
 }
 
@@ -302,7 +392,12 @@ fn test_designation_work_executes_in_live_schedule() {
         let mut q = world.query_filtered::<Entity, With<Pop>>();
         q.iter(&world).next().expect("one fresh worker")
     };
-    assert!(try_designate(&mut world, tree.0, tree.1, DesignationType::Chop));
+    assert!(try_designate(
+        &mut world,
+        tree.0,
+        tree.1,
+        DesignationType::Chop
+    ));
     let chop_des = designation_at(
         &mut world,
         GridPosition {
@@ -312,7 +407,7 @@ fn test_designation_work_executes_in_live_schedule() {
     )
     .expect("chop designation entity");
     assign_work_plan(&mut world, worker, chop_des, tree);
-    run_until_consumed(&mut world, chop_des, 200);
+    run_until_consumed(&mut world, worker, chop_des, tree, 200);
     assert!(
         world.get_entity(chop_des).is_err(),
         "EXECUTION BREAK: a pop arrived at a designated tree with a Work \
@@ -327,7 +422,12 @@ fn test_designation_work_executes_in_live_schedule() {
         let mut q = world.query_filtered::<Entity, With<Pop>>();
         q.iter(&world).next().expect("one fresh worker")
     };
-    assert!(try_designate(&mut world, rock.0, rock.1, DesignationType::Mine));
+    assert!(try_designate(
+        &mut world,
+        rock.0,
+        rock.1,
+        DesignationType::Mine
+    ));
     let mine_des = designation_at(
         &mut world,
         GridPosition {
@@ -337,7 +437,7 @@ fn test_designation_work_executes_in_live_schedule() {
     )
     .expect("mine designation entity");
     assign_work_plan(&mut world, worker, mine_des, rock);
-    run_until_consumed(&mut world, mine_des, 200);
+    run_until_consumed(&mut world, worker, mine_des, rock, 200);
     assert!(
         world.get_entity(mine_des).is_err(),
         "EXECUTION BREAK: a pop arrived at a designated rock with a Work \
@@ -431,9 +531,7 @@ fn test_structure_repair_completes_in_live_schedule() {
         run_simulation_tick(&mut world);
         if !repairer_arrived {
             let mut q = world.query_filtered::<&MovementTarget, With<AtTarget>>();
-            repairer_arrived = q
-                .iter(&world)
-                .any(|mt| mt.for_action == ActionType::Repair);
+            repairer_arrived = q.iter(&world).any(|mt| mt.for_action == ActionType::Repair);
         }
         for (entity, max_hp) in &damaged {
             if let Some(s) = world.get::<Structure>(*entity) {
