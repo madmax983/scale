@@ -416,7 +416,13 @@ pub fn handle_fetch_clothing(
                         item: old_entity,
                         slot: "body".to_string(),
                     });
-                    commands.entity(old_entity).despawn();
+                    // Item 95: old_entity may be stale (garment despawned
+                    // by another path while Equipment.body still pointed
+                    // at it) — commands.entity() panics on a dead entity,
+                    // so despawn only via the guarded get_entity form.
+                    if let Some(mut old_cmds) = commands.get_entity(old_entity) {
+                        old_cmds.despawn();
+                    }
                 }
             }
         }
@@ -508,7 +514,11 @@ pub fn handle_fetch_suit(
                 item: old_entity,
                 slot: "body".to_string(),
             });
-            commands.entity(old_entity).despawn();
+            // Item 95: see handle_fetch_clothing — Equipment.body may
+            // hold a stale entity; never despawn it unguarded.
+            if let Some(mut old_cmds) = commands.get_entity(old_entity) {
+                old_cmds.despawn();
+            }
         }
     }
     let suit_entity = if loose_target {
@@ -987,5 +997,140 @@ mod tests {
         let equip = world.get::<crate::layer1::Equipment>(pop).unwrap();
         assert!(equip.body.is_none(), "body slot cleared");
         assert!(world.get_entity(suit).is_err(), "pooled suit entity consumed");
+    }
+
+    #[test]
+    fn test_fetch_suit_tolerates_stale_body_entity() {
+        // Item 95: Equipment.body can go stale when the worn garment is
+        // despawned by another path (wear/decay, consumption, ...) while
+        // the pop still references it. Donning a suit must not panic on
+        // the replaced-garment despawn; it must clear the stale slot by
+        // overwriting it with the new suit.
+        let mut world = World::new();
+        world.init_resource::<Events<UnequipEvent>>();
+        world.init_resource::<Events<crate::layer1::economy::bio_loom::UnequipFailedEvent>>();
+        let stale = world
+            .spawn((
+                Item::default(),
+                Clothing {
+                    clothing_type: ClothingType::Tunic,
+                    insulation: 1.0,
+                    durability: 100.0,
+                    max_durability: 100.0,
+                },
+            ))
+            .id();
+        // Garment despawned elsewhere; Equipment still points at it.
+        world.despawn(stale);
+        assert!(world.get_entity(stale).is_err());
+        let pop = world
+            .spawn(Equipment {
+                body: Some(stale),
+                ..Default::default()
+            })
+            .id();
+        let stockpile = world.spawn(GridPosition { x: 1, y: 1 }).id();
+        let mut resources = ColonyResources {
+            eva_suits: 1.0,
+            ..Default::default()
+        };
+        let _ = world.run_system_once(
+            move |mut commands: Commands,
+                  bio_suits: Query<&crate::layer1::economy::bio_loom::BioSuit>,
+                  eva_suits: Query<&crate::layer1::eva_suit::EvaSuit>,
+                  mut eq_query: Query<&mut Equipment>,
+                  mut unequip_events: EventWriter<UnequipEvent>,
+                  mut failed_events: EventWriter<
+                crate::layer1::economy::bio_loom::UnequipFailedEvent,
+            >| {
+                let eq = eq_query.get_mut(pop).unwrap();
+                let mut equip_opt = Some(eq);
+                handle_fetch_suit(
+                    &mut commands,
+                    &mut resources,
+                    pop,
+                    GridPosition { x: 1, y: 1 },
+                    stockpile,
+                    &mut equip_opt,
+                    &mut unequip_events,
+                    &bio_suits,
+                    &mut failed_events,
+                    &eva_suits,
+                    None,
+                    crate::layer1::eva_suit::SuitClass::Base,
+                );
+                assert_eq!(resources.eva_suits, 0.0, "pool decremented");
+            },
+        );
+        world.flush();
+        let equip = world.get::<crate::layer1::Equipment>(pop).unwrap();
+        let suit_entity = equip
+            .body
+            .expect("body slot holds the new suit, stale ref cleared");
+        assert_ne!(suit_entity, stale);
+        assert!(world
+            .get::<crate::layer1::eva_suit::EvaSuit>(suit_entity)
+            .is_some());
+    }
+
+    #[test]
+    fn test_fetch_clothing_tolerates_stale_body_entity() {
+        // Item 95 sibling: handle_fetch_clothing shares the same
+        // unguarded replaced-garment despawn on Equipment.body.
+        let mut world = World::new();
+        world.init_resource::<Events<UnequipEvent>>();
+        world.init_resource::<Events<crate::layer1::economy::bio_loom::UnequipFailedEvent>>();
+        let stale = world
+            .spawn((
+                Item::default(),
+                Clothing {
+                    clothing_type: ClothingType::Tunic,
+                    insulation: 1.0,
+                    durability: 100.0,
+                    max_durability: 100.0,
+                },
+            ))
+            .id();
+        world.despawn(stale);
+        assert!(world.get_entity(stale).is_err());
+        let pop = world
+            .spawn(Equipment {
+                body: Some(stale),
+                ..Default::default()
+            })
+            .id();
+        let mut resources = ColonyResources {
+            clothing: 1.0,
+            ..Default::default()
+        };
+        let _ = world.run_system_once(
+            move |mut commands: Commands,
+                  bio_suits: Query<&crate::layer1::economy::bio_loom::BioSuit>,
+                  mut eq_query: Query<&mut Equipment>,
+                  mut unequip_events: EventWriter<UnequipEvent>,
+                  mut failed_events: EventWriter<
+                crate::layer1::economy::bio_loom::UnequipFailedEvent,
+            >| {
+                let eq = eq_query.get_mut(pop).unwrap();
+                let mut equip_opt = Some(eq);
+                handle_fetch_clothing(
+                    &mut commands,
+                    &mut resources,
+                    pop,
+                    &mut equip_opt,
+                    &mut unequip_events,
+                    &bio_suits,
+                    &mut failed_events,
+                );
+                assert_eq!(resources.clothing, 0.0, "clothing consumed");
+            },
+        );
+        world.flush();
+        let equip = world.get::<crate::layer1::Equipment>(pop).unwrap();
+        let new_entity = equip
+            .body
+            .expect("body slot holds new clothing, stale ref cleared");
+        assert_ne!(new_entity, stale);
+        assert!(world.get::<Clothing>(new_entity).is_some());
     }
 }
