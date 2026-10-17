@@ -78,10 +78,12 @@ mod tests {
         app.add_event::<AddChronicleEvent>();
         app.add_systems(Update, thermal_damage_chronicle_bridge);
 
-        // Send a thermal damage event
+        // Send a thermal damage event (cold damage — this test's
+        // "Deep Chill" expectation is the hypothermia telegraph)
         app.world_mut().send_event(ThermalDamageEvent {
             entity: Entity::from_raw(1),
             amount: 0.5,
+            is_heatstroke: false,
         });
 
         app.update();

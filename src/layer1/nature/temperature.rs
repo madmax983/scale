@@ -278,12 +278,14 @@ pub fn update_temperature_system(
             }
             BuildingType::LifeSupport => {
                 // Life support includes thermal regulation for the habitat:
-                // it gently holds nearby tiles toward a survivable 20C. This
-                // is the colony's winter lifeline — and one more reason
-                // sabotage targeting life support is scary.
+                // it gently holds nearby tiles toward a survivable 20C in
+                // both directions — heating in winter, cooling in summer.
+                // This is the colony's year-round lifeline — and one more
+                // reason sabotage targeting life support is scary.
                 //
-                // NOTE: arm returns 0.0; the actual multi-tile heating is
-                // applied just below (it needs the grid, not just `heat`).
+                // NOTE: arm returns 0.0; the actual multi-tile
+                // thermoregulation is applied just below (it needs the
+                // grid, not just `heat`).
                 0.0
             }
             BuildingType::Smelter => {
@@ -308,15 +310,24 @@ pub fn update_temperature_system(
         }
 
         // Life-support habitat thermoregulation (see match arm above):
-        // warm every tile within radius 4 of a LifeSupport building toward
-        // 20C. The habitat stays livable through winter as long as life
-        // support stands.
+        // push every tile within radius 4 of a LifeSupport building toward
+        // 20C — heating cold tiles, cooling hot ones. The habitat stays
+        // livable year-round as long as life support stands.
         //
         // WINTER-WIPE FIX (2026-10-04): the old +6/tick cap lost to diffusion
         // against -5C winter ambient, leaving habitat tiles at 2-3C — below
         // the 10C hypothermia threshold for uninsulated pops, who then took
         // 0.5/tick all winter and died en masse ~tick 925. The stronger
         // +12/tick push actually holds the habitat above 10C.
+        //
+        // SUMMER-COOLING FIX (item 96, 2026-10-17): the arm above only ever
+        // heated (`tile_temp < 20.0`), so there was no cooling verb at all —
+        // building heat (+2.5 Housing, +2.0 Generator, ...) and summer solar
+        // gain cooked habitat interiors to 35–47C. The 2026-10-17 balance
+        // re-baseline found heatstroke was 42% of pooled deaths, 97% of
+        // them on pressurized tiles with LifeSupport intact. The cooling
+        // branch mirrors the winter fix exactly: a symmetric capped push
+        // toward 20C, so heating behavior is unchanged below 20C.
         if b.building_type == BuildingType::LifeSupport {
             for dy in -4i32..=4 {
                 for dx in -4i32..=4 {
@@ -328,6 +339,8 @@ pub fn update_temperature_system(
                     let tile_temp = grid.get_safe(tx, ty);
                     if tile_temp < 20.0 {
                         grid.add(tx, ty, (20.0 - tile_temp).min(12.0));
+                    } else if tile_temp > 20.0 {
+                        grid.add(tx, ty, -(tile_temp - 20.0).min(12.0));
                     }
                 }
             }
@@ -367,6 +380,10 @@ pub struct ThermalDamageEvent {
     pub entity: Entity,
     /// The amount of damage taken.
     pub amount: f32,
+    /// True when the damage is heatstroke (tile above the heat
+    /// tolerance); false for hypothermia. Lets downstream consumers
+    /// (e.g. the INT-1335 chronicle bridge) telegraph the honest cause.
+    pub is_heatstroke: bool,
 }
 
 /// System to apply thermal damage to pops.
@@ -419,6 +436,7 @@ pub fn thermal_damage_system(
             thermal_damage_events.send(ThermalDamageEvent {
                 entity,
                 amount: 0.5,
+                is_heatstroke: false,
             });
         } else if temp > heat_tolerance {
             // Heatstroke
@@ -432,6 +450,7 @@ pub fn thermal_damage_system(
             thermal_damage_events.send(ThermalDamageEvent {
                 entity,
                 amount: 0.5,
+                is_heatstroke: true,
             });
         }
     }
@@ -700,6 +719,94 @@ mod tests {
                 assert!(
                     t >= 10.0,
                     "Habitat tile ({},{}) at {:.1}C below hypothermia threshold",
+                    10 + dx,
+                    10 + dy,
+                    t
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_lifesupport_thermoregulation_holds_habitat_below_heatstroke() {
+        // SUMMER TWIN of the winter-wipe regression test above (item 96,
+        // 2026-10-17): LifeSupport thermoregulation was heating-only, so
+        // habitat interiors cooked all summer — the 2026-10-17 balance
+        // re-baseline found heatstroke = 42% of pooled deaths, 97% of
+        // them on pressurized tiles at 35–47C with LifeSupport intact.
+        // With 30C summer ambient, daytime solar gain, and building heat
+        // from a housing cluster inside the habitat, tiles within
+        // radius 4 of a LifeSupport must stay BELOW the 35C heatstroke
+        // threshold after the grid reaches equilibrium.
+        let mut world = World::new();
+        world.insert_resource(SeasonState {
+            current_season: Season::Summer,
+        });
+        world.insert_resource(DayNightCycle {
+            time_of_day: TimeOfDay::Day,
+            day_count: 0,
+            ticks_per_day: 1000,
+        });
+        let mut grid = TemperatureGrid::new(20, 20, 30.0);
+        grid.ambient = 30.0;
+        world.insert_resource(grid);
+        world.insert_resource(TerrainGrid {
+            width: 20,
+            height: 20,
+            tiles: vec![TerrainType::Grass; 400],
+        });
+
+        // LifeSupport at center (10,10), no PowerConsumer = always on.
+        world.spawn((
+            Building {
+                building_type: BuildingType::LifeSupport,
+            },
+            GridPosition { x: 10, y: 10 },
+        ));
+
+        // Building heat inside the habitat: a housing ring (+2.5/tick
+        // each) plus a generator (+2.0/tick) — the heat load a real
+        // habitat carries through summer.
+        for (x, y) in [
+            (9, 9),
+            (10, 9),
+            (11, 9),
+            (9, 10),
+            (11, 10),
+            (9, 11),
+            (10, 11),
+            (11, 11),
+        ] {
+            world.spawn((
+                Building {
+                    building_type: BuildingType::Housing,
+                },
+                GridPosition { x, y },
+            ));
+        }
+        world.spawn((
+            Building {
+                building_type: BuildingType::Generator,
+            },
+            GridPosition { x: 12, y: 10 },
+        ));
+
+        // Run many ticks to reach thermal equilibrium.
+        for _ in 0..300 {
+            world.run_system_once(update_temperature_system).unwrap();
+        }
+
+        let grid = world.resource::<TemperatureGrid>();
+        // Heatstroke threshold for pops is 35C.
+        for dy in -4i32..=4 {
+            for dx in -4i32..=4 {
+                if dx.abs() + dy.abs() > 4 {
+                    continue;
+                }
+                let t = grid.get_safe(10 + dx, 10 + dy);
+                assert!(
+                    t < 35.0,
+                    "Habitat tile ({},{}) at {:.1}C above heatstroke threshold",
                     10 + dx,
                     10 + dy,
                     t

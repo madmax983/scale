@@ -49,22 +49,44 @@ pub fn kinetic_strike_chronicle_bridge(
     }
 }
 
-/// INT-1335: Bridges `ThermalDamageEvent` (The Deep Chill) to `AddChronicleEvent`
+/// INT-1335: Bridges `ThermalDamageEvent` to `AddChronicleEvent`.
+///
+/// Telegraphs the honest cause (item 96, 2026-10-17): cold damage reads
+/// as hypothermia ("The Deep Chill"), heat damage as heatstroke ("The
+/// Long Heat") — previously every thermal death was chronicle-labelled
+/// hypothermia, so summer heat deaths had no usable telegraph. The rate
+/// design is unchanged per cause: at most one entry per year at
+/// Standard importance, tracked independently for cold and heat so a
+/// winter entry cannot suppress the following summer's warning.
 pub fn thermal_damage_chronicle_bridge(
     mut events: EventReader<ThermalDamageEvent>,
     mut chronicle: EventWriter<AddChronicleEvent>,
     time: Res<SimulationTime>,
-    mut last_recorded_tick: Local<u64>,
+    mut last_cold_tick: Local<u64>,
+    mut last_heat_tick: Local<u64>,
 ) {
-    let mut any_damage = false;
-    if events.read().next().is_some() {
-        any_damage = true;
+    let mut saw_cold = false;
+    let mut saw_heat = false;
+    for event in events.read() {
+        if event.is_heatstroke {
+            saw_heat = true;
+        } else {
+            saw_cold = true;
+        }
     }
 
-    if any_damage && time.tick > *last_recorded_tick + TICKS_PER_YEAR {
-        *last_recorded_tick = time.tick;
+    if saw_cold && time.tick > *last_cold_tick + TICKS_PER_YEAR {
+        *last_cold_tick = time.tick;
         chronicle.send(AddChronicleEvent {
             text: "The Deep Chill took its toll. Pops are suffering from hypothermia.".to_string(),
+            importance: EventImportance::Standard,
+        });
+    }
+
+    if saw_heat && time.tick > *last_heat_tick + TICKS_PER_YEAR {
+        *last_heat_tick = time.tick;
+        chronicle.send(AddChronicleEvent {
+            text: "The Long Heat took its toll. Pops are suffering from heatstroke.".to_string(),
             importance: EventImportance::Standard,
         });
     }
@@ -3771,5 +3793,123 @@ mod recent_arrival_tests {
             world.get::<RecentArrival>(pop).is_none(),
             "marker should expire after the arrival window"
         );
+    }
+}
+
+#[cfg(test)]
+mod thermal_chronicle_tests {
+    use super::*;
+    use bevy_ecs::system::RunSystemOnce;
+
+    fn thermal_world(tick: u64) -> World {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime {
+            tick,
+            ..Default::default()
+        });
+        world.init_resource::<Events<ThermalDamageEvent>>();
+        world.init_resource::<Events<AddChronicleEvent>>();
+        world
+    }
+
+    fn send_thermal(world: &mut World, is_heatstroke: bool) {
+        let entity = world.spawn_empty().id();
+        world
+            .resource_mut::<Events<ThermalDamageEvent>>()
+            .send(ThermalDamageEvent {
+                entity,
+                amount: 0.5,
+                is_heatstroke,
+            });
+    }
+
+    fn chronicle_texts(world: &mut World) -> Vec<String> {
+        let events = world.resource::<Events<AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        reader.read(events).map(|e| e.text.clone()).collect()
+    }
+
+    #[test]
+    fn heat_damage_chronicles_heatstroke_not_hypothermia() {
+        // Item 96: heat deaths must telegraph as heatstroke.
+        let mut world = thermal_world(TICKS_PER_YEAR + 1);
+        send_thermal(&mut world, true);
+        world
+            .run_system_once(thermal_damage_chronicle_bridge)
+            .unwrap();
+        let texts = chronicle_texts(&mut world);
+        assert_eq!(texts.len(), 1, "expected one chronicle entry: {texts:?}");
+        assert!(
+            texts[0].contains("heatstroke"),
+            "heat damage must read as heatstroke: {}",
+            texts[0]
+        );
+        assert!(
+            !texts[0].contains("hypothermia"),
+            "heat damage must not be mislabelled hypothermia: {}",
+            texts[0]
+        );
+    }
+
+    #[test]
+    fn cold_damage_chronicles_hypothermia() {
+        let mut world = thermal_world(TICKS_PER_YEAR + 1);
+        send_thermal(&mut world, false);
+        world
+            .run_system_once(thermal_damage_chronicle_bridge)
+            .unwrap();
+        let texts = chronicle_texts(&mut world);
+        assert_eq!(texts.len(), 1, "expected one chronicle entry: {texts:?}");
+        assert!(
+            texts[0].contains("hypothermia"),
+            "cold damage must read as hypothermia: {}",
+            texts[0]
+        );
+    }
+
+    #[test]
+    fn thermal_chronicle_coalesces_per_cause() {
+        // Rate design kept: a burst of damage coalesces to at most one
+        // entry per cause, and the two causes telegraph independently —
+        // a cold entry must not suppress the heat entry or vice versa.
+        // (The per-year window itself lives in the bridge's Locals,
+        // which persist in the real schedule; `run_system_once`
+        // reinitializes them, so the window is asserted by design —
+        // same mechanism as the original single-timer bridge.)
+        let mut world = thermal_world(TICKS_PER_YEAR + 1);
+        send_thermal(&mut world, true);
+        send_thermal(&mut world, true);
+        send_thermal(&mut world, false);
+        world
+            .run_system_once(thermal_damage_chronicle_bridge)
+            .unwrap();
+        let texts = chronicle_texts(&mut world);
+        assert_eq!(
+            texts.len(),
+            2,
+            "expected one entry per cause, got: {texts:?}"
+        );
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("heatstroke")).count(),
+            1,
+            "exactly one heatstroke entry: {texts:?}"
+        );
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("hypothermia")).count(),
+            1,
+            "exactly one hypothermia entry: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn thermal_chronicle_silent_before_first_year_elapses() {
+        // The original bridge only fires once tick > TICKS_PER_YEAR;
+        // that gate is part of the kept rate design.
+        let mut world = thermal_world(10);
+        send_thermal(&mut world, true);
+        world
+            .run_system_once(thermal_damage_chronicle_bridge)
+            .unwrap();
+        assert!(chronicle_texts(&mut world).is_empty());
     }
 }
