@@ -124,6 +124,9 @@ pub fn build_simulation_schedule() -> Schedule {
             crate::layer1::psychology::panic_spirals::spread_panic_system,
             crate::layer1::psychology::panic_spirals::panic_timer_system,
             crate::layer1::psychology::panic_spirals::panic_flee_system,
+            // Item 97: survival return — suffocating / low-air pops in
+            // vacuum head back to pressure after panic flight resolves.
+            crate::layer1::psychology::panic_spirals::vacuum_return_system,
         )
             .chain(),
     );
