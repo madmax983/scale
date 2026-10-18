@@ -563,6 +563,15 @@ impl ColonyAtmosphere {
     pub fn life_support_unpowered(&self) -> bool {
         self.life_support_total > 0 && self.unpowered_life_support == self.life_support_total
     }
+
+    /// True when at least one LifeSupport unit is unpowered (Item 99).
+    /// The all-or-nothing check above left partial outages — one of two
+    /// units dark, the survivor carrying the colony — invisible in the
+    /// shell status bar even though STATS counted them.
+    #[must_use]
+    pub fn any_life_support_unpowered(&self) -> bool {
+        self.unpowered_life_support > 0
+    }
 }
 
 /// Refresh the [`ColonyAtmosphere`] snapshot from the live world.
@@ -616,6 +625,8 @@ pub struct LifeSupportPowerAlertState {
     unpowered_since: Option<u64>,
     /// Whether the warning has fired for the current stretch.
     warned_unpowered: bool,
+    /// Whether the sustained-outage escalation has fired (Item 99).
+    escalated_unpowered: bool,
 }
 
 /// How long a LifeSupport must stay continuously unpowered before the
@@ -629,13 +640,27 @@ pub struct LifeSupportPowerAlertState {
 /// threshold; a brownout flicker never comes close.
 pub const UNPOWERED_WARNING_DELAY_TICKS: u64 = 100;
 
+/// How long a LifeSupport must stay continuously unpowered before the
+/// warning escalates (Item 99).
+///
+/// The first warning cannot tell a recovering brownout from an outage
+/// that is still in force hours later — before Item 99 a unit dark for
+/// 101 ticks and a unit dark for 10,000 produced exactly one identical
+/// chronicle line, so the balance data's endemic sustained outages
+/// (final `ls_unpowered >= 1` in roughly half of colonies) read as
+/// already-answered news. At this duration the outage is the colony's
+/// condition, not an incident, and the chronicle says so — once.
+pub const UNPOWERED_ESCALATION_TICKS: u64 = 600;
+
 /// Colony-level alert: a LifeSupport unit with no power (Item 77 Phase 2).
 ///
 /// Before Phase 2 this fact lived only in the inspector of the exact
 /// building ("Consumer Demand: 10 (Inactive)"), so a colony could coast on
 /// its one-time seeded air charge with a dead generator and never be told.
 /// The warning fires once per sustained power loss (see
-/// [`UNPOWERED_WARNING_DELAY_TICKS`]) and re-arms on repowering.
+/// [`UNPOWERED_WARNING_DELAY_TICKS`]), escalates once if the outage is
+/// still in force at [`UNPOWERED_ESCALATION_TICKS`] (Item 99), and both
+/// re-arm on repowering.
 pub fn lifesupport_power_warning_system(
     mut commands: Commands,
     time: Res<crate::shared::time::SimulationTime>,
@@ -661,19 +686,20 @@ pub fn lifesupport_power_warning_system(
                 commands.entity(entity).try_insert(LifeSupportPowerAlertState {
                     unpowered_since: None,
                     warned_unpowered: false,
+                    escalated_unpowered: false,
                 });
             }
             continue;
         }
         let since = state.unpowered_since.unwrap_or(time.tick);
+        let dark_for = time.tick.saturating_sub(since);
         if state.unpowered_since.is_none() {
             commands.entity(entity).try_insert(LifeSupportPowerAlertState {
                 unpowered_since: Some(time.tick),
                 warned_unpowered: false,
+                escalated_unpowered: false,
             });
-        } else if !state.warned_unpowered
-            && time.tick.saturating_sub(since) >= UNPOWERED_WARNING_DELAY_TICKS
-        {
+        } else if !state.warned_unpowered && dark_for >= UNPOWERED_WARNING_DELAY_TICKS {
             chronicle.send(crate::layer1::chronicle::AddChronicleEvent {
                 text: "LifeSupport has no power — the air is only what the hull already holds. Bridge it to a power source with a Power Pole or build a Generator.".to_string(),
                 importance: EventImportance::Major,
@@ -684,6 +710,25 @@ pub fn lifesupport_power_warning_system(
             commands.entity(entity).try_insert(LifeSupportPowerAlertState {
                 unpowered_since: Some(since),
                 warned_unpowered: true,
+                escalated_unpowered: false,
+            });
+        } else if state.warned_unpowered
+            && !state.escalated_unpowered
+            && dark_for >= UNPOWERED_ESCALATION_TICKS
+        {
+            // Item 99: a sustained outage escalates once. The wording
+            // deliberately avoids the first warning's "no power" phrasing
+            // so chronicle readers can tell the two apart at a glance.
+            chronicle.send(crate::layer1::chronicle::AddChronicleEvent {
+                text: format!(
+                    "LifeSupport is STILL without power after {dark_for} ticks — no new air is being made, and the colony is living on what the hull trapped. This is no longer a flicker. Restore power now: bridge it with a Power Pole or build a Generator."
+                ),
+                importance: EventImportance::Major,
+            });
+            commands.entity(entity).try_insert(LifeSupportPowerAlertState {
+                unpowered_since: Some(since),
+                warned_unpowered: true,
+                escalated_unpowered: true,
             });
         }
     }
@@ -1597,6 +1642,76 @@ mod tests {
             2,
             "warning should refire after a repower/re-loss cycle"
         );
+    }
+
+    #[test]
+    fn test_lifesupport_power_warning_escalates_once_on_sustained_outage() {
+        // Item 99: the first warning (100 ticks) cannot distinguish a
+        // brownout that recovered from an outage that is still killing
+        // the colony hours later. A sustained outage must escalate
+        // exactly once, and re-arm on repowering like the first warning.
+        use crate::layer1::chronicle::AddChronicleEvent;
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+        app.add_event::<AddChronicleEvent>();
+        app.insert_resource(crate::shared::time::SimulationTime::default());
+        let ls = app
+            .world_mut()
+            .spawn((
+                Building {
+                    building_type: BuildingType::LifeSupport,
+                },
+                GridPosition { x: 5, y: 5 },
+                crate::layer1::energy::PowerConsumer {
+                    demand: 10.0,
+                    active: false,
+                },
+            ))
+            .id();
+        app.add_systems(bevy::prelude::Update, lifesupport_power_warning_system);
+        let set_tick = |app: &mut bevy::prelude::App, tick: u64| {
+            app.world_mut()
+                .resource_mut::<crate::shared::time::SimulationTime>()
+                .tick = tick;
+        };
+        let escalations = |app: &bevy::prelude::App| {
+            chronicle_texts(app)
+                .iter()
+                .filter(|t| t.contains("STILL"))
+                .count()
+        };
+        app.update();
+        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS);
+        app.update();
+        assert_eq!(escalations(&app), 0, "no escalation with the first warning");
+        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS - 1);
+        app.update();
+        assert_eq!(escalations(&app), 0, "no escalation before the sustained threshold");
+        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS);
+        app.update();
+        app.update();
+        assert_eq!(escalations(&app), 1, "sustained outage escalates exactly once");
+        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS * 4);
+        app.update();
+        assert_eq!(escalations(&app), 1, "escalation does not spam on longer outages");
+        // Repower re-arms: a fresh sustained outage escalates again.
+        app.world_mut()
+            .get_mut::<crate::layer1::energy::PowerConsumer>(ls)
+            .unwrap()
+            .active = true;
+        app.update();
+        app.world_mut()
+            .get_mut::<crate::layer1::energy::PowerConsumer>(ls)
+            .unwrap()
+            .active = false;
+        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS * 4 + 10);
+        app.update();
+        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS * 5 + 10);
+        app.update();
+        // The re-loss first re-fires the plain warning (previous update);
+        // one more tick at the same sustained duration escalates again.
+        app.update();
+        assert_eq!(escalations(&app), 2, "escalation re-arms after repower/re-loss");
     }
 
     #[test]

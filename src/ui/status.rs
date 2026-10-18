@@ -267,6 +267,19 @@ fn build_atmosphere_spans(world: &World) -> Vec<Span<'static>> {
                 .fg(Color::Red)
                 .add_modifier(Modifier::BOLD),
         ));
+    } else if atmo.any_life_support_unpowered() {
+        // Item 99: partial outage — name the count so a colony running
+        // on its surviving unit does not read as fully healthy. Yellow,
+        // not red: air is still being made, but the margin is gone.
+        spans.push(Span::styled(
+            format!(
+                " ⚠ LifeSupport {}/{} unpowered ",
+                atmo.unpowered_life_support, atmo.life_support_total
+            ),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
     }
     spans
 }
@@ -1118,6 +1131,29 @@ mod tests {
         assert!(
             text.contains("LifeSupport unpowered"),
             "power warning shown: {text}"
+        );
+    }
+
+    #[test]
+    fn atmosphere_spans_warn_on_partial_lifesupport_outage() {
+        // Item 99: the balance re-baseline found ls_unpowered >= 1 in
+        // roughly half of colonies, but the bar only spoke when EVERY
+        // unit was dark (life_support_unpowered is all-or-nothing), so
+        // a colony running on one of two units looked fully healthy.
+        use crate::layer1::physics::pressure::ColonyAtmosphere;
+
+        let mut world = World::new();
+        world.insert_resource(ColonyAtmosphere {
+            pops_in_vacuum: 0,
+            min_pop_pressure: 1.0,
+            unpowered_life_support: 1,
+            life_support_total: 2,
+        });
+        let spans = build_atmosphere_spans(&world);
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            text.contains("LifeSupport 1/2 unpowered"),
+            "partial outage must be named with its count: {text}"
         );
     }
 }

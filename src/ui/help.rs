@@ -369,6 +369,9 @@ fn vacuum_section(lines: &mut Vec<Line<'static>>) {
         "Watch the status bar: it counts anyone standing in vacuum and names the thinnest air any colonist is breathing. When someone is suffocating, the Chronicle says so — once, by name, while there is still time to matter.",
     ));
     lines.push(body(
+        "Life Support power speaks in three voices. A brief brownout — the grid flickering under load — says nothing: a flicker is weather, not news. A unit that stays dark earns one Chronicle warning, and the status bar counts the damage — 'LifeSupport 1/2 unpowered' means one of two units is down and the survivor is carrying the colony alone. A unit dark for a long stretch escalates: a STILL-without-power Chronicle entry, because an outage that long is no longer an accident, it is the colony's condition. Answer all three the same way: more generation, or a shorter pole line to the unit that went dark.",
+    ));
+    lines.push(body(
         "New arrivals walk in from the beacon with nothing but their skills. The roster marks them NEW ARRIVAL while they are still finding their feet.",
     ));
     lines.push(blank());
@@ -628,6 +631,27 @@ mod tests {
         assert!(text.contains("Life Support"), "air source missing");
         assert!(text.contains("Power Pole"), "power chain missing");
         assert!(text.contains("suffocating"), "suffocation warning missing");
+    }
+
+    #[test]
+    fn guide_teaches_unpowered_lifesupport_telegraphs() {
+        // Item 99: the guide was silent on what the power telegraphs
+        // mean — a keeper could not learn that a flicker is forgiven,
+        // a sustained outage is chronicled, a long one escalates, or
+        // that the status bar names a partial outage by count.
+        let text = all_text();
+        assert!(
+            text.contains("1/2 unpowered"),
+            "guide must teach the partial-outage status segment"
+        );
+        assert!(
+            text.contains("brownout"),
+            "guide must distinguish brownout flicker from a real outage"
+        );
+        assert!(
+            text.contains("STILL"),
+            "guide must name the sustained-outage escalation"
+        );
     }
 
     #[test]
