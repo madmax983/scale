@@ -180,7 +180,17 @@ fn is_click_notable(world: &World, entity: Entity) -> bool {
 }
 
 /// Handle mouse click for selection.
+///
+/// A left click selects (Pop > Building > notable > tile). A right
+/// click is the secondary verb: it clears the current selection and
+/// never selects the thing under the cursor — before the button was
+/// threaded through, a right click silently selected like a left one.
 pub fn handle_selection_click(world: &mut World, mouse: GameMouseEvent, viewport: &Viewport) {
+    if mouse.is_right_click() {
+        world.resource_mut::<Selection>().clear();
+        return;
+    }
+
     let (world_x, world_y) = screen_to_world(mouse.x, mouse.y, viewport);
 
     // Find all entities at position
@@ -594,6 +604,70 @@ mod tests {
             world.resource::<Selection>().target(),
             SelectionTarget::Entity(rat),
             "pest vermin are notable entities and stay click-selectable"
+        );
+    }
+
+    #[test]
+    fn test_right_click_clears_selection_and_does_not_select() {
+        use crate::shared::keyboard::GameMouseButton;
+
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let pop = world.spawn((Pop, GridPosition { x: 5, y: 5 })).id();
+        world.resource_mut::<Selection>().select_tile(1, 1);
+
+        let viewport = Viewport::default();
+        // Right-click directly on a pop: it must clear, never select it.
+        handle_selection_click(
+            &mut world,
+            GameMouseEvent::new(5, 5).with_button(GameMouseButton::Right),
+            &viewport,
+        );
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::None,
+            "right-click is the clear-selection verb; it must not select the pop under it"
+        );
+        assert_ne!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Entity(pop)
+        );
+    }
+
+    #[test]
+    fn test_right_click_with_nothing_selected_stays_unselected() {
+        use crate::shared::keyboard::GameMouseButton;
+
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+
+        let viewport = Viewport::default();
+        handle_selection_click(
+            &mut world,
+            GameMouseEvent::new(5, 5).with_button(GameMouseButton::Right),
+            &viewport,
+        );
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::None,
+            "right-click on empty ground must not fall through to tile selection"
+        );
+    }
+
+    #[test]
+    fn test_left_click_still_selects_after_right_click_support() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+
+        let viewport = Viewport::default();
+        handle_selection_click(&mut world, GameMouseEvent::new(5, 5), &viewport);
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(5, 5),
+            "left-click behaviour is unchanged: it still selects the tile"
         );
     }
 

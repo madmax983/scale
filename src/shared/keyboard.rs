@@ -101,22 +101,66 @@ impl GameKeyEvent {
     }
 }
 
+/// A platform-agnostic mouse button.
+///
+/// Only the two buttons the game binds are modelled: left is the
+/// primary (selection/designation) button, right is the secondary
+/// verb (clear selection). Platform translators drop any other
+/// button (middle, back, forward, …) at the boundary rather than
+/// letting it masquerade as a left click.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum GameMouseButton {
+    /// Primary button.
+    #[default]
+    Left,
+    /// Secondary button.
+    Right,
+}
+
 /// A platform-agnostic mouse click event.
 ///
-/// Only represents left-button click-down events, which is all the game uses.
+/// Represents click-down events only; releases and moves are filtered
+/// at the platform translation boundary. [`GameMouseEvent::new`]
+/// defaults to the left button, so every constructor call site that
+/// predates right-click support keeps its exact meaning.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GameMouseEvent {
     /// Screen column (x coordinate).
     pub x: u16,
     /// Screen row (y coordinate).
     pub y: u16,
+    /// Which button was pressed.
+    pub button: GameMouseButton,
 }
 
 impl GameMouseEvent {
-    /// Create a new mouse event.
+    /// Create a new (left-button) mouse event.
     #[must_use]
     pub const fn new(x: u16, y: u16) -> Self {
-        Self { x, y }
+        Self {
+            x,
+            y,
+            button: GameMouseButton::Left,
+        }
+    }
+
+    /// Create a new mouse event with an explicit button.
+    #[must_use]
+    pub const fn new_with_button(x: u16, y: u16, button: GameMouseButton) -> Self {
+        Self { x, y, button }
+    }
+
+    /// Attach an explicit button to this event.
+    #[must_use]
+    pub const fn with_button(mut self, button: GameMouseButton) -> Self {
+        self.button = button;
+        self
+    }
+
+    /// Whether this is a right (secondary) click.
+    #[must_use]
+    pub const fn is_right_click(&self) -> bool {
+        matches!(self.button, GameMouseButton::Right)
     }
 }
 
@@ -190,6 +234,28 @@ mod tests {
         let event = GameMouseEvent::new(5, 5);
         let copy = event;
         assert_eq!(event, copy);
+    }
+
+    #[test]
+    fn test_game_mouse_event_defaults_to_left_button() {
+        // Backwards compatibility: every pre-existing constructor call
+        // site built left clicks, so `new` must keep meaning left.
+        let event = GameMouseEvent::new(10, 20);
+        assert_eq!(event.button, GameMouseButton::Left);
+        assert_eq!(GameMouseButton::default(), GameMouseButton::Left);
+    }
+
+    #[test]
+    fn test_game_mouse_event_carries_right_button() {
+        let event = GameMouseEvent::new(10, 20).with_button(GameMouseButton::Right);
+        assert_eq!(event.x, 10);
+        assert_eq!(event.y, 20);
+        assert_eq!(event.button, GameMouseButton::Right);
+        assert_ne!(event, GameMouseEvent::new(10, 20));
+
+        let direct = GameMouseEvent::new_with_button(3, 4, GameMouseButton::Right);
+        assert_eq!(direct.button, GameMouseButton::Right);
+        assert_eq!((direct.x, direct.y), (3, 4));
     }
 
     #[test]

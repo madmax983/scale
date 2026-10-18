@@ -224,19 +224,36 @@ pub fn route_mouse_input(world: &mut World, mouse: GameMouseEvent, map_inner: Op
             }) {
                 return;
             }
-            GameMouseEvent::new(mouse.x - inner.x, mouse.y - inner.y)
+            // Rebase coordinates only — the button rides along, so a
+            // right click in an offset pane is still a right click.
+            GameMouseEvent::new(mouse.x - inner.x, mouse.y - inner.y).with_button(mouse.button)
         }
         None => mouse,
     };
 
+    // Secondary verb, in every gameplay mouse context: a right click
+    // clears the current selection and does nothing else — it never
+    // selects (Normal) and never starts a designation drag
+    // (DesignationMode). This is the mouse twin of the item-90
+    // Esc-clear; right-click clear was deferred there to this item.
+    // Contexts that ignore the mouse entirely (BuildMode, Overlay, …)
+    // keep ignoring it, right button included.
     let context = world.resource::<InputContextStack>().current();
 
     match context {
         InputContext::Normal => {
+            if mouse.is_right_click() {
+                world.resource_mut::<Selection>().clear();
+                return;
+            }
             let viewport = effective_map_viewport(world, map_inner);
             handle_selection_click(world, mouse, &viewport);
         }
         InputContext::DesignationMode => {
+            if mouse.is_right_click() {
+                world.resource_mut::<Selection>().clear();
+                return;
+            }
             handle_designation_mouse(world, mouse, map_inner);
         }
         _ => {}
@@ -804,6 +821,11 @@ mod tests {
         GameMouseEvent::new(column, row)
     }
 
+    fn right_mouse_event(column: u16, row: u16) -> GameMouseEvent {
+        GameMouseEvent::new(column, row)
+            .with_button(crate::shared::keyboard::GameMouseButton::Right)
+    }
+
     #[test]
     fn ctrl_k_opens_palette_without_toggling_gameplay_state() {
         let (world, mut shell) = setup_shell_world_for_test();
@@ -1260,6 +1282,83 @@ mod tests {
 
         let selection = world.resource::<Selection>();
         assert_eq!(selection.target(), SelectionTarget::Tile(10, 10));
+    }
+
+    #[test]
+    fn test_route_mouse_right_click_clears_selection_without_selecting() {
+        let mut world = World::new();
+        let mut stack = InputContextStack::default();
+        stack.push(InputContext::Normal);
+        world.insert_resource(stack);
+        world.insert_resource(Viewport::default());
+        world.insert_resource(Selection::default());
+        world.resource_mut::<Selection>().select_tile(2, 2);
+
+        // Right-click a different tile: clears, and must NOT move the
+        // selection to the clicked tile.
+        route_mouse_input(&mut world, right_mouse_event(10, 10), None);
+
+        let selection = world.resource::<Selection>();
+        assert_eq!(selection.target(), SelectionTarget::None);
+    }
+
+    #[test]
+    fn test_route_mouse_right_click_in_offset_pane_clears_selection() {
+        // The item-89 rebase must preserve the button: a right-click
+        // arriving in absolute cells in an offset pane still clears
+        // (and still selects nothing) after rebasing.
+        let mut world = shoreline_map_world(InputContext::Normal);
+        world.resource_mut::<Selection>().select_tile(0, 7);
+        let inner = map_inner_area(Rect::new(3, 2, 42, 22));
+
+        route_mouse_input(&mut world, right_mouse_event(19, 16), Some(inner));
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::None
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_right_click_in_designation_mode_does_not_designate() {
+        let mut world = centered_map_world(InputContext::DesignationMode);
+        world.insert_resource(DesignationMode::default());
+        world.resource_mut::<Selection>().select_tile(1, 1);
+
+        route_mouse_input(
+            &mut world,
+            right_mouse_event(15, 6),
+            Some(Rect::new(0, 0, 40, 20)),
+        );
+
+        let mode = world.resource::<DesignationMode>();
+        assert!(
+            mode.drag_start.is_none(),
+            "right-click must not start a designation drag"
+        );
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::None,
+            "right-click clears the selection in designation mode too"
+        );
+    }
+
+    #[test]
+    fn test_route_mouse_left_click_still_selects() {
+        // Pin (c): left-click routing is unchanged by right-click support.
+        let mut world = World::new();
+        let mut stack = InputContextStack::default();
+        stack.push(InputContext::Normal);
+        world.insert_resource(stack);
+        world.insert_resource(Viewport::default());
+        world.insert_resource(Selection::default());
+
+        route_mouse_input(&mut world, mouse_event(10, 10), None);
+
+        assert_eq!(
+            world.resource::<Selection>().target(),
+            SelectionTarget::Tile(10, 10)
+        );
     }
 
     #[test]

@@ -1,8 +1,10 @@
 //! Native platform adapter (crossterm → `GameKeyEvent` / `GameMouseEvent`).
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 
-use crate::shared::keyboard::{GameKeyCode, GameKeyEvent, GameKeyModifiers, GameMouseEvent};
+use crate::shared::keyboard::{
+    GameKeyCode, GameKeyEvent, GameKeyModifiers, GameMouseButton, GameMouseEvent,
+};
 
 /// Convert a crossterm `KeyEvent` to a platform-agnostic `GameKeyEvent`.
 ///
@@ -42,18 +44,19 @@ impl TryFrom<KeyEvent> for GameKeyEvent {
 
 /// Convert a crossterm `MouseEvent` to a platform-agnostic `GameMouseEvent`.
 ///
-/// Only left-button mouse-down events are translated; all others return `None`.
+/// Only left- and right-button mouse-down events are translated, with
+/// the button preserved; all other events (moves, releases, middle or
+/// other buttons) return `Err`.
 impl TryFrom<MouseEvent> for GameMouseEvent {
     type Error = ();
 
     fn try_from(mouse: MouseEvent) -> Result<Self, Self::Error> {
-        match mouse.kind {
-            MouseEventKind::Down(_button) => Ok(Self {
-                x: mouse.column,
-                y: mouse.row,
-            }),
-            _ => Err(()),
-        }
+        let button = match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => GameMouseButton::Left,
+            MouseEventKind::Down(MouseButton::Right) => GameMouseButton::Right,
+            _ => return Err(()),
+        };
+        Ok(Self::new_with_button(mouse.column, mouse.row, button))
     }
 }
 
@@ -240,6 +243,52 @@ mod tests {
         let game_mouse = GameMouseEvent::try_from(mouse).unwrap();
         assert_eq!(game_mouse.x, 10);
         assert_eq!(game_mouse.y, 20);
+        assert_eq!(
+            game_mouse.button,
+            crate::shared::keyboard::GameMouseButton::Left
+        );
+    }
+
+    #[test]
+    fn test_translate_mouse_right_down() {
+        let mouse = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: 7,
+            row: 9,
+            modifiers: KeyModifiers::empty(),
+        };
+        let game_mouse = GameMouseEvent::try_from(mouse).unwrap();
+        assert_eq!(game_mouse.x, 7);
+        assert_eq!(game_mouse.y, 9);
+        assert_eq!(
+            game_mouse.button,
+            crate::shared::keyboard::GameMouseButton::Right,
+            "a right click must survive translation as a right click, not select like a left click"
+        );
+    }
+
+    #[test]
+    fn test_translate_mouse_middle_down_ignored() {
+        // The shared type models left/right only; other buttons are
+        // dropped at the boundary instead of masquerading as left.
+        let mouse = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Middle),
+            column: 10,
+            row: 20,
+            modifiers: KeyModifiers::empty(),
+        };
+        assert!(GameMouseEvent::try_from(mouse).is_err());
+    }
+
+    #[test]
+    fn test_translate_mouse_right_up_ignored() {
+        let mouse = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Right),
+            column: 10,
+            row: 20,
+            modifiers: KeyModifiers::empty(),
+        };
+        assert!(GameMouseEvent::try_from(mouse).is_err());
     }
 
     #[test]
