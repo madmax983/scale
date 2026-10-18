@@ -723,9 +723,14 @@ pub fn panic_flee_system(world: &mut World) {
 /// pops are left alone (legitimate EVA work continues), pressurized
 /// pops are untouched, and panicked pops are handled by the
 /// hazard-aware [`panic_flee_system`] instead. Player-possessed pops,
-/// the phased/dormant Chronostalker, and pops in cryo-stasis are never
-/// dragged by this drive (origin vessels hold their own pressure
-/// envelopes, so their pops do not read as vacuum here anyway).
+/// dormant origin pops, the phased Chronostalker, and pops in
+/// cryo-stasis are never dragged by this drive. The dormant exemption
+/// matters (Item 100): the land-origin sites (cradle, scar,
+/// moment-wound) hold no pressure envelope — the vessel origins write
+/// theirs into the PressureGrid, these do not — so a dormant pop DOES
+/// read as vacuum here; it is exempt because it waits in stasis
+/// (pressure and thermal damage both spare the dormant state) and its
+/// origin tether would fight this drive tile-for-tile in vacuum.
 pub fn vacuum_return_system(world: &mut World) {
     let Some(field) = pressure_field(world) else {
         return;
@@ -748,6 +753,12 @@ pub fn vacuum_return_system(world: &mut World) {
         if world
             .get::<crate::layer1::direct_link::Possessed>(e)
             .is_some()
+            || world
+                .get::<crate::layer1::culture::lawbound::DormantAutomaton>(e)
+                .is_some()
+            || world
+                .get::<crate::layer1::culture::bloomtouched::DormantTouched>(e)
+                .is_some()
             || world
                 .get::<crate::layer1::culture::chronostalker::Chronostalker>(e)
                 .is_some()
@@ -1733,6 +1744,40 @@ mod tests {
 
         let after = world.get::<GridPosition>(pop).copied().unwrap();
         assert!(after.x < 35, "dry-suited pop is suffocating and must turn back, got {after:?}");
+    }
+
+    #[test]
+    fn test_vacuum_return_never_drags_dormant_origin_pops() {
+        // Item 100: dormant origin pops wait in stasis at their outdoor
+        // sites. The return drive must not drag them toward the habitat:
+        // their origin tethers pull them back to the site every tick, so
+        // claiming them is a 1:1 tug-of-war fought in vacuum (and Tock
+        // was already excluded here on a mistaken envelope premise).
+        let mut world = setup_vacuum_world();
+        let vigil = spawn_pop(&mut world, 35, 30);
+        world
+            .entity_mut(vigil)
+            .insert(crate::layer1::culture::lawbound::DormantAutomaton);
+        let quill = spawn_pop(&mut world, 40, 40);
+        world
+            .entity_mut(quill)
+            .insert(crate::layer1::culture::bloomtouched::DormantTouched);
+        let tock = spawn_pop(&mut world, 45, 30);
+        world
+            .entity_mut(tock)
+            .insert(crate::layer1::culture::chronostalker::DormantStalker);
+
+        for _ in 0..5 {
+            vacuum_return_system(&mut world);
+        }
+
+        for (pop, x, y) in [(vigil, 35, 30), (quill, 40, 40), (tock, 45, 30)] {
+            assert_eq!(
+                world.get::<GridPosition>(pop).copied().unwrap(),
+                GridPosition { x, y },
+                "dormant origin pops stay at their sites"
+            );
+        }
     }
 
     #[test]

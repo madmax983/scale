@@ -389,7 +389,20 @@ pub struct ThermalDamageEvent {
 /// System to apply thermal damage to pops.
 pub fn thermal_damage_system(
     grid: Option<Res<TemperatureGrid>>,
-    mut pops: Query<(Entity, &mut Health, &GridPosition, &Equipment), With<Pop>>,
+    mut pops: Query<
+        (Entity, &mut Health, &GridPosition, &Equipment),
+        (
+            With<Pop>,
+            // Item 100: dormant origin pops are in stasis at their
+            // sites (see pressure_damage_system) — they are excluded
+            // from utility AI and tethered in place, so they can never
+            // seek warmth; thermal damage cannot touch them until
+            // they wake and the dormant marker is removed.
+            Without<crate::layer1::culture::lawbound::DormantAutomaton>,
+            Without<crate::layer1::culture::bloomtouched::DormantTouched>,
+            Without<crate::layer1::culture::chronostalker::DormantStalker>,
+        ),
+    >,
     clothing_query: Query<&Clothing>,
     mut thermal_damage_events: EventWriter<ThermalDamageEvent>,
     mut commands: Commands,
@@ -641,6 +654,76 @@ mod tests {
 
         let health = world.get::<Health>(pop).unwrap();
         assert!(health.current < 100.0, "Freezing temp should damage Pop");
+    }
+
+    #[test]
+    fn test_dormant_origin_pops_take_no_thermal_damage() {
+        // Item 100: the same stasis that exempts dormant origin pops from
+        // suffocation covers thermal damage — balance data shows dormant
+        // Vigils/Quills/Tocks whose sites were pressurized surviving the
+        // vacuum, then freezing in place over winter (they are excluded
+        // from utility AI and tethered to their sites, so they can never
+        // seek warmth). An ordinary pop on the same tiles still freezes.
+        let mut world = World::new();
+        let grid = TemperatureGrid::new(10, 10, -20.0);
+        world.insert_resource(grid);
+        world.init_resource::<Events<crate::layer1::nature::temperature::ThermalDamageEvent>>();
+
+        let mk_health = || Health {
+            current: 100.0,
+            max: 100.0,
+            has_rust_lung: false,
+        };
+        let vigil = world
+            .spawn((
+                Pop,
+                mk_health(),
+                Equipment::default(),
+                GridPosition { x: 5, y: 5 },
+                crate::layer1::culture::lawbound::DormantAutomaton,
+            ))
+            .id();
+        let quill = world
+            .spawn((
+                Pop,
+                mk_health(),
+                Equipment::default(),
+                GridPosition { x: 6, y: 5 },
+                crate::layer1::culture::bloomtouched::DormantTouched,
+            ))
+            .id();
+        let tock = world
+            .spawn((
+                Pop,
+                mk_health(),
+                Equipment::default(),
+                GridPosition { x: 7, y: 5 },
+                crate::layer1::culture::chronostalker::DormantStalker,
+            ))
+            .id();
+        let control = world
+            .spawn((
+                Pop,
+                mk_health(),
+                Equipment::default(),
+                GridPosition { x: 8, y: 5 },
+            ))
+            .id();
+
+        world.run_system_once(thermal_damage_system).unwrap();
+
+        for dormant in [vigil, quill, tock] {
+            let health = world.get::<Health>(dormant).unwrap();
+            assert_eq!(
+                health.current, 100.0,
+                "dormant origin pops are in stasis — cold cannot touch them"
+            );
+        }
+        let health = world.get::<Health>(control).unwrap();
+        assert!(
+            health.current < 100.0,
+            "an ordinary pop on the same freezing tiles still takes damage"
+        );
     }
 
     #[test]

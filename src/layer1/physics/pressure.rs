@@ -423,6 +423,15 @@ pub fn pressure_damage_system(
             // The phased Chronostalker is out of the time stream:
             // vacuum cannot touch what is not, momentarily, there.
             Without<crate::layer1::culture::chronostalker::Phased>,
+            // Item 100: dormant origin pops wait in stasis at their
+            // outdoor sites — the automaton does not breathe, the chrome
+            // stranger is between moments, the changed scout is half
+            // weather. Suffocation cannot touch them until they wake
+            // (the dormant marker is removed on taking the path, and
+            // from then on they suffocate like anyone else).
+            Without<crate::layer1::culture::lawbound::DormantAutomaton>,
+            Without<crate::layer1::culture::bloomtouched::DormantTouched>,
+            Without<crate::layer1::culture::chronostalker::DormantStalker>,
         ),
     >,
     mut suit_query: Query<&mut crate::layer1::eva_suit::EvaSuit>,
@@ -1065,6 +1074,73 @@ mod tests {
 
         let health = app.world().get::<Health>(pop).unwrap();
         assert!(health.current < 100.0, "Pop in vacuum should take damage");
+    }
+
+    #[test]
+    fn test_dormant_origin_pops_do_not_suffocate() {
+        // Item 100: dormant origin pops (Vigil the automaton, Quill the
+        // changed scout, Tock the chrome stranger) wait in stasis at
+        // outdoor sites beyond the habitat's pressure. Suffocation must
+        // not touch them before a player can wake them — in the
+        // 2026-10-18 balance matrix every one of the 30 fatal vacuum
+        // episodes was a dormant origin pop dying ~98 ticks after spawn.
+        let mut app = bevy::prelude::App::new();
+        app.add_plugins(bevy::prelude::MinimalPlugins);
+        app.init_resource::<Events<crate::layer1::chronicle::AddChronicleEvent>>();
+        app.insert_resource(PressureGrid::new(10, 10));
+
+        let mk_health = || Health {
+            current: 100.0,
+            max: 100.0,
+            has_rust_lung: false,
+        };
+        let vigil = app
+            .world_mut()
+            .spawn((
+                Pop,
+                mk_health(),
+                GridPosition { x: 5, y: 5 },
+                crate::layer1::culture::lawbound::DormantAutomaton,
+            ))
+            .id();
+        let quill = app
+            .world_mut()
+            .spawn((
+                Pop,
+                mk_health(),
+                GridPosition { x: 6, y: 5 },
+                crate::layer1::culture::bloomtouched::DormantTouched,
+            ))
+            .id();
+        let tock = app
+            .world_mut()
+            .spawn((
+                Pop,
+                mk_health(),
+                GridPosition { x: 7, y: 5 },
+                crate::layer1::culture::chronostalker::DormantStalker,
+            ))
+            .id();
+        let control = app
+            .world_mut()
+            .spawn((Pop, mk_health(), GridPosition { x: 8, y: 5 }))
+            .id();
+
+        app.add_systems(bevy::prelude::Update, pressure_damage_system);
+        app.update();
+
+        for dormant in [vigil, quill, tock] {
+            let health = app.world().get::<Health>(dormant).unwrap();
+            assert_eq!(
+                health.current, 100.0,
+                "dormant origin pops are in stasis — vacuum cannot touch them"
+            );
+        }
+        let health = app.world().get::<Health>(control).unwrap();
+        assert!(
+            health.current < 100.0,
+            "an ordinary pop on the same vacuum tiles still suffocates"
+        );
     }
 
     #[test]

@@ -446,8 +446,12 @@ pub fn spawn_lawbound_cradle_once(world: &mut World) {
         .map(|(_, p)| *p);
     let Some(lander) = lander else { return };
 
-    let (walkable, occupied, buildings) = {
+    let (walkable, safe, occupied, buildings) = {
         let mut walkable = std::collections::HashSet::new();
+        // Tiles a pop can safely stand on (canonical walkability:
+        // no water/void, no rock, and — since the deaths-report fix —
+        // no magma or spore-bloom hazard tiles).
+        let mut safe = std::collections::HashSet::new();
         if let Some(terrain) = world.get_resource::<TerrainGrid>() {
             for dx in -CRADLE_RING_MAX..=CRADLE_RING_MAX {
                 for dy in -CRADLE_RING_MAX..=CRADLE_RING_MAX {
@@ -457,6 +461,9 @@ pub fn spawn_lawbound_cradle_once(world: &mut World) {
                         if let Some(tt) = terrain.get(x as usize, y as usize) {
                             if !matches!(tt, TerrainType::Water | TerrainType::Void) {
                                 walkable.insert((x, y));
+                            }
+                            if tt.is_walkable() {
+                                safe.insert((x, y));
                             }
                         }
                     }
@@ -472,7 +479,7 @@ pub fn spawn_lawbound_cradle_once(world: &mut World) {
             .iter(world)
             .map(|(_, p)| (p.x, p.y))
             .collect();
-        (walkable, occupied, buildings)
+        (walkable, safe, occupied, buildings)
     };
 
     let target: Option<GridPosition> = {
@@ -494,15 +501,17 @@ pub fn spawn_lawbound_cradle_once(world: &mut World) {
                     if !walkable.contains(&(x, y)) {
                         continue;
                     }
-                    // The dormant automaton needs an adjacent free tile.
-                    let adj = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-                        .into_iter()
-                        .find(|(ax, ay)| {
-                            walkable.contains(&(*ax, *ay))
-                                && !occupied.contains(&(*ax, *ay))
-                                && !buildings.contains(&(*ax, *ay))
-                        });
-                    if adj.is_none() {
+                    // The dormant automaton spawns on (x + 1, y) (see
+                    // spawn_cradle_at) — verify THAT tile, not just any
+                    // neighbour: it must be free and safely standable.
+                    // The old any-neighbour check let the automaton land
+                    // on an unverified tile (Item 100: a Vigil spawned
+                    // on magma and burned before it could suffocate).
+                    let dormant_tile = (x + 1, y);
+                    if !safe.contains(&dormant_tile)
+                        || occupied.contains(&dormant_tile)
+                        || buildings.contains(&dormant_tile)
+                    {
                         continue;
                     }
                     found = Some(GridPosition { x, y });
@@ -1578,6 +1587,41 @@ mod tests {
         assert!(
             pressure_of(&world) > 0.0,
             "witnessing sabotage is a First-Statute inaction crisis"
+        );
+    }
+
+    #[test]
+    fn red_cradle_spawn_never_places_dormant_on_hazard_tile() {
+        // Item 100: the ring search used to verify only that SOME
+        // neighbour of the cradle site was free, then spawn the dormant
+        // automaton on (x + 1, y) unverified — a Vigil could land on
+        // magma and burn in single-digit ticks. The first candidate
+        // site around a (10,10) lander is (4,4); its dormant tile is
+        // (5,4). Poison that tile: the search must move on, and the
+        // automaton must end up on a safely standable tile.
+        let mut world = setup();
+        world.spawn((
+            Building {
+                building_type: BuildingType::Lander,
+            },
+            GridPosition { x: 10, y: 10 },
+        ));
+        {
+            let mut terrain = world.resource_mut::<TerrainGrid>();
+            let idx = 4 * terrain.width + 5;
+            terrain.tiles[idx] = TerrainType::MagmaRock;
+        }
+        spawn_lawbound_cradle_once(&mut world);
+        let dormant = world
+            .resource::<LawboundState>()
+            .dormant
+            .expect("the cradle still spawns at a later site");
+        let pos = *world.get::<GridPosition>(dormant).unwrap();
+        let terrain = world.resource::<TerrainGrid>();
+        let tile = terrain.get(pos.x as usize, pos.y as usize).unwrap();
+        assert!(
+            tile.is_walkable(),
+            "dormant automaton must not spawn on a hazard tile, got {tile:?} at {pos:?}"
         );
     }
 

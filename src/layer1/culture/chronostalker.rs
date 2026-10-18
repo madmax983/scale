@@ -268,8 +268,11 @@ pub fn spawn_moment_wound_once(world: &mut World) {
         .map(|(_, p)| *p);
     let Some(lander) = lander else { return };
 
-    let (walkable, occupied, buildings) = {
+    let (walkable, safe, occupied, buildings) = {
         let mut walkable = std::collections::HashSet::new();
+        // Tiles a pop can safely stand on (canonical walkability:
+        // no water/void, no rock, no magma or spore-bloom hazards).
+        let mut safe = std::collections::HashSet::new();
         if let Some(terrain) = world.get_resource::<TerrainGrid>() {
             for dx in -WOUND_RING_MAX..=WOUND_RING_MAX {
                 for dy in -WOUND_RING_MAX..=WOUND_RING_MAX {
@@ -279,6 +282,9 @@ pub fn spawn_moment_wound_once(world: &mut World) {
                         if let Some(tt) = terrain.get(x as usize, y as usize) {
                             if !matches!(tt, TerrainType::Water | TerrainType::Void) {
                                 walkable.insert((x, y));
+                            }
+                            if tt.is_walkable() {
+                                safe.insert((x, y));
                             }
                         }
                     }
@@ -294,7 +300,7 @@ pub fn spawn_moment_wound_once(world: &mut World) {
             .iter(world)
             .map(|(_, p)| (p.x, p.y))
             .collect();
-        (walkable, occupied, buildings)
+        (walkable, safe, occupied, buildings)
     };
 
     let target: Option<GridPosition> = {
@@ -316,14 +322,15 @@ pub fn spawn_moment_wound_once(world: &mut World) {
                     if !walkable.contains(&(x, y)) {
                         continue;
                     }
-                    let adj = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-                        .into_iter()
-                        .find(|(ax, ay)| {
-                            walkable.contains(&(*ax, *ay))
-                                && !occupied.contains(&(*ax, *ay))
-                                && !buildings.contains(&(*ax, *ay))
-                        });
-                    if adj.is_none() {
+                    // The dormant stranger spawns on (x + 1, y) (see
+                    // spawn_wound_at) — verify THAT tile, not just any
+                    // neighbour: free and safely standable (Item 100,
+                    // same unverified-tile hazard as the cradle spawn).
+                    let dormant_tile = (x + 1, y);
+                    if !safe.contains(&dormant_tile)
+                        || occupied.contains(&dormant_tile)
+                        || buildings.contains(&dormant_tile)
+                    {
                         continue;
                     }
                     found = Some(GridPosition { x, y });
@@ -976,6 +983,33 @@ mod tests {
     }
 
     // --- RED: taking the path -------------------------------------------------
+
+    #[test]
+    fn red_wound_spawn_never_places_dormant_on_hazard_tile() {
+        // Item 100: same unverified-tile hazard as the cradle spawn —
+        // the ring search verified SOME neighbour, then placed the
+        // dormant stranger on (x + 1, y) regardless. First candidate
+        // site around a (10,10) lander is (4,4); dormant tile (5,4).
+        let mut world = setup();
+        spawn_lander(&mut world, 10, 10);
+        {
+            let mut terrain = world.resource_mut::<TerrainGrid>();
+            let idx = 4 * terrain.width + 5;
+            terrain.tiles[idx] = TerrainType::MagmaRock;
+        }
+        spawn_moment_wound_once(&mut world);
+        let dormant = world
+            .resource::<ChronostalkerState>()
+            .dormant
+            .expect("the wound still spawns at a later site");
+        let pos = *world.get::<GridPosition>(dormant).unwrap();
+        let terrain = world.resource::<TerrainGrid>();
+        let tile = terrain.get(pos.x as usize, pos.y as usize).unwrap();
+        assert!(
+            tile.is_walkable(),
+            "dormant stranger must not spawn on a hazard tile, got {tile:?} at {pos:?}"
+        );
+    }
 
     #[test]
     fn red_take_path_transfers_possession() {

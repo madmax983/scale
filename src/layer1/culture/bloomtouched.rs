@@ -426,15 +426,24 @@ pub fn spawn_bloom_scar_once(world: &mut World) {
                     if !patch_ok {
                         continue;
                     }
-                    // The scout needs a free tile beside the scar.
-                    let scout_spot = [(x + 2, y), (x - 2, y), (x, y + 2), (x, y - 2)]
-                        .into_iter()
-                        .find(|(sx, sy)| {
-                            !unbloomable.contains(&(*sx, *sy))
-                                && !occupied.contains(&(*sx, *sy))
-                                && !buildings.contains(&(*sx, *sy))
+                    // The scout spawns on (x + 2, y) (see the spawn
+                    // call below) — verify THAT tile, not just any of
+                    // the four candidate spots: it must be bloomable,
+                    // free, and safely standable in the canonical
+                    // sense (Item 100: the any-spot check let the
+                    // scout land on an unverified hazard tile).
+                    let scout_tile = (x + 2, y);
+                    let scout_safe = world
+                        .get_resource::<TerrainGrid>()
+                        .is_some_and(|t| {
+                            t.get(scout_tile.0 as usize, scout_tile.1 as usize)
+                                .is_some_and(TerrainType::is_walkable)
                         });
-                    if scout_spot.is_none() {
+                    if unbloomable.contains(&scout_tile)
+                        || occupied.contains(&scout_tile)
+                        || buildings.contains(&scout_tile)
+                        || !scout_safe
+                    {
                         continue;
                     }
                     found = Some(GridPosition { x, y });
@@ -1312,6 +1321,36 @@ mod tests {
         let before = tile_count(&world);
         spawn_bloom_scar_once(&mut world);
         assert_eq!(tile_count(&world), before);
+    }
+
+    #[test]
+    fn red_scar_spawn_never_places_scout_on_hazard_tile() {
+        // Item 100: the scar search used to accept a site when ANY of
+        // the four candidate scout spots was free, then spawn the
+        // scout on (x + 2, y) unverified. First candidate site around
+        // a (10,10) lander is (4,4); its scout tile is (6,4). Poison
+        // that tile: the search must move on, and the scout must end
+        // up on a safely standable tile.
+        let mut world = setup();
+        spawn_lander(&mut world, 10, 10);
+        {
+            let mut terrain = world.resource_mut::<TerrainGrid>();
+            let idx = 4 * terrain.width + 6;
+            terrain.tiles[idx] = TerrainType::MagmaRock;
+        }
+        spawn_bloom_scar_once(&mut world);
+        let dormant = world
+            .query_filtered::<Entity, With<DormantTouched>>()
+            .iter(&world)
+            .next()
+            .expect("the scar still spawns at a later site");
+        let pos = *world.get::<GridPosition>(dormant).unwrap();
+        let terrain = world.resource::<TerrainGrid>();
+        let tile = terrain.get(pos.x as usize, pos.y as usize).unwrap();
+        assert!(
+            tile.is_walkable(),
+            "dormant scout must not spawn on a hazard tile, got {tile:?} at {pos:?}"
+        );
     }
 
     // --- taking the path ----------------------------------------------------------
