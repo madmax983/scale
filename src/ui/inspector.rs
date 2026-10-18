@@ -663,7 +663,7 @@ fn render_tile_inspector(frame: &mut Frame, area: Rect, world: &World, x: i32, y
     render_tile_visual(frame, layout[visual_idx], char, color);
 
     frame.render_widget(
-        Paragraph::new("Esc: back to colony view").style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new("Esc or right-click: back to colony view").style(Style::default().fg(Color::DarkGray)),
         layout[visual_idx + 1],
     );
 }
@@ -1047,7 +1047,7 @@ fn render_entity_inspector(frame: &mut Frame, area: Rect, world: &World, entity:
     push_mind_info(&mut layout, world, entity);
     layout.push(1, |f, a| {
         f.render_widget(
-            Paragraph::new("Esc: back to colony view").style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new("Esc or right-click: back to colony view").style(Style::default().fg(Color::DarkGray)),
             a,
         );
     });
@@ -2324,7 +2324,7 @@ mod tests {
             full_text.contains("Drone"),
             "drone inspector should be headed 'Drone', not the bare fallback"
         );
-        assert!(full_text.contains("Esc: back to colony view"));
+        assert!(full_text.contains("Esc or right-click: back to colony view"));
     }
 
     #[test]
@@ -2369,7 +2369,7 @@ mod tests {
         let tile_text = inspector_text(&world, 40, 20);
         assert!(tile_text.contains("Terrain:"));
         assert!(
-            tile_text.contains("Esc: back to colony view"),
+            tile_text.contains("Esc or right-click: back to colony view"),
             "tile inspector should hint the way back to the dashboard"
         );
 

@@ -314,7 +314,7 @@ fn legend_section(lines: &mut Vec<Line<'static>>) {
         "Colors matter: the same letter in a different color is a different thing.",
     ));
     lines.push(body(
-        "Unsure about a tile? Click it — the Inspector pane names it.",
+        "Unsure about a tile? Click it — the Inspector pane names it. Right-click or Esc clears the selection.",
     ));
     lines.push(blank());
 }
@@ -414,7 +414,7 @@ fn controls_section(lines: &mut Vec<Line<'static>>) {
     lines.push(header("CONTROLS"));
     lines.push(control(
         "Camera",
-        "WASD or arrow keys. Click a tile to select it; the Inspector explains it.",
+        "WASD or arrow keys. Click a tile to select it; right-click or Esc clears the selection; the Inspector explains it.",
     ));
     lines.push(control(
         "Space",
@@ -434,7 +434,7 @@ fn controls_section(lines: &mut Vec<Line<'static>>) {
     ));
     lines.push(control(
         "M · C · X",
-        "designate mining / chopping / demolition: Enter anchors a corner, Enter again confirms the rectangle, Backspace cancels a mark, Esc leaves.",
+        "designate mining / chopping / demolition: Enter anchors a corner, Enter again confirms the rectangle, Backspace cancels a mark, right-click clears the selection, Esc leaves.",
     ));
     lines.push(control(
         "Tab",
@@ -454,7 +454,7 @@ fn controls_section(lines: &mut Vec<Line<'static>>) {
     ));
     lines.push(control(
         "Q",
-        "quit. Esc clears the selection; press it again to quit.",
+        "quit. Esc clears the selection; with nothing selected, Esc opens Layout mode instead — Q is the quit key.",
     ));
     lines.push(control(
         "This guide",
@@ -729,6 +729,39 @@ mod tests {
             "guide must name its own palette command"
         );
         assert!(text.contains("possess"), "guide must teach possession");
+    }
+
+    #[test]
+    fn guide_teaches_right_click_and_esc_selection_clear() {
+        // Item 98: right-click support (item 93) and the layered Esc
+        // (item 90) must be taught where a player will actually read
+        // them, worded only as far as src/ui/input.rs proves:
+        // route_mouse_input clears Selection on a right click in both
+        // Normal and DesignationMode (never selecting / never starting
+        // a drag), and route_root_input clears the selection on Esc in
+        // Normal — while a bare Esc with nothing selected flips the
+        // shell into Layout mode instead of quitting.
+        let text = all_text();
+        assert!(
+            text.contains("Click a tile to select it; right-click or Esc clears the selection"),
+            "camera line must teach right-click / Esc selection clear"
+        );
+        assert!(
+            text.contains("Right-click or Esc clears the selection"),
+            "legend line must teach right-click / Esc selection clear"
+        );
+        assert!(
+            text.contains("right-click clears the selection"),
+            "designation line must teach right-click selection clear"
+        );
+        assert!(
+            text.contains("with nothing selected, Esc opens Layout mode instead"),
+            "Q line must not claim a second Esc quits; it opens Layout mode"
+        );
+        assert!(
+            !text.contains("press it again to quit"),
+            "stale Q wording (second Esc quits) must be gone"
+        );
     }
 
     #[test]
