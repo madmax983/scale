@@ -19,6 +19,12 @@ pub mod modular;
 pub mod shadow;
 pub use modular::*;
 
+/// Alien domestication (Spec 353): progressive taming on top of fauna.
+pub mod domestication;
+pub use domestication::{
+    Carnivorous, FeralInstinct, ResourceProducer, Tameable, TameAction, Tamed, Territorial,
+};
+
 /// Type of fauna.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum FaunaType {
@@ -117,9 +123,28 @@ pub fn fauna_behavior_system(world: &mut World) {
         .map(|(e, p)| (e, *p))
         .collect();
 
+    // Spec 353 (+ Spec 075): tamed animals are not wildlife. Neither the
+    // progressive `Tamed` bond nor husbandry's instant `Tame` hunts pops.
+    let tamed_entities: std::collections::HashSet<Entity> = {
+        let mut set = std::collections::HashSet::new();
+        let mut q = world.query_filtered::<Entity, With<domestication::Tamed>>();
+        for e in q.iter(world) {
+            set.insert(e);
+        }
+        let mut q2 = world
+            .query_filtered::<Entity, With<crate::layer1::agriculture::husbandry::Tame>>();
+        for e in q2.iter(world) {
+            set.insert(e);
+        }
+        set
+    };
+
     let mut query = world.query::<(Entity, &mut Fauna, &GridPosition, Option<&FaunaBody>)>();
 
     for (entity, mut fauna, pos, body) in query.iter_mut(world) {
+        if tamed_entities.contains(&entity) {
+            continue;
+        }
         if fauna.attack_cooldown > 0 {
             fauna.attack_cooldown -= 1;
         }

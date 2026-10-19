@@ -716,6 +716,11 @@ pub fn register(schedule: &mut Schedule) {
         crate::layer1::core::integration::spatial_compression_chronicle_bridge
             .in_set(Layer1SystemSet::Observation),
     );
+    // Spec 353 §5: keeper–animal bonding mood.
+    schedule.add_systems(
+        crate::layer1::fauna::domestication::bonding_mood_system
+            .in_set(Layer1SystemSet::Observation),
+    );
     schedule.add_systems(clear_input_system.after(Layer1SystemSet::Observation));
 }
 #[cfg(feature = "nova")]

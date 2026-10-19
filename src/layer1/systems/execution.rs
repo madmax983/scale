@@ -125,6 +125,14 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Execution),
     );
 
+    // Spec 353: progressive taming actions resolve alongside husbandry's
+    // instant designation-based taming.
+    schedule.add_systems(
+        crate::layer1::fauna::domestication::execute_tame_action_system
+            .after(crate::layer1::husbandry::tame_execution_system)
+            .in_set(Layer1SystemSet::Execution),
+    );
+
     // UI state sync for adventurer possession: updates
     // `UiState::suppress_global_ui` and the input context stack from the same
     // possess/unpossess events. Read-only w.r.t. the sim.

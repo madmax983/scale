@@ -248,6 +248,19 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Consumption),
     );
+
+    // Spec 353: tamed-animal upkeep and feral reversion; bonded grief
+    // must run before dead entities are despawned.
+    schedule.add_systems(
+        (
+            crate::layer1::fauna::domestication::tamed_animal_metabolism_system,
+            crate::layer1::fauna::domestication::feral_reversion_system
+                .after(crate::layer1::fauna::domestication::tamed_animal_metabolism_system),
+            crate::layer1::fauna::domestication::bonded_grief_system
+                .before(crate::layer1::health::despawn_dead_entities_system),
+        )
+            .in_set(Layer1SystemSet::Consumption),
+    );
 }
 
 /// System for consuming Void-Ale to boost morale and leisure.

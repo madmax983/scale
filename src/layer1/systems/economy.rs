@@ -418,4 +418,11 @@ pub fn register(schedule: &mut Schedule) {
             .chain()
             .in_set(Layer1SystemSet::Economy),
     );
+
+    // Spec 353: tamed-animal resource yields, after husbandry production.
+    schedule.add_systems(
+        crate::layer1::fauna::domestication::animal_production_system
+            .after(crate::layer1::husbandry::husbandry_production_system)
+            .in_set(Layer1SystemSet::Economy),
+    );
 }

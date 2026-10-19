@@ -504,6 +504,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "launch" => handle_launch_command(world, &parts),
         "winches" => print_winches(world),
         "feral" => handle_feral_command(world, &parts),
+        "beast" => handle_beast_command(world, &parts),
+        "tame" => handle_tame_command(world),
+        "beasts" => print_beasts(world),
         "relocate" => handle_relocate_command(world, &parts),
         "overgrow" => handle_overgrow_command(world, &parts),
         "extractor" => handle_extractor_command(world, &parts),
@@ -3113,6 +3116,11 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::feral_outpost::fringe_pop_count;
         fringe_pop_count(world)
     };
+    // Spec 353: domestication census (full panel: `beasts`).
+    let (tamed, tameable) = {
+        use scale::layer1::fauna::domestication::{tameable_count, tamed_count};
+        (tamed_count(world), tameable_count(world))
+    };
     let sabotaged = {
         use scale::layer1::architecture::construction_sabotage::sabotaged_building_count;
         sabotaged_building_count(world)
@@ -3236,7 +3244,7 @@ fn print_stats(world: &mut World) {
         .map_or(0, |t| t.revision);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={}",
         tick,
         scenario,
         pops,
@@ -3277,6 +3285,8 @@ fn print_stats(world: &mut World) {
         martyrdom,
         feral,
         fringe,
+        tamed,
+        tameable,
         sabotaged,
         vetting,
         deorbit,
@@ -7724,6 +7734,157 @@ fn handle_feral_command(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Debug: spawn a wild tameable beast near the colony (Spec 353).
+/// `beast [wolf|rat|mascot] [x] [y]` — defaults to a wolf beside the
+/// first pop. Work it with repeated `tame` calls; inspect with `beasts`.
+fn handle_beast_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::fauna::domestication::spawn_tameable_beast;
+    let kind = parts.get(1).map_or("wolf", |s| *s);
+    let anchor = {
+        let mut query = world.query_filtered::<&GridPosition, With<Pop>>();
+        query
+            .iter(world)
+            .next()
+            .copied()
+            .unwrap_or(GridPosition { x: 30, y: 30 })
+    };
+    let x = parts
+        .get(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(anchor.x + 2);
+    let y = parts
+        .get(3)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(anchor.y);
+    let entity = spawn_tameable_beast(world, kind, GridPosition { x, y });
+    print_dashboard_panel(
+        "ALIEN DOMESTICATION",
+        &format!(
+            "A wild {kind} (entity {}) waits at ({x}, {y}), untamed and watching you.\nWork it with `tame` — progress builds with the keeper's Husbandry skill. See `beasts`.",
+            entity.index()
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: one taming session — the first pop works the first tameable
+/// beast (Spec 353). Progress accumulates across sessions; at 100 the
+/// beast converts and bonds to that pop as its keeper.
+fn handle_tame_command(world: &mut World) {
+    use scale::layer1::fauna::domestication::{apply_tame_attempt, Tameable, Tamed};
+    let actor = {
+        let mut query = world.query_filtered::<Entity, With<Pop>>();
+        query.iter(world).next()
+    };
+    let target = {
+        let mut query = world.query::<(Entity, &Tameable)>();
+        query.iter(world).next().map(|(e, _)| e)
+    };
+    let (Some(actor), Some(target)) = (actor, target) else {
+        print_dashboard_panel(
+            "ALIEN DOMESTICATION",
+            "No tameable beast (or no pop) to work. Spawn one with `beast`.",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    match apply_tame_attempt(world, actor, target) {
+        Some(_) if world.get::<Tamed>(target).is_some() => {
+            print_dashboard_panel(
+                "ALIEN DOMESTICATION",
+                "TAMED! The beast settles, and turns its head toward its keeper.\nIt will eat from the stockpile now — and it will remember being fed. See `beasts`.",
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some(progress) => {
+            print_dashboard_panel(
+                "ALIEN DOMESTICATION",
+                &format!(
+                    "The keeper works the beast slowly. Taming progress: {progress:.0}/100. Run `tame` again."
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        None => {
+            print_dashboard_panel(
+                "ERROR",
+                "That beast is no longer tameable.",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// Debug: list fauna with their domestication state (Spec 353).
+fn print_beasts(world: &mut World) {
+    use scale::layer1::fauna::domestication::{ResourceProducer, Tameable, Tamed};
+    use scale::layer1::fauna::Fauna;
+    let mut lines: Vec<String> = Vec::new();
+    {
+        let mut query = world.query::<(Entity, &Fauna, &Tameable, Option<&GridPosition>)>();
+        for (entity, fauna, tameable, pos) in query.iter(world) {
+            let at = pos.map_or("?".to_string(), |p| format!("({}, {})", p.x, p.y));
+            lines.push(format!(
+                "#{} {:?} TAMEABLE progress={:.0}/100 needs_power={} at {}",
+                entity.index(),
+                fauna.fauna_type,
+                tameable.progress,
+                tameable.required_skill,
+                at
+            ));
+        }
+    }
+    {
+        let mut query = world.query::<(
+            Entity,
+            &Fauna,
+            &Tamed,
+            Option<&Needs>,
+            Option<&ResourceProducer>,
+            Option<&GridPosition>,
+        )>();
+        for (entity, fauna, tamed, needs, producer, pos) in query.iter(world) {
+            let at = pos.map_or("?".to_string(), |p| format!("({}, {})", p.x, p.y));
+            let hunger = needs.map_or("n/a".to_string(), |n| format!("{:.2}", n.hunger));
+            let yield_label = producer.map_or("none".to_string(), |p| {
+                format!("{:?} {:.0}/{:.0}", p.resource_type, p.progress, p.max)
+            });
+            let keeper = tamed
+                .owner
+                .map_or("none".to_string(), |o| o.index().to_string());
+            lines.push(format!(
+                "#{} {:?} TAMED keeper={} hunger={} yield={} at {}",
+                entity.index(),
+                fauna.fauna_type,
+                keeper,
+                hunger,
+                yield_label,
+                at
+            ));
+        }
+    }
+    if lines.is_empty() {
+        print_dashboard_panel(
+            "BEASTS",
+            "No fauna in the colony's orbit. Spawn one with `beast`.",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        print_dashboard_panel(
+            "BEASTS",
+            &lines.join("\n"),
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
 }
 
 /// Debug: order a pop to relocate — feral pops may refuse (Spec 273).
