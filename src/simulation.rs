@@ -1508,6 +1508,8 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         crate::layer3::map::recalculate_trade_routes_system
             .after(crate::layer3::map::process_hyperlane_collapse_system),
         crate::layer3::integration::hyperlane_collapse_chronicle_bridge,
+        crate::layer3::integration::hyperlane_formed_chronicle_bridge
+            .after(crate::layer3::map::hyperlane_formation_system),
         crate::layer3::integration::anomaly_discovered_chronicle_bridge
             .after(crate::layer3::map::process_hyperlane_collapse_system),
         crate::layer3::integration::diplomatic_fashion_chronicle_bridge,

@@ -22,6 +22,20 @@ pub fn hyperlane_collapse_chronicle_bridge(
     }
 }
 
+/// Bridges `HyperlaneFormedEvent` (Spec 352, stellar drift) to `AddChronicleEvent`.
+pub fn hyperlane_formed_chronicle_bridge(
+    mut formed_events: EventReader<crate::layer3::map::HyperlaneFormedEvent>,
+    mut chronicle_events: EventWriter<AddChronicleEvent>,
+) {
+    for _ in formed_events.read() {
+        chronicle_events.send(AddChronicleEvent {
+            importance: EventImportance::Standard,
+            text: "A new hyperlane has formed as stellar drift brings two systems within reach. New routes open across the galaxy."
+                .to_string(),
+        });
+    }
+}
+
 pub fn dead_internet_chronicle_bridge(
     mut events: EventReader<crate::layer3::diplomacy::dead_internet::DiplomaticInteraction>,
     mut chronicle: EventWriter<AddChronicleEvent>,
@@ -945,5 +959,29 @@ mod tests {
         assert!(c_events[0]
             .text
             .contains("Hostile fleet stalled by bureaucratic red tape."));
+    }
+
+    #[test]
+    fn test_hyperlane_formed_chronicle_bridge() {
+        let mut app = bevy_app::App::new();
+        app.add_event::<crate::layer3::map::HyperlaneFormedEvent>();
+        app.add_event::<AddChronicleEvent>();
+        app.add_systems(bevy_app::Update, hyperlane_formed_chronicle_bridge);
+        app.world_mut()
+            .resource_mut::<Events<crate::layer3::map::HyperlaneFormedEvent>>()
+            .send(crate::layer3::map::HyperlaneFormedEvent {
+                system_a: Entity::PLACEHOLDER,
+                system_b: Entity::PLACEHOLDER,
+            });
+        app.update();
+        let chronicle_events = app.world().resource::<Events<AddChronicleEvent>>();
+        let mut reader = chronicle_events.get_cursor();
+        let events: Vec<&AddChronicleEvent> = reader.read(chronicle_events).collect();
+        assert_eq!(events.len(), 1);
+        assert!(
+            events[0].text.contains("hyperlane"),
+            "chronicle names the new lane: {}",
+            events[0].text
+        );
     }
 }

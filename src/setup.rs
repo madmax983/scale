@@ -522,6 +522,9 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
 
     world.init_resource::<Events<crate::layer3::map::HyperlaneCollapseEvent>>();
     world.init_resource::<Events<crate::layer3::map::TradeRouteSeveredEvent>>();
+    // Spec 352: stellar-drift formation events + topology ledger.
+    world.init_resource::<Events<crate::layer3::map::HyperlaneFormedEvent>>();
+    world.init_resource::<crate::layer3::map::GalaxyTopology>();
     world.init_resource::<Events<crate::layer2::moon_hermits::PopDesertedEvent>>();
     world.init_resource::<Events<crate::layer1::social::gossip_economy::GossipEvent>>();
     world.init_resource::<Events<crate::layer1::social::gossip_economy::BrokerPurchaseEvent>>();
@@ -677,6 +680,9 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
         STARTER_HAZARD_BUFFER_RADIUS,
     );
     initial_naming_system(&mut world);
+    // Spec 352: seed the drifting galaxy (systems + hyperlanes) so the
+    // registered drift systems act on a live map.
+    crate::layer3::map::spawn_initial_galaxy(&mut world);
     initial_chronicle_event(&mut world);
     // Field Guide onboarding: seed the new keeper's pointers alongside the
     // founding entry (once per new colony; saves restore them verbatim).

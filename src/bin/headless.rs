@@ -520,6 +520,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "rumors" => print_rumors(world),
         "contagion" => print_contagion(world),
         "season" => print_season(world),
+        "galaxy" => print_galaxy(world),
+        "drift" => handle_drift_command(world, &parts),
         "save" => handle_save_command(world, &parts),
         "load" => handle_load_command(world, &parts),
         "saves" => print_saves(world),
@@ -3227,8 +3229,14 @@ fn print_stats(world: &mut World) {
         .get_resource::<scale::layer1::biology::death_attribution::DeathLedger>()
         .map_or((0, 0), |ledger| (ledger.total, ledger.unknown_count()));
 
+    // Spec 352: drifting-galaxy census for STATS (full panel: `galaxy`).
+    let (galaxy_systems, galaxy_lanes) = scale::layer3::map::galaxy_counts(world);
+    let galaxy_topo = world
+        .get_resource::<scale::layer3::map::GalaxyTopology>()
+        .map_or(0, |t| t.revision);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={}",
         tick,
         scenario,
         pops,
@@ -3313,6 +3321,9 @@ fn print_stats(world: &mut World) {
         drones_repairing,
         deaths_total,
         deaths_unknown,
+        galaxy_systems,
+        galaxy_lanes,
+        galaxy_topo,
     );
 }
 
@@ -6373,6 +6384,16 @@ fn print_help() {
                     "",
                     "Item 84: death ledger — totals by attributed cause + recent deaths",
                 ),
+                (
+                    "galaxy",
+                    "",
+                    "Spec 352: drifting star systems, hyperlanes, topology revision",
+                ),
+                (
+                    "drift <id> <vx> <vy>",
+                    "",
+                    "Spec 352 debug: set a star system's drift velocity",
+                ),
                 #[cfg(feature = "nova")]
                 (
                     "stories",
@@ -8065,6 +8086,89 @@ fn handle_quirk_command(world: &mut World, parts: &[&str]) {
 }
 
 /// Rumor web report (headless `rumors` command, Spec 343).
+/// Spec 352: the drifting galaxy — every star system with its position and
+/// drift vector, every hyperlane with its endpoint distance vs. the snap
+/// limit, and the topology ledger (revision = pathfinding-cache seam).
+fn print_galaxy(world: &mut World) {
+    use scale::layer3::map::{GalaxyTopology, Hyperlane, StarSystem, MAX_HYPERLANE_DISTANCE};
+    type SystemRow = (bevy_ecs::entity::Entity, (u32, f32, f32, f32, f32));
+    let mut query = world.query::<(bevy_ecs::entity::Entity, &StarSystem)>();
+    let systems: Vec<SystemRow> = query
+        .iter(world)
+        .map(|(e, s)| (e, (s.id, s.x, s.y, s.drift_vx, s.drift_vy)))
+        .collect();
+    let positions: std::collections::HashMap<bevy_ecs::entity::Entity, (u32, f32, f32)> =
+        systems.iter().map(|(e, s)| (*e, (s.0, s.1, s.2))).collect();
+    let mut lane_query = world.query::<&Hyperlane>();
+    let lanes: Vec<(u32, u32, f32)> = lane_query
+        .iter(world)
+        .filter_map(|lane| {
+            let a = positions.get(&lane.start)?;
+            let b = positions.get(&lane.end)?;
+            let dist = ((a.1 - b.1).powi(2) + (a.2 - b.2).powi(2)).sqrt();
+            Some((a.0, b.0, dist))
+        })
+        .collect();
+    let topo = world.get_resource::<GalaxyTopology>();
+    let (revision, formed, collapsed) = topo.map_or((0, 0, 0), |t| {
+        (t.revision, t.lanes_formed, t.lanes_collapsed)
+    });
+    println!(
+        "GALAXY systems={} lanes={} topo_revision={} formed={} collapsed={} max_lane_distance={:.1}",
+        systems.len(),
+        lanes.len(),
+        revision,
+        formed,
+        collapsed,
+        MAX_HYPERLANE_DISTANCE
+    );
+    for (_, sys) in &systems {
+        println!(
+            "SYSTEM id={} x={:.1} y={:.1} drift=({:.3},{:.3})",
+            sys.0, sys.1, sys.2, sys.3, sys.4
+        );
+    }
+    for (a, b, dist) in &lanes {
+        println!("LANE {a}-{b} distance={dist:.1}");
+    }
+    println!(
+        "Drift epochs run every 100 ticks; lanes snap beyond {:.1} and form within it. Set a velocity with `drift <id> <vx> <vy>`.",
+        MAX_HYPERLANE_DISTANCE
+    );
+}
+
+/// Spec 352 debug: `drift <system_id> <vx> <vy>` sets a system's drift
+/// velocity so playtests can force a snap/formation on demand.
+fn handle_drift_command(world: &mut World, parts: &[&str]) {
+    use scale::layer3::map::StarSystem;
+    if parts.len() != 4 {
+        println!("Usage: drift <system_id> <vx> <vy>");
+        return;
+    }
+    let (Ok(id), Ok(vx), Ok(vy)) = (
+        parts[1].parse::<u32>(),
+        parts[2].parse::<f32>(),
+        parts[3].parse::<f32>(),
+    ) else {
+        println!("Usage: drift <system_id> <vx> <vy> (numeric)");
+        return;
+    };
+    let mut query = world.query::<&mut StarSystem>();
+    let mut found = false;
+    for mut sys in query.iter_mut(world) {
+        if sys.id == id {
+            sys.drift_vx = vx;
+            sys.drift_vy = vy;
+            found = true;
+        }
+    }
+    if found {
+        println!("DRIFT id={id} velocity=({vx:.3},{vy:.3})");
+    } else {
+        println!("DRIFT no system with id={id} (see `galaxy`)");
+    }
+}
+
 fn print_season(world: &mut World) {
     use scale::layer1::seasons::season_status_label;
     print_dashboard_panel(
