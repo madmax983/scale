@@ -40,6 +40,13 @@ use crate::ui::map::{
 pub struct FieldGuideUiState {
     /// Index of the first guide line shown at the top of the pane.
     pub scroll: u16,
+    /// The largest scroll offset that can still show guide content,
+    /// as computed by the renderer from the WRAPPED row count at the
+    /// pane's real width and published here on every draw (see
+    /// [`guide_max_scroll`]). The key handler clamps against this
+    /// value, so renderer and input share one bound. Zero until the
+    /// first render publishes it.
+    pub max_scroll: u16,
 }
 
 impl FieldGuideUiState {
@@ -62,6 +69,29 @@ impl FieldGuideUiState {
 
 /// How far a PageUp/PageDown press moves the guide.
 pub const PAGE_SCROLL_LINES: i32 = 10;
+
+/// The Field Guide's true scroll bound for a pane whose bordered
+/// block has the given inner width and height.
+///
+/// The guide renders with `Wrap { trim: false }`, so at narrow pane
+/// widths one logical line occupies several visual rows. The bound
+/// therefore comes from the WRAPPED row count at the real content
+/// width -- counted by ratatui itself, since `Paragraph::line_count`
+/// runs the same `WordWrapper` the renderer uses -- minus the rows
+/// that fit on screen. Counting unwrapped lines instead strands
+/// every wrapped row past `lines - visible` (item 103).
+#[must_use]
+pub fn guide_max_scroll(lines: &[Line<'static>], inner_width: u16, inner_height: u16) -> u16 {
+    if inner_width == 0 || inner_height == 0 {
+        return 0;
+    }
+    let wrapped = Paragraph::new(lines.to_vec())
+        .wrap(Wrap { trim: false })
+        .line_count(inner_width);
+    u16::try_from(wrapped)
+        .unwrap_or(u16::MAX)
+        .saturating_sub(inner_height)
+}
 
 /// Marker text identifying the seeded guide entries in the Chronicle.
 ///
@@ -486,9 +516,9 @@ fn weird_stuff_section(lines: &mut Vec<Line<'static>>) {
 }
 
 /// Render the Field Guide into `area` (used by the shell pane plugin).
-pub fn render_field_guide(frame: &mut Frame, area: Rect, world: &World) {
+pub fn render_field_guide(frame: &mut Frame, area: Rect, world: &World) -> u16 {
     if area.width == 0 || area.height == 0 {
-        return;
+        return 0;
     }
 
     let chunks = Layout::default()
@@ -496,21 +526,26 @@ pub fn render_field_guide(frame: &mut Frame, area: Rect, world: &World) {
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(area);
 
-    let lines = guide_lines();
-    // The bordered block eats the top and bottom rows of the content chunk.
-    let visible = chunks[0].height.saturating_sub(2);
-    let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
-    let max_scroll = total.saturating_sub(visible);
-    let scroll = world
-        .get_resource::<FieldGuideUiState>()
-        .map_or(0, |state| state.scroll)
-        .min(max_scroll);
-
     let block = Block::default()
         .title(" Field Guide ")
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .style(Style::default().bg(Color::Black));
+    // Wrap width and visible height are the block's INNER dimensions.
+    let inner = block.inner(chunks[0]);
+
+    let lines = guide_lines();
+    // The bound must count WRAPPED rows at the inner width (see
+    // `guide_max_scroll`); the unwrapped line count strands the tail
+    // of the guide (item 103). The caller publishes the returned
+    // bound into `FieldGuideUiState::max_scroll`, and the key
+    // handler clamps against that same value.
+    let max_scroll = guide_max_scroll(&lines, inner.width, inner.height);
+    let scroll = world
+        .get_resource::<FieldGuideUiState>()
+        .map_or(0, |state| state.scroll)
+        .min(max_scroll);
+
     frame.render_widget(Clear, chunks[0]);
     let paragraph = Paragraph::new(lines)
         .block(block)
@@ -523,6 +558,8 @@ pub fn render_field_guide(frame: &mut Frame, area: Rect, world: &World) {
         Style::default().fg(Color::DarkGray),
     )));
     frame.render_widget(footer, chunks[1]);
+
+    max_scroll
 }
 
 /// A colonist whose worst need is `worst` (drives the pop legend glyphs).
@@ -794,7 +831,9 @@ mod tests {
         let backend = TestBackend::new(90, 34);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| render_field_guide(frame, frame.area(), &world))
+            .draw(|frame| {
+                render_field_guide(frame, frame.area(), &world);
+            })
             .unwrap();
         let buffer = terminal.backend().buffer();
         let mut text = String::new();
@@ -822,6 +861,81 @@ mod tests {
         assert_eq!(state.scroll, 0);
         state.scroll_to_bottom(40);
         assert_eq!(state.scroll, 40);
+    }
+
+    /// Render the guide at the given terminal size with the world's
+    /// current scroll state and return the whole buffer as text.
+    fn render_guide_text(world: &World, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_field_guide(frame, frame.area(), world);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for cell in buffer.content() {
+            text.push_str(cell.symbol());
+        }
+        text
+    }
+
+    #[test]
+    fn guide_tail_is_reachable_at_narrow_width() {
+        // Item 103 (Mark, WASM playtest): at a narrow pane width the
+        // guide's wrapped rows far outnumber its raw line count, and
+        // the scroll bound derived from the UNWRAPPED count stranded
+        // everything below the EVA section. Pin the scroll past the
+        // end -- the renderer clamps to its bound, and that bound must
+        // reach the guide's final line.
+        let mut world = World::new();
+        world.insert_resource(FieldGuideUiState {
+            scroll: u16::MAX,
+            ..Default::default()
+        });
+        let text = render_guide_text(&world, 44, 14);
+        assert!(
+            text.contains("Good luck, keeper"),
+            "at max scroll the final guide line must be visible"
+        );
+        assert!(
+            text.contains("today."),
+            "at max scroll the final wrapped row must be visible"
+        );
+    }
+
+    #[test]
+    fn guide_max_scroll_matches_empirical_wrapped_rows() {
+        // The shared bound must equal (wrapped rows - visible rows)
+        // with the wrapped rows counted EMPIRICALLY from a real
+        // render, so if ratatui's wrap counting ever drifts from its
+        // rendering, this fails instead of the guide's tail quietly
+        // becoming unreachable again.
+        let world = World::new();
+        let backend = TestBackend::new(44, 900);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render_field_guide(frame, frame.area(), &world);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut last_text_row = 0u16;
+        for y in 1..buffer.area.height - 2 {
+            let row_has_text = (1..43).any(|x| buffer[(x, y)].symbol().trim() != "");
+            if row_has_text {
+                last_text_row = y;
+            }
+        }
+        // Pane 44x14: content chunk 13 rows, block inner 42 wide x 11.
+        assert_eq!(
+            guide_max_scroll(&guide_lines(), 42, 11),
+            last_text_row - 11,
+            "guide_max_scroll must equal empirical wrapped rows minus visible rows"
+        );
+        // A wide pane wraps far less, so its bound is strictly smaller.
+        assert!(guide_max_scroll(&guide_lines(), 118, 30) < last_text_row - 11);
     }
 
     #[test]

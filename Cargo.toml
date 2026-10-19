@@ -18,7 +18,7 @@ lazy_static = "1.4.0"
 rand = "0.8.5"
 # "std" keeps the layout cache on thread_local; without it ratatui-core falls back
 # to critical-section, which has no implementation on wasm32 and fails to link.
-ratatui = { version = "0.30.0", default-features = false, features = ["all-widgets", "layout-cache", "macros", "std", "underline-color"] }
+ratatui = { version = "0.30.0", default-features = false, features = ["all-widgets", "layout-cache", "macros", "std", "underline-color", "unstable-rendered-line-info"] }
 ratatui-hypertile = { version = "0.4.2", default-features = false, features = ["serde"] }
 ratatui-hypertile-extras = { version = "0.4.2", default-features = false, features = ["serde"] }
 
