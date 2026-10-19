@@ -146,28 +146,26 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, world: &World) {
         active_singularity_mass,
     );
 
-    // Atmosphere segment (Item 77 Phase 2): pops standing in vacuum and
-    // unpowered LifeSupport, from the ColonyAtmosphere snapshot. Quiet
-    // while everyone breathes.
-    status
-        .spans
-        .extend(build_atmosphere_spans(world));
-
-    // EVA suit segment (Spec 1384): the worst suited bottle in vacuum,
-    // red when below a quarter. Quiet while nobody is out there.
-    status.spans.extend(build_suit_spans(world));
-
-    // Reign & sky segments: constellation broadcast, god-mind bit-rot,
-    // sovereign legitimacy, and the possessed pop. Quiet unless live.
-    status
-        .spans
-        .extend(crate::ui::reign_sky::build_reign_spans(world));
+    // Tail segments: atmosphere (Item 77 Phase 2), EVA suit (Spec
+    // 1384), reign & sky. All quiet unless live.
+    let mut tail_spans: Vec<Span<'static>> = Vec::new();
+    tail_spans.extend(build_atmosphere_spans(world));
+    tail_spans.extend(build_suit_spans(world));
+    tail_spans.extend(crate::ui::reign_sky::build_reign_spans(world));
+    // Item 104: while any tail segment is live it deterministically
+    // owns the tail. The Ctrl+K hint previously appeared iff the whole
+    // line fit, so each LifeSupport power toggle also flipped the hint
+    // across its fit threshold and the bar's tail swapped warning <->
+    // hint in sync. Now the hint is a quiet-bar-only signpost: present
+    // iff no tail segment is live AND the whole line fits.
+    let tail_active = !tail_spans.is_empty();
+    status.spans.extend(tail_spans);
 
     // One quiet signpost for new keepers: the palette holds every command.
-    // Appended only when the whole bar still fits — on narrow terminals the
-    // hint yields silently instead of truncating real colony state.
+    // On narrow terminals the hint yields silently instead of truncating
+    // real colony state.
     let hint = Span::styled("  ·  Ctrl+K: commands", Style::default().fg(Color::Gray));
-    if status.width() + hint.width() <= usize::from(area.width) {
+    if should_show_hint(tail_active, status.width(), hint.width(), area.width) {
         status.spans.push(hint);
     }
 
@@ -235,6 +233,22 @@ fn build_play_pause_span(paused: bool) -> Span<'static> {
     }
 }
 
+/// Whether the Ctrl+K hint may join the status bar (Item 104).
+///
+/// Deterministic layout rule: while any tail segment (atmosphere, suit,
+/// reign & sky) is live, the hint is absent — a warning owns its slot
+/// outright instead of competing with the hint at a fit threshold the
+/// warning itself moves. On a quiet bar the hint appears iff the whole
+/// line still fits the bar width.
+fn should_show_hint(
+    tail_active: bool,
+    line_width: usize,
+    hint_width: usize,
+    area_width: u16,
+) -> bool {
+    !tail_active && line_width + hint_width <= usize::from(area_width)
+}
+
 /// Build the atmosphere segment of the status bar (Item 77 Phase 2).
 ///
 /// Reads the [`ColonyAtmosphere`] snapshot: when any pop stands in
@@ -259,6 +273,36 @@ fn build_atmosphere_spans(world: &World) -> Vec<Span<'static>> {
                 .fg(Color::Red)
                 .add_modifier(Modifier::BOLD),
         ));
+    }
+    // Item 104: the LifeSupport warning reads the dwell-filtered
+    // display state whenever the sim maintains one — the raw snapshot
+    // toggles every ~2 ticks on a marginal grid and strobed the bar.
+    // Worlds that never run the display system (unit fixtures, tools)
+    // fall back to the instantaneous snapshot read below.
+    if let Some(display) =
+        world.get_resource::<crate::layer1::physics::pressure::LifeSupportWarningDisplay>()
+    {
+        if display.visible {
+            if display.full_outage {
+                spans.push(Span::styled(
+                    " ⚠ LifeSupport unpowered ".to_string(),
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    format!(
+                        " ⚠ LifeSupport {}/{} unpowered ",
+                        display.unpowered, display.total
+                    ),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+        }
+        return spans;
     }
     if atmo.life_support_unpowered() {
         spans.push(Span::styled(
@@ -1132,6 +1176,119 @@ mod tests {
         assert!(
             text.contains("LifeSupport unpowered"),
             "power warning shown: {text}"
+        );
+    }
+
+
+    #[test]
+    fn atmosphere_spans_follow_warning_display_dwell() {
+        // Item 104: when the sim maintains the dwell-filtered display
+        // state, the bar obeys it — a raw-dark snapshot whose outage
+        // has not outlasted the dwell renders NO warning (the old
+        // instantaneous read strobed with the brownout coin flip).
+        use crate::layer1::physics::pressure::{
+            ColonyAtmosphere, LifeSupportWarningDisplay,
+        };
+
+        let dark = ColonyAtmosphere {
+            pops_in_vacuum: 0,
+            pops_in_vacuum_dormant: 0,
+            min_pop_pressure: 1.0,
+            unpowered_life_support: 1,
+            life_support_total: 2,
+        };
+        let mut world = World::new();
+        world.insert_resource(dark);
+        world.insert_resource(LifeSupportWarningDisplay::default());
+        assert!(
+            build_atmosphere_spans(&world).is_empty(),
+            "no bar warning before the dwell elapses"
+        );
+
+        // Drive the display past the dwell with the same raw snapshot.
+        let mut display = LifeSupportWarningDisplay::default();
+        for tick in 0..=crate::layer1::physics::pressure::LIFESUPPORT_WARNING_ON_DWELL_TICKS {
+            display.update(tick, &dark);
+        }
+        world.insert_resource(display);
+        let spans = build_atmosphere_spans(&world);
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            text.contains("LifeSupport 1/2 unpowered"),
+            "dwelling partial outage is named with latched counts: {text}"
+        );
+    }
+
+    #[test]
+    fn hint_yields_deterministically_while_any_tail_segment_is_live() {
+        // Item 104: the Ctrl+K hint must never swap in/out in sync with
+        // a warning crossing a fit threshold. Rule: while any tail
+        // segment owns the tail, the hint is deterministically absent;
+        // on a quiet bar it appears iff the whole line fits.
+        assert!(!should_show_hint(true, 10, 21, 200));
+        assert!(!should_show_hint(true, 0, 21, 200));
+        assert!(should_show_hint(false, 100, 21, 200));
+        assert!(!should_show_hint(false, 190, 21, 200));
+        assert!(should_show_hint(false, 179, 21, 200));
+    }
+
+    #[test]
+    fn rendered_bar_hint_is_stable_across_warning_toggle() {
+        // Item 104 render pin: at a fixed wide width, the quiet bar
+        // carries the hint and the warning bar deterministically does
+        // not — structure never depends on a fit threshold the warning
+        // itself moves.
+        use crate::layer1::physics::pressure::ColonyAtmosphere;
+        use crate::layer1::{ColonyPolicies, ColonyResources, NamedLocations, Viewport};
+        use crate::shared::state::GameState;
+        use crate::shared::time::SimulationTime;
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let render = |atmo: ColonyAtmosphere| -> String {
+            let mut world = World::new();
+            world.insert_resource(SimulationTime::default());
+            world.insert_resource(GameState::Running);
+            world.insert_resource(BuildMode::default());
+            world.insert_resource(DesignationMode::default());
+            world.insert_resource(Viewport::default());
+            world.insert_resource(NamedLocations::default());
+            world.insert_resource(ColonyResources::default());
+            world.insert_resource(ColonyPolicies::default());
+            world.insert_resource(atmo);
+            let backend = TestBackend::new(200, 1);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| {
+                    render_status_bar(f, f.area(), &world);
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let mut text = String::new();
+            for c in &buffer.content {
+                text.push_str(c.symbol());
+            }
+            text
+        };
+
+        let quiet = render(ColonyAtmosphere::default());
+        assert!(quiet.contains("Ctrl+K"), "quiet bar shows the hint: {quiet}");
+        assert!(!quiet.contains("LifeSupport"), "quiet bar has no warning: {quiet}");
+
+        let warning = render(ColonyAtmosphere {
+            pops_in_vacuum: 0,
+            pops_in_vacuum_dormant: 0,
+            min_pop_pressure: 1.0,
+            unpowered_life_support: 1,
+            life_support_total: 1,
+        });
+        assert!(
+            warning.contains("LifeSupport unpowered"),
+            "warning bar shows the warning: {warning}"
+        );
+        assert!(
+            !warning.contains("Ctrl+K"),
+            "warning deterministically owns the tail — no hint swap: {warning}"
         );
     }
 

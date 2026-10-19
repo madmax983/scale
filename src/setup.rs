@@ -268,6 +268,8 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(ColonyResources::default());
     // Item 77 Phase 2: atmosphere telegraphing snapshot + shelter order.
     world.insert_resource(crate::layer1::pressure::ColonyAtmosphere::default());
+    // Item 104: dwell-filtered LifeSupport warning the status bar reads.
+    world.insert_resource(crate::layer1::pressure::LifeSupportWarningDisplay::default());
     // Spec 1384: colony suit status snapshot + scenario issue floor.
     world.insert_resource(crate::layer1::eva_suit::ColonySuitStatus::default());
     world.insert_resource(crate::layer1::eva_suit::ScenarioSuitFloor::default());

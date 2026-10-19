@@ -356,6 +356,15 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Environment),
     );
+    // Item 104: dwell-filtered LifeSupport bar warning, fed by the fresh
+    // atmosphere snapshot (display-only; never feeds back into the sim).
+    // Separate add_systems: the Environment tuple above is at Bevy's
+    // system-tuple arity cap.
+    schedule.add_systems(
+        (crate::layer1::physics::pressure::update_lifesupport_warning_display_system
+            .after(crate::layer1::physics::pressure::update_colony_atmosphere_system),)
+            .in_set(Layer1SystemSet::Environment),
+    );
     // Spec 335: Orbital Shadow. The projection rebuild lives in
     // Environment; the light application must run AFTER
     // update_lighting_system (Execution, which resets the map to ambient),

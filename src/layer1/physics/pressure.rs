@@ -591,6 +591,111 @@ impl ColonyAtmosphere {
     }
 }
 
+/// How many consecutive ticks LifeSupport must read unpowered before
+/// the status-bar warning appears (Item 104).
+///
+/// Forensic baseline (live Classic headless sample, ticks 1–1200, one
+/// LifeSupport on the starter grid): the grid runs at supply ratio 0.5
+/// (Lander 10 nameplate × 0.5 prototype efficiency against 10 demand)
+/// and `activate_consumers` re-rolls every consumer independently each
+/// tick (`rng.gen_bool(supply_ratio)`), so the raw flag is a memoryless
+/// coin flip — dark duty 51.1%, 591 transitions in 1200 ticks, dark runs
+/// mean 2.07 / median 1 / max 10, zero runs of 20+. The allocation is an
+/// honest instantaneous read of a genuinely marginal grid (and pressure
+/// production keys off the same `active` flag, so making allocation
+/// sticky would change air output — a balance change, not a display
+/// fix). The bar therefore debounces the *display*: 20 ticks is twice
+/// the longest flicker run observed, so brownout flicker essentially
+/// never surfaces, while a genuine outage still warns at tick 20 —
+/// well ahead of the chronicle warning (100) and escalation (600),
+/// whose timers are untouched and compose independently.
+pub const LIFESUPPORT_WARNING_ON_DWELL_TICKS: u64 = 20;
+
+/// How many ticks the status-bar warning lingers after LifeSupport is
+/// powered again (Item 104). Light gaps inside a flickering stretch ran
+/// to 13 ticks in the forensic sample; a 30-tick linger bridges them so
+/// a warning, once earned, stays solid until power is truly back, then
+/// clears promptly. Display-only: no sim state reads this.
+pub const LIFESUPPORT_WARNING_OFF_LINGER_TICKS: u64 = 30;
+
+/// Dwell-filtered LifeSupport power warning for the status bar
+/// (Item 104).
+///
+/// The raw [`ColonyAtmosphere`] snapshot is instantaneous — on a
+/// marginal grid it toggles every ~2 ticks (see
+/// [`LIFESUPPORT_WARNING_ON_DWELL_TICKS`]) — and the bar rendered it
+/// verbatim, strobing the warning (and, through the fit-threshold hint
+/// logic, the bar's whole tail). This resource is the display-side
+/// debounce: [`update`](Self::update) is a pure state machine fed the
+/// raw snapshot each tick; the bar renders only `visible` state with
+/// counts latched from the last dark tick. The raw snapshot, headless
+/// STATS, and the per-entity chronicle alert state
+/// ([`LifeSupportPowerAlertState`]) are deliberately untouched.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct LifeSupportWarningDisplay {
+    /// Whether the warning currently owns its status-bar slot.
+    pub visible: bool,
+    /// Latched: every LifeSupport unit was dark at the last dark tick.
+    pub full_outage: bool,
+    /// Latched unpowered count from the last dark tick.
+    pub unpowered: usize,
+    /// Latched LifeSupport total from the last dark tick.
+    pub total: usize,
+    /// Tick the current continuous dark stretch began.
+    dark_since: Option<u64>,
+    /// Most recent tick that read dark (drives the off-linger).
+    last_dark_tick: Option<u64>,
+}
+
+impl LifeSupportWarningDisplay {
+    /// Advance the dwell state machine by one tick against the raw
+    /// snapshot. Pure and deterministic — the unit tests drive this
+    /// directly with synthetic flicker patterns.
+    pub fn update(&mut self, tick: u64, raw: &ColonyAtmosphere) {
+        if raw.any_life_support_unpowered() {
+            if self.dark_since.is_none() {
+                self.dark_since = Some(tick);
+            }
+            self.last_dark_tick = Some(tick);
+            // Latch the freshest dark counts so the bar (and the
+            // linger after repower) shows the last real numbers.
+            self.unpowered = raw.unpowered_life_support;
+            self.total = raw.life_support_total;
+            self.full_outage = raw.life_support_unpowered();
+            let dark_for = tick.saturating_sub(self.dark_since.unwrap_or(tick));
+            if dark_for >= LIFESUPPORT_WARNING_ON_DWELL_TICKS {
+                self.visible = true;
+            }
+        } else {
+            self.dark_since = None;
+            if self.visible {
+                let linger_expired = self.last_dark_tick.is_some_and(|last_dark| {
+                    tick.saturating_sub(last_dark) > LIFESUPPORT_WARNING_OFF_LINGER_TICKS
+                });
+                if linger_expired {
+                    self.visible = false;
+                    self.last_dark_tick = None;
+                    self.unpowered = 0;
+                    self.total = 0;
+                    self.full_outage = false;
+                }
+            } else {
+                self.last_dark_tick = None;
+            }
+        }
+    }
+}
+
+/// Refresh the [`LifeSupportWarningDisplay`] from the raw snapshot.
+/// Scheduled after [`update_colony_atmosphere_system`].
+pub fn update_lifesupport_warning_display_system(
+    time: Res<crate::shared::time::SimulationTime>,
+    snapshot: Res<ColonyAtmosphere>,
+    mut display: ResMut<LifeSupportWarningDisplay>,
+) {
+    display.update(time.tick, &snapshot);
+}
+
 /// Refresh the [`ColonyAtmosphere`] snapshot from the live world.
 #[allow(clippy::type_complexity)]
 pub fn update_colony_atmosphere_system(
@@ -1650,6 +1755,104 @@ mod tests {
         // are cumulative: first excursion + second excursion = 2.
         let alerts = texts.iter().filter(|t| t.contains("suffocating")).count();
         assert_eq!(alerts, 2, "second excursion should alert again");
+    }
+
+
+    // ---- Item 104: status-bar warning dwell (display state) ----
+
+    fn raw_atmo(unpowered: usize, total: usize) -> ColonyAtmosphere {
+        ColonyAtmosphere {
+            pops_in_vacuum: 0,
+            pops_in_vacuum_dormant: 0,
+            min_pop_pressure: 1.0,
+            unpowered_life_support: unpowered,
+            life_support_total: total,
+        }
+    }
+
+    #[test]
+    fn lifesupport_warning_display_never_shows_for_brownout_flicker() {
+        // Item 104 forensic baseline (live Classic sample, ticks 1-1200):
+        // the starter grid runs at supply_ratio 0.5 and activation is an
+        // independent per-tick coin flip, so the raw flag alternates with
+        // dark runs of mean ~2 ticks (observed max 10). No such pattern
+        // may ever surface on the status bar.
+        let mut display = LifeSupportWarningDisplay::default();
+        for tick in 0..600u64 {
+            let raw = raw_atmo(if tick % 2 == 0 { 1 } else { 0 }, 1);
+            display.update(tick, &raw);
+            assert!(!display.visible, "flicker must never show (tick {tick})");
+        }
+        // A worst-case observed flicker burst: 10 dark, 1 light, repeat.
+        let mut display = LifeSupportWarningDisplay::default();
+        for tick in 0..600u64 {
+            let raw = raw_atmo(if tick % 11 == 10 { 0 } else { 1 }, 1);
+            display.update(tick, &raw);
+            assert!(!display.visible, "burst flicker must never show (tick {tick})");
+        }
+    }
+
+    #[test]
+    fn lifesupport_warning_display_shows_only_after_on_dwell() {
+        let mut display = LifeSupportWarningDisplay::default();
+        let dark = raw_atmo(1, 1);
+        for tick in 0..LIFESUPPORT_WARNING_ON_DWELL_TICKS {
+            display.update(tick, &dark);
+            assert!(!display.visible, "hidden before dwell elapses (tick {tick})");
+        }
+        display.update(LIFESUPPORT_WARNING_ON_DWELL_TICKS, &dark);
+        assert!(display.visible, "visible once the outage outlasts the dwell");
+        assert!(display.full_outage);
+        assert_eq!(display.unpowered, 1);
+        assert_eq!(display.total, 1);
+    }
+
+    #[test]
+    fn lifesupport_warning_display_lingers_after_repower_then_clears() {
+        let mut display = LifeSupportWarningDisplay::default();
+        let dark = raw_atmo(1, 2);
+        let lit = raw_atmo(0, 2);
+        for tick in 0..=30u64 {
+            display.update(tick, &dark);
+        }
+        assert!(display.visible);
+        assert!(!display.full_outage, "1 of 2 dark is a partial outage");
+        // Repower at tick 31; last dark tick was 30. The warning must
+        // linger LINGER ticks so a marginal grid cannot strobe it, with
+        // the last real counts still on the bar.
+        for tick in 31..=(30 + LIFESUPPORT_WARNING_OFF_LINGER_TICKS) {
+            display.update(tick, &lit);
+            assert!(display.visible, "lingering at tick {tick}");
+            assert_eq!(display.unpowered, 1, "latched counts during linger");
+            assert_eq!(display.total, 2);
+        }
+        display.update(31 + LIFESUPPORT_WARNING_OFF_LINGER_TICKS, &lit);
+        assert!(!display.visible, "clears once the linger expires");
+    }
+
+    #[test]
+    fn lifesupport_warning_display_survives_flicker_gaps_once_visible() {
+        let mut display = LifeSupportWarningDisplay::default();
+        for tick in 0..=30u64 {
+            display.update(tick, &raw_atmo(1, 1));
+        }
+        assert!(display.visible);
+        // Marginal grid again: single light ticks between dark ticks
+        // must not blink the warning off and on.
+        for tick in 31..200u64 {
+            let raw = raw_atmo(if tick % 2 == 0 { 0 } else { 1 }, 1);
+            display.update(tick, &raw);
+            assert!(display.visible, "no blink during flicker (tick {tick})");
+        }
+    }
+
+    #[test]
+    fn lifesupport_warning_display_quiet_with_no_lifesupport() {
+        let mut display = LifeSupportWarningDisplay::default();
+        for tick in 0..1000u64 {
+            display.update(tick, &raw_atmo(0, 0));
+        }
+        assert!(!display.visible);
     }
 
     #[test]
