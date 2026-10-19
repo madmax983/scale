@@ -1120,6 +1120,7 @@ mod tests {
 
         world.insert_resource(ColonyAtmosphere {
             pops_in_vacuum: 2,
+            pops_in_vacuum_dormant: 0,
             min_pop_pressure: 0.0,
             unpowered_life_support: 1,
             life_support_total: 1,
@@ -1145,6 +1146,7 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(ColonyAtmosphere {
             pops_in_vacuum: 0,
+            pops_in_vacuum_dormant: 0,
             min_pop_pressure: 1.0,
             unpowered_life_support: 1,
             life_support_total: 2,

@@ -2889,13 +2889,24 @@ fn print_stats(world: &mut World) {
     let mut min_pressure = f32::MAX;
     // Collect pop positions first (query borrows world mutably), then do the
     // pressure lookups with a separate shared borrow — the two can't overlap.
-    let pop_tiles: Vec<(i32, i32)> = {
+    let pop_tiles: Vec<(i32, i32, bool)> = {
         // Census definition (Item 85): `pops=` counts Pop + Health +
         // GridPosition, excluding hidden stowaways (Spec 327) and Dead
         // pops awaiting despawn. `panicking_count` uses this exact base
         // filter plus Panic, so `panicking <= pops` always holds.
+        // Item 101: the bool is "dormant origin pop in stasis" (any of
+        // the three dormant markers), carried alongside the tile so the
+        // vacuum scan below can split out `vacuum_dormant=` — mirroring
+        // `ColonyAtmosphere::pops_in_vacuum_dormant`, which the
+        // atmosphere system publishes from the same markers/threshold.
         let mut query = world.query_filtered::<
-            (&GridPosition, &scale::layer1::health::Health),
+            (
+                &GridPosition,
+                &scale::layer1::health::Health,
+                Has<scale::layer1::culture::lawbound::DormantAutomaton>,
+                Has<scale::layer1::culture::bloomtouched::DormantTouched>,
+                Has<scale::layer1::culture::chronostalker::DormantStalker>,
+            ),
             (
                 With<Pop>,
                 // Spec 327: the census never counts stowaways.
@@ -2905,22 +2916,32 @@ fn print_stats(world: &mut World) {
         >();
         query
             .iter(world)
-            .map(|(pos, health)| {
+            .map(|(pos, health, dormant_auto, dormant_touched, dormant_stalker)| {
                 pops += 1;
                 health_sum += health.current;
-                (pos.x, pos.y)
+                (
+                    pos.x,
+                    pos.y,
+                    dormant_auto || dormant_touched || dormant_stalker,
+                )
             })
             .collect()
     };
     // Item 77 Phase 2: pops standing in vacuum (below the suffocation
     // threshold), counted alongside the minimum-pressure scan.
+    // Item 101: `vacuum` stays the honest total; `vacuum_dormant`
+    // counts how many of those are dormant origin pops in stasis.
     let mut vacuum = 0u32;
+    let mut vacuum_dormant = 0u32;
     if let Some(grid) = world.get_resource::<scale::layer1::pressure::PressureGrid>() {
-        for (x, y) in &pop_tiles {
+        for (x, y, dormant) in &pop_tiles {
             let pressure = grid.get(*x, *y);
             min_pressure = min_pressure.min(pressure);
             if pressure < scale::layer1::physics::pressure::SUFFOCATION_PRESSURE_THRESHOLD {
                 vacuum += 1;
+                if *dormant {
+                    vacuum_dormant += 1;
+                }
             }
         }
     }
@@ -3207,7 +3228,7 @@ fn print_stats(world: &mut World) {
         .map_or((0, 0), |ledger| (ledger.total, ledger.unknown_count()));
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={}",
         tick,
         scenario,
         pops,
@@ -3282,6 +3303,7 @@ fn print_stats(world: &mut World) {
         stashes,
         travelers,
         vacuum,
+        vacuum_dormant,
         ls_unpowered,
         shelter,
         suits_pool,

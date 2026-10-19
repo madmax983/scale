@@ -557,7 +557,15 @@ pub fn pressure_damage_system(
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct ColonyAtmosphere {
     /// Pops currently on tiles below the suffocation threshold.
+    /// This is the honest total — dormant origin pops in stasis are
+    /// included (they *are* on vacuum tiles); see
+    /// `pops_in_vacuum_dormant` for the split (Item 101).
     pub pops_in_vacuum: usize,
+    /// Of `pops_in_vacuum`, how many are dormant origin pops in stasis
+    /// (Item 101: `DormantAutomaton` / `DormantTouched` /
+    /// `DormantStalker`). They are exempt from suffocation by design,
+    /// so this split keeps `vacuum=` honest without implying danger.
+    pub pops_in_vacuum_dormant: usize,
     /// Lowest pressure on any living pop's tile (1.0 when there are no pops).
     pub min_pop_pressure: f32,
     /// LifeSupport units whose power consumer is inactive.
@@ -584,10 +592,19 @@ impl ColonyAtmosphere {
 }
 
 /// Refresh the [`ColonyAtmosphere`] snapshot from the live world.
+#[allow(clippy::type_complexity)]
 pub fn update_colony_atmosphere_system(
     mut snapshot: ResMut<ColonyAtmosphere>,
     grid_opt: Option<Res<PressureGrid>>,
-    pops: Query<&crate::layer1::map::GridPosition, With<crate::layer1::pop::Pop>>,
+    pops: Query<
+        (
+            &crate::layer1::map::GridPosition,
+            Has<crate::layer1::culture::lawbound::DormantAutomaton>,
+            Has<crate::layer1::culture::bloomtouched::DormantTouched>,
+            Has<crate::layer1::culture::chronostalker::DormantStalker>,
+        ),
+        With<crate::layer1::pop::Pop>,
+    >,
     life_support: Query<(
         &crate::layer1::building::Building,
         Option<&crate::layer1::energy::PowerConsumer>,
@@ -597,12 +614,16 @@ pub fn update_colony_atmosphere_system(
 
     let mut min_pressure = 1.0f32;
     let mut in_vacuum = 0usize;
+    let mut in_vacuum_dormant = 0usize;
     if let Some(grid) = grid_opt.as_deref() {
-        for pos in pops.iter() {
+        for (pos, dormant_auto, dormant_touched, dormant_stalker) in pops.iter() {
             let pressure = grid.get(pos.x, pos.y);
             min_pressure = min_pressure.min(pressure);
             if pressure < SUFFOCATION_PRESSURE_THRESHOLD {
                 in_vacuum += 1;
+                if dormant_auto || dormant_touched || dormant_stalker {
+                    in_vacuum_dormant += 1;
+                }
             }
         }
     }
@@ -621,6 +642,7 @@ pub fn update_colony_atmosphere_system(
     }
     *snapshot = ColonyAtmosphere {
         pops_in_vacuum: in_vacuum,
+        pops_in_vacuum_dormant: in_vacuum_dormant,
         min_pop_pressure: if pops.is_empty() { 1.0 } else { min_pressure },
         unpowered_life_support: unpowered,
         life_support_total: total,
@@ -822,6 +844,14 @@ pub fn shelter_order_system(
             // The possessed pop is the player's own hands; the order
             // never overrides direct control.
             Without<crate::layer1::direct_link::Possessed>,
+            // Item 101: dormant origin pops wait in stasis at their
+            // sites — the order must not move them (their origin
+            // tether would fight the order 1:1). The dormant marker
+            // is removed on awakening, so awakened pops are ordered
+            // normally.
+            Without<crate::layer1::culture::lawbound::DormantAutomaton>,
+            Without<crate::layer1::culture::bloomtouched::DormantTouched>,
+            Without<crate::layer1::culture::chronostalker::DormantStalker>,
         ),
     >,
 ) {
@@ -1651,6 +1681,55 @@ mod tests {
     }
 
     #[test]
+    fn test_colony_atmosphere_snapshot_counts_vacuum_dormant() {
+        // Item 101: vacuum= stays the honest total; vacuum_dormant=
+        // counts only dormant-origin pops in stasis among them.
+        let mut app = suffocation_app();
+        app.init_resource::<ColonyAtmosphere>();
+        // Three dormant origins in vacuum.
+        app.world_mut().spawn((
+            Pop,
+            crate::layer1::pop::PopName("Vigil".to_string()),
+            Health { current: 100.0, max: 100.0, has_rust_lung: false },
+            GridPosition { x: 5, y: 5 },
+            crate::layer1::culture::lawbound::DormantAutomaton,
+        ));
+        app.world_mut().spawn((
+            Pop,
+            crate::layer1::pop::PopName("Quill".to_string()),
+            Health { current: 100.0, max: 100.0, has_rust_lung: false },
+            GridPosition { x: 6, y: 5 },
+            crate::layer1::culture::bloomtouched::DormantTouched,
+        ));
+        app.world_mut().spawn((
+            Pop,
+            crate::layer1::pop::PopName("Tock".to_string()),
+            Health { current: 100.0, max: 100.0, has_rust_lung: false },
+            GridPosition { x: 7, y: 5 },
+            crate::layer1::culture::chronostalker::DormantStalker,
+        ));
+        // Non-dormant control in vacuum: counts in total, not dormant.
+        spawn_named_pop(&mut app, 8, 5);
+        // Dormant pop on a pressurized tile: counts in neither.
+        app.world_mut().spawn((
+            Pop,
+            crate::layer1::pop::PopName("Vigil2".to_string()),
+            Health { current: 100.0, max: 100.0, has_rust_lung: false },
+            GridPosition { x: 9, y: 9 },
+            crate::layer1::culture::lawbound::DormantAutomaton,
+        ));
+        app.world_mut().resource_mut::<PressureGrid>().set(9, 9, 1.0);
+        app.add_systems(bevy::prelude::Update, update_colony_atmosphere_system);
+        app.update();
+        let snapshot = *app.world().resource::<ColonyAtmosphere>();
+        assert_eq!(snapshot.pops_in_vacuum, 4, "vacuum= is the honest total");
+        assert_eq!(
+            snapshot.pops_in_vacuum_dormant, 3,
+            "only dormant-origin pops in vacuum count as vacuum_dormant"
+        );
+    }
+
+    #[test]
     fn test_lifesupport_power_warning_fires_once_and_rearms() {
         use crate::layer1::chronicle::AddChronicleEvent;
         let mut app = bevy::prelude::App::new();
@@ -1819,6 +1898,65 @@ mod tests {
                 .get::<crate::layer1::execution::components::MovementTarget>(pop2)
                 .is_none(),
             "no shelter target while the order is lifted"
+        );
+    }
+
+    #[test]
+    fn test_shelter_order_skips_dormant_origin_pops() {
+        // Item 101: a dormant origin pop is in stasis at its site; a
+        // player ShelterOrder must not issue it a MovementTarget (the
+        // origin tether would fight the order 1:1). A non-dormant
+        // control pop in vacuum under the same order DOES move.
+        let mut app = suffocation_app();
+        app.init_resource::<ShelterOrder>();
+        app.world_mut().resource_mut::<ShelterOrder>().active = true;
+        app.world_mut().resource_mut::<PressureGrid>().set(8, 5, 1.0);
+        let vigil = app
+            .world_mut()
+            .spawn((
+                Pop,
+                crate::layer1::pop::PopName("Vigil".to_string()),
+                Health { current: 100.0, max: 100.0, has_rust_lung: false },
+                GridPosition { x: 5, y: 5 },
+                crate::layer1::culture::lawbound::DormantAutomaton,
+            ))
+            .id();
+        let quill = app
+            .world_mut()
+            .spawn((
+                Pop,
+                crate::layer1::pop::PopName("Quill".to_string()),
+                Health { current: 100.0, max: 100.0, has_rust_lung: false },
+                GridPosition { x: 5, y: 6 },
+                crate::layer1::culture::bloomtouched::DormantTouched,
+            ))
+            .id();
+        let tock = app
+            .world_mut()
+            .spawn((
+                Pop,
+                crate::layer1::pop::PopName("Tock".to_string()),
+                Health { current: 100.0, max: 100.0, has_rust_lung: false },
+                GridPosition { x: 5, y: 4 },
+                crate::layer1::culture::chronostalker::DormantStalker,
+            ))
+            .id();
+        let control = spawn_named_pop(&mut app, 6, 5);
+        app.add_systems(bevy::prelude::Update, shelter_order_system);
+        app.update();
+        for dormant in [vigil, quill, tock] {
+            assert!(
+                app.world()
+                    .get::<crate::layer1::execution::components::MovementTarget>(dormant)
+                    .is_none(),
+                "shelter order must not move a dormant origin pop in stasis"
+            );
+        }
+        assert!(
+            app.world()
+                .get::<crate::layer1::execution::components::MovementTarget>(control)
+                .is_some(),
+            "a non-dormant control pop in vacuum DOES receive a shelter target"
         );
     }
 
