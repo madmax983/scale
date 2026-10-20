@@ -500,6 +500,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "tethers" => print_tethers(world),
         "crossfire" => handle_crossfire_command(world, &parts),
         "crossfires" => print_crossfire(world),
+        "graffiti" => print_graffiti(world),
+        "tag" => handle_tag_command(world, &parts),
+        "scrub" => handle_scrub_command(world, &parts),
         "drones" => print_drones(world),
         "void" => handle_void_command(world, &parts),
         "harpoon" => handle_harpoon_command(world, &parts),
@@ -3261,8 +3264,11 @@ fn print_stats(world: &mut World) {
         impact_site_count(world)
     };
 
+    // Spec 357: active graffiti markings (full panel: `graffiti`).
+    let graffiti_total = scale::layer1::graffiti::graffiti_count(world);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={}",
         tick,
         scenario,
         pops,
@@ -3355,6 +3361,7 @@ fn print_stats(world: &mut World) {
         galaxy_topo,
         crossfire_total,
         impact_sites,
+        graffiti_total,
     );
 }
 
@@ -9343,6 +9350,127 @@ fn print_crossfire(world: &mut World) {
         "ORBITAL CROSSFIRE",
         &lines.join("\n"),
         Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Panel: graffiti & signage (Spec 357). `graffiti` — every active
+/// marking: tile, type, remaining decay, morale modifier.
+fn print_graffiti(world: &mut World) {
+    use scale::layer1::graffiti::GraffitiMap;
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(map) = world.get_resource::<GraffitiMap>() {
+        let mut entries: Vec<(&(i32, i32), &scale::layer1::graffiti::Graffiti)> =
+            map.markings.iter().collect();
+        entries.sort_by_key(|(pos, _)| **pos);
+        lines.push(format!("{} active marking(s).", entries.len()));
+        for ((x, y), g) in entries {
+            lines.push(format!(
+                "({}, {}): {} — decay {:.0}, modifier {:+.2}",
+                x,
+                y,
+                g.graffiti_type.name(),
+                g.decay,
+                g.modifier
+            ));
+        }
+    } else {
+        lines.push("0 active marking(s).".to_string());
+    }
+    lines.push(
+        "Seed one with `tag [x] [y] [type]`; clean one with `scrub [x] [y]`."
+            .to_string(),
+    );
+    print_dashboard_panel(
+        "GRAFFITI & SIGNAGE",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug seed: `tag [x] [y] [type]` (Spec 357) — place a marking now so
+/// the observation/scrub loop can be playtested deterministically.
+fn handle_tag_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::graffiti::{tag_graffiti, GraffitiMap, GraffitiType};
+    let (x, y) = match (parts.get(1), parts.get(2)) {
+        (Some(xs), Some(ys)) => match (xs.parse::<i32>(), ys.parse::<i32>()) {
+            (Ok(x), Ok(y)) => (x, y),
+            _ => (40, 25),
+        },
+        _ => (40, 25),
+    };
+    let ty = parts
+        .get(3)
+        .and_then(|s| GraffitiType::from_name(s))
+        .unwrap_or(GraffitiType::Vandalism);
+    world.init_resource::<GraffitiMap>();
+    {
+        let mut map = world.resource_mut::<GraffitiMap>();
+        tag_graffiti(&mut map, x, y, ty);
+    }
+    print_dashboard_panel(
+        "TAGGED",
+        &format!(
+            "A {} marking now covers ({}, {}).\nRun `tick` and watch nearby pops — or `graffiti` for the panel, `scrub {} {}` to clean it.",
+            ty.name(),
+            x,
+            y,
+            x,
+            y
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Counterplay: `scrub [x] [y]` (Spec 357 CleanGraffiti, adapted to the
+/// GraffitiMap resource model) — remove the marking at a tile.
+fn handle_scrub_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::graffiti::{graffiti_count, scrub_graffiti, GraffitiMap};
+    let (x, y) = match (parts.get(1), parts.get(2)) {
+        (Some(xs), Some(ys)) => match (xs.parse::<i32>(), ys.parse::<i32>()) {
+            (Ok(x), Ok(y)) => (x, y),
+            _ => {
+                print_dashboard_panel(
+                    "SCRUB",
+                    "Usage: scrub <x> <y>",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return;
+            }
+        },
+        _ => {
+            print_dashboard_panel(
+                "SCRUB",
+                "Usage: scrub <x> <y>",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        }
+    };
+    world.init_resource::<GraffitiMap>();
+    let removed = {
+        let mut map = world.resource_mut::<GraffitiMap>();
+        scrub_graffiti(&mut map, x, y)
+    };
+    let remaining = graffiti_count(world);
+    print_dashboard_panel(
+        "SCRUBBED",
+        &format!(
+            "{} ({}, {}). {} marking(s) remain — watch STATS graffiti=.",
+            if removed {
+                "Scrubbed the marking at"
+            } else {
+                "No marking at"
+            },
+            x,
+            y,
+            remaining
+        ),
+        Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
     );
 }

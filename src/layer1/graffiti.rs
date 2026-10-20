@@ -36,6 +36,72 @@ pub struct Graffiti {
     pub modifier: f32,
 }
 
+impl GraffitiType {
+    /// Short display name for panels and logs.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            GraffitiType::Vandalism => "Vandalism",
+            GraffitiType::Inspiration => "Inspiration",
+            GraffitiType::Mural => "Mural",
+            GraffitiType::Propaganda => "Propaganda",
+            GraffitiType::MemeticSigil => "MemeticSigil",
+        }
+    }
+
+    /// Parse a type name (case-insensitive) for debug seeding.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "vandalism" | "vandal" => Some(GraffitiType::Vandalism),
+            "inspiration" | "inspiring" => Some(GraffitiType::Inspiration),
+            "mural" | "art" => Some(GraffitiType::Mural),
+            "propaganda" | "poster" => Some(GraffitiType::Propaganda),
+            "memetic" | "sigil" | "memeticsigil" => Some(GraffitiType::MemeticSigil),
+            _ => None,
+        }
+    }
+
+    /// Canonical (decay, morale modifier) a fresh marking of this type gets.
+    #[must_use]
+    pub fn fresh_decay_modifier(&self) -> (f32, f32) {
+        match self {
+            GraffitiType::Vandalism => (1000.0, -0.05),
+            GraffitiType::Inspiration | GraffitiType::Propaganda | GraffitiType::Mural => {
+                (1000.0, 0.05)
+            }
+            GraffitiType::MemeticSigil => (1000.0, 0.0),
+        }
+    }
+}
+
+/// Spec 357: place (or replace) a marking at a tile with canonical tuning.
+/// Used by the headless `tag` debug seed; returns the inserted marking.
+pub fn tag_graffiti(map: &mut GraffitiMap, x: i32, y: i32, graffiti_type: GraffitiType) -> Graffiti {
+    let (decay, modifier) = graffiti_type.fresh_decay_modifier();
+    let graffiti = Graffiti {
+        graffiti_type,
+        decay,
+        modifier,
+    };
+    map.markings.insert((x, y), graffiti.clone());
+    graffiti
+}
+
+/// Spec 357 CleanGraffiti counterplay (adapted to the GraffitiMap resource
+/// model, §8): scrub the marking at a tile. Returns true if one was removed.
+pub fn scrub_graffiti(map: &mut GraffitiMap, x: i32, y: i32) -> bool {
+    map.markings.remove(&(x, y)).is_some()
+}
+
+/// Number of active markings in a live world (headless STATS `graffiti=`).
+#[must_use]
+pub fn graffiti_count(world: &mut World) -> usize {
+    world
+        .get_resource::<GraffitiMap>()
+        .map_or(0, |m| m.markings.len())
+}
+
 /// Resource storing all active graffiti on the map.
 /// ⚡ Bolt Optimization: Switched to bevy::utils::HashMap (AHash) to eliminate SipHash overhead for integer coordinate keys.
 #[derive(Resource, Default)]
@@ -500,3 +566,199 @@ mod additional_tests {
         assert_eq!(graffiti.unwrap().graffiti_type, GraffitiType::Propaganda);
     }
 }
+
+#[cfg(test)]
+mod spec357_tests {
+    //! Spec 357 acceptance, adapted to the existing Spec-144 GraffitiMap
+    //! resource model (§8 pattern): scrub counterplay + IP guard. The
+    //! live-schedule proofs live in `live_wiring_tests` below.
+    use super::*;
+
+    #[test]
+    fn test_scrub_removes_marking() {
+        let mut map = GraffitiMap::default();
+        tag_graffiti(&mut map, 5, 5, GraffitiType::Vandalism);
+        assert_eq!(map.markings.len(), 1);
+        assert!(scrub_graffiti(&mut map, 5, 5), "scrub must report removal");
+        assert!(map.markings.is_empty());
+        assert!(!scrub_graffiti(&mut map, 5, 5), "empty tile scrubs false");
+    }
+
+    #[test]
+    fn test_tag_seeds_canonical_marking() {
+        let mut map = GraffitiMap::default();
+        let g = tag_graffiti(&mut map, 1, 2, GraffitiType::Inspiration);
+        assert_eq!(g.modifier, 0.05);
+        assert_eq!(map.markings.get(&(1, 2)).unwrap().decay, 1000.0);
+        assert_eq!(GraffitiType::from_name("sigil"), Some(GraffitiType::MemeticSigil));
+        assert_eq!(GraffitiType::from_name("nope"), None);
+    }
+
+    #[test]
+    fn test_no_banned_ip_strings() {
+        // Original names only: no distinctive third-party IP terms in the
+        // public strings this spec adds.
+        let banned = ["banksy", "kilroy", "obey giant", "shepard fairey"];
+        let mut strings: Vec<String> = (0..5)
+            .map(|_| String::new())
+            .collect();
+        let types = [
+            GraffitiType::Vandalism,
+            GraffitiType::Inspiration,
+            GraffitiType::Mural,
+            GraffitiType::Propaganda,
+            GraffitiType::MemeticSigil,
+        ];
+        for (i, t) in types.iter().enumerate() {
+            strings[i] = t.name().to_ascii_lowercase();
+        }
+        for s in &strings {
+            for b in banned {
+                assert!(!s.contains(b), "banned IP string {b} in {s}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod live_wiring_tests {
+    //! Spec 357 live-wiring audit: these run the REAL production schedule
+    //! (`run_simulation_tick`) on a REAL world from `setup_world_with_config`
+    //! — real OccupiedTiles, real GraffitiMap insertion, real set ordering
+    //! (Economy observation -> Consumption -> Observation placement).
+    //! Test scaffolding pins the starter pops' needs/morale/positions each
+    //! tick so the 1%-per-tick placement roll gets enough trials; the
+    //! systems under audit are unmodified production code.
+    use super::*;
+    use crate::layer1::building::OccupiedTiles;
+    use crate::layer1::map::GridPosition;
+    use crate::layer1::morale::Morale;
+    use crate::layer1::needs::Needs;
+    use crate::layer1::pop::Pop;
+
+    fn pop_entities(world: &mut World) -> Vec<Entity> {
+        let mut q = world.query_filtered::<Entity, With<Pop>>();
+        q.iter(world).collect()
+    }
+
+    #[test]
+    fn live_stressed_pops_place_graffiti_in_full_sim() {
+        let mut world =
+            crate::setup::setup_world_with_config(crate::setup::SetupConfig::default());
+        let occupied: Vec<(i32, i32)> = world
+            .resource::<OccupiedTiles>()
+            .0
+            .iter()
+            .copied()
+            .collect();
+        assert!(!occupied.is_empty(), "setup world must have buildings");
+        let pops = pop_entities(&mut world);
+        assert!(!pops.is_empty(), "setup world must have pops");
+
+        let mut placed = false;
+        for tick in 0..400 {
+            // Pin: every pop miserable + parked beside an occupied tile.
+            for (i, e) in pops.iter().enumerate() {
+                let (ox, oy) = occupied[i % occupied.len()];
+                if let Some(mut pos) = world.get_mut::<GridPosition>(*e) {
+                    pos.x = ox;
+                    pos.y = oy - 1;
+                }
+                if let Some(mut needs) = world.get_mut::<Needs>(*e) {
+                    needs.hunger = 0.1;
+                    needs.rest = 0.1;
+                    needs.leisure = 0.1;
+                    needs.hygiene = 0.1;
+                }
+                if let Some(mut morale) = world.get_mut::<Morale>(*e) {
+                    morale.value = 0.1;
+                    // Needs recover during Execution (pops eat/rest), so
+                    // pin misery through the game's own mood-modifier
+                    // channel — the morale cache sums modifiers, holding
+                    // value at ~0 for the Observation-phase placement roll.
+                    morale.modifiers.push(
+                        crate::layer1::morale::MoodModifier {
+                            label: "Audit Misery".to_string(),
+                            value: -1.0,
+                            duration: 3,
+                        },
+                    );
+                }
+            }
+            crate::simulation::run_simulation_tick(&mut world);
+            // Other live systems can also write markings (memetic arrival
+            // sigils, protest/binge lanes); the audit target is the
+            // morale-driven Vandalism the pinned pops must produce.
+            if world
+                .resource::<GraffitiMap>()
+                .markings
+                .values()
+                .any(|g| g.graffiti_type == GraffitiType::Vandalism)
+            {
+                placed = true;
+                println!("graffiti placed live at tick {tick}");
+                break;
+            }
+        }
+        assert!(
+            placed,
+            "a stressed pop adjacent to a building must place graffiti in the live schedule"
+        );
+    }
+
+    #[test]
+    fn live_observation_applies_mood_modifier_in_full_sim() {
+        let mut world =
+            crate::setup::setup_world_with_config(crate::setup::SetupConfig::default());
+        let pops = pop_entities(&mut world);
+        let anchor = world.get::<GridPosition>(pops[0]).copied().unwrap();
+        // Blanket the anchor's neighbourhood so wherever the pop steps
+        // during Execution it stays cardinally adjacent to a marking.
+        {
+            let mut map = world.resource_mut::<GraffitiMap>();
+            for dx in -2..=2 {
+                for dy in -2..=2 {
+                    tag_graffiti(
+                        &mut map,
+                        anchor.x + dx,
+                        anchor.y + dy,
+                        GraffitiType::Vandalism,
+                    );
+                }
+            }
+        }
+        let mut observed = false;
+        for _ in 0..10 {
+            crate::simulation::run_simulation_tick(&mut world);
+            let mut q = world.query::<&Morale>();
+            observed = q
+                .iter(&world)
+                .any(|m| m.modifiers.iter().any(|md| md.label == "Saw Vandalism"));
+            if observed {
+                break;
+            }
+        }
+        assert!(
+            observed,
+            "a pop near vandalism must gain the 'Saw Vandalism' mood modifier in the live schedule"
+        );
+    }
+
+    #[test]
+    fn live_scrub_empties_map_in_full_sim() {
+        let mut world =
+            crate::setup::setup_world_with_config(crate::setup::SetupConfig::default());
+        {
+            let mut map = world.resource_mut::<GraffitiMap>();
+            tag_graffiti(&mut map, 3, 3, GraffitiType::Propaganda);
+        }
+        assert_eq!(graffiti_count(&mut world), 1);
+        let removed = {
+            let mut map = world.resource_mut::<GraffitiMap>();
+            scrub_graffiti(&mut map, 3, 3)
+        };
+        assert!(removed);
+        assert_eq!(graffiti_count(&mut world), 0);
+    }
+}
+
