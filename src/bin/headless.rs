@@ -498,6 +498,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "shadow" => handle_shadow_command(world, &parts),
         "tether" => handle_tether_command(world, &parts),
         "tethers" => print_tethers(world),
+        "crossfire" => handle_crossfire_command(world, &parts),
+        "crossfires" => print_crossfire(world),
         "drones" => print_drones(world),
         "void" => handle_void_command(world, &parts),
         "harpoon" => handle_harpoon_command(world, &parts),
@@ -3248,8 +3250,19 @@ fn print_stats(world: &mut World) {
     // Spec 354: total industrial waste burden (full panel: `waste`).
     let waste_total = scale::layer1::crafting::byproducts::waste_total(world);
 
+    // Spec 356: orbital crossfire strikes resolved + standing impact sites
+    // (full panel: `crossfires`).
+    let crossfire_total = {
+        use scale::layer1::environment::orbital_crossfire::crossfire_stats_label;
+        crossfire_stats_label(world)
+    };
+    let impact_sites = {
+        use scale::layer1::environment::orbital_crossfire::impact_site_count;
+        impact_site_count(world)
+    };
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={}",
         tick,
         scenario,
         pops,
@@ -3340,6 +3353,8 @@ fn print_stats(world: &mut World) {
         galaxy_systems,
         galaxy_lanes,
         galaxy_topo,
+        crossfire_total,
+        impact_sites,
     );
 }
 
@@ -9213,6 +9228,120 @@ fn print_tethers(world: &mut World) {
         &format!(
             "{count} tether arrays standing, total strength {strength:.1}.\nDeorbit: {status}."
         ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: orbital crossfire strike (Spec 356). `crossfire [x] [y]` —
+/// drop a stray orbital shot on the colony now. Target defaults to the
+/// colony heart. The strike resolves on the next `tick` through the real
+/// impact system: crater, building damage, harvestable scrap, chronicle.
+fn handle_crossfire_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::environment::orbital_crossfire::trigger_crossfire;
+    use scale::layer1::map::GridPosition;
+
+    let target = match (parts.get(1), parts.get(2)) {
+        (Some(xs), Some(ys)) => match (xs.parse::<i32>(), ys.parse::<i32>()) {
+            (Ok(x), Ok(y)) => GridPosition { x, y },
+            _ => colony_heart_for_crossfire(world),
+        },
+        _ => colony_heart_for_crossfire(world),
+    };
+    world.init_resource::<scale::layer1::environment::orbital_crossfire::CrossfireDirector>();
+    world.init_resource::<scale::layer1::environment::orbital_crossfire::CrossfireStats>();
+    trigger_crossfire(world, target);
+    print_dashboard_panel(
+        "ORBITAL CROSSFIRE INBOUND",
+        &format!(
+            "A stray shot from the fighting above is falling toward ({}, {})!\nRun `tick` to resolve it — crater, damage, and mineable wreckage. Watch STATS crossfire= / impact_sites= and the chronicle.",
+            target.x, target.y
+        ),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn colony_heart_for_crossfire(world: &mut World) -> scale::layer1::map::GridPosition {
+    use scale::layer1::map::GridPosition;
+    use scale::layer1::pop::Pop;
+    let mut query = world.query_filtered::<&GridPosition, With<Pop>>();
+    let positions: Vec<GridPosition> = query.iter(world).copied().collect();
+    if positions.is_empty() {
+        return GridPosition { x: 40, y: 25 };
+    }
+    let (sx, sy) = positions
+        .iter()
+        .fold((0i64, 0i64), |(x, y), p| (x + p.x as i64, y + p.y as i64));
+    #[allow(clippy::cast_possible_truncation)]
+    GridPosition {
+        x: (sx / positions.len() as i64) as i32,
+        y: (sy / positions.len() as i64) as i32,
+    }
+}
+
+/// Panel: crossfire ledger (Spec 356). `crossfires` — strike totals,
+/// last strike, director tuning, and every standing impact site.
+fn print_crossfire(world: &mut World) {
+    use scale::layer1::environment::orbital_crossfire::{
+        CrossfireDirector, CrossfireStats, ImpactSite,
+    };
+    use scale::layer1::map::GridPosition;
+
+    world.init_resource::<CrossfireStats>();
+    world.init_resource::<CrossfireDirector>();
+    let (total, destroyed, last) = {
+        let stats = world.resource::<CrossfireStats>();
+        (
+            stats.total_strikes,
+            stats.buildings_destroyed,
+            stats
+                .last_target
+                .map(|t| format!("({}, {}) at tick {}", t.x, t.y, stats.last_tick))
+                .unwrap_or_else(|| "none yet".to_string()),
+        )
+    };
+    let (interval, base_chance, debris) = {
+        let director = world.resource::<CrossfireDirector>();
+        let debris = world
+            .get_resource::<scale::layer2::debris::OrbitalDebris>()
+            .map_or(0.0, |d| d.0);
+        (
+            director.check_interval_ticks,
+            director.base_chance,
+            debris,
+        )
+    };
+    let chance = {
+        let director = world.resource::<CrossfireDirector>();
+        scale::layer1::environment::orbital_crossfire::crossfire_chance(director, debris)
+    };
+    let mut lines = vec![
+        format!(
+            "{total} strike(s) resolved, {destroyed} building(s) destroyed. Last strike: {last}."
+        ),
+        format!(
+            "Director: roll every {interval} ticks, chance {chance:.3} (base {base_chance:.2} + debris {debris:.2}). Strikes also fall organically — a dirtier sky is a more dangerous sky."
+        ),
+    ];
+    let mut query = world.query::<(&ImpactSite, &GridPosition)>();
+    let mut sites: Vec<String> = query
+        .iter(world)
+        .map(|(site, pos)| {
+            format!(
+                "Impact site at ({}, {}): {:.0} scrap (difficulty {:.1}) — designate Mine to harvest.",
+                pos.x, pos.y, site.scrap_amount, site.harvest_difficulty
+            )
+        })
+        .collect();
+    if sites.is_empty() {
+        lines.push("No unharvested impact sites. `crossfire [x] [y]` drops one.".to_string());
+    } else {
+        lines.append(&mut sites);
+    }
+    print_dashboard_panel(
+        "ORBITAL CROSSFIRE",
+        &lines.join("\n"),
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );

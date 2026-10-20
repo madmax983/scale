@@ -84,6 +84,14 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Environment),
     );
+    // Spec 356 Orbital Crossfire: the organic director spawns OrbitalEvent
+    // strikes (debris-scaled chance); impact_system above resolves them.
+    // Own block to stay clear of the tuple arity limit. A strike spawned
+    // this tick resolves this tick or the next — either is live.
+    schedule.add_systems(
+        (crate::layer1::environment::orbital_crossfire::crossfire_director_system,)
+            .in_set(Layer1SystemSet::Environment),
+    );
     schedule.add_systems(
         (
             crate::layer1::environment::impact::process_impact_countdown_system,
