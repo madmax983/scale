@@ -25,6 +25,7 @@
 //!     *   Worker gains experience.
 
 use crate::layer1::building::{Building, BuildingType};
+use crate::layer1::crafting::byproducts::{bin_chokes, capture_byproducts, CraftingBuilding, Inventory};
 use crate::layer1::eureka::check_for_eureka_world;
 use crate::layer1::factions::{FactionMember, FactionState, Factions};
 use crate::layer1::law::aesthetic_edict::Halted;
@@ -248,7 +249,17 @@ fn process_active_refining_buildings(
     let mut finished_jobs = Vec::new();
     let mut xp_gains = Vec::new();
 
-    let buildings: Vec<(Entity, BuildingType, GridPosition, f32, f32, bool, f32)> = world
+    let buildings: Vec<(
+        Entity,
+        BuildingType,
+        GridPosition,
+        f32,
+        f32,
+        bool,
+        f32,
+        Option<CraftingBuilding>,
+        Option<Inventory>,
+    )> = world
         .query_filtered::<(
             Entity,
             &Building,
@@ -257,9 +268,11 @@ fn process_active_refining_buildings(
             Option<&crate::layer1::energy::PowerConsumer>,
             Option<&crate::layer1::rituals::Quirk>,
             Option<&crate::layer1::prototyping::Prototype>,
+            Option<&CraftingBuilding>,
+            Option<&Inventory>,
         ), Without<Halted>>()
         .iter(world)
-        .map(|(e, b, p, prog, power, quirk, prototype)| {
+        .map(|(e, b, p, prog, power, quirk, prototype, crafting, inventory)| {
             let active = power.is_none_or(|c| c.active);
             let quirk_stops = quirk.is_some_and(crate::layer1::rituals::Quirk::stops_production);
             let efficiency_mod = prototype.map_or(1.0, |pr| pr.efficiency_modifier);
@@ -271,6 +284,8 @@ fn process_active_refining_buildings(
                 prog.max,
                 active && !quirk_stops,
                 efficiency_mod,
+                crafting.cloned(),
+                inventory.cloned(),
             )
         })
         .collect();
@@ -283,6 +298,8 @@ fn process_active_refining_buildings(
         _max_prog,
         is_active,
         efficiency_mod,
+        crafting,
+        inventory,
     ) in buildings
     {
         if !is_active {
@@ -320,9 +337,20 @@ fn process_active_refining_buildings(
             continue;
         }
 
+        // Item 108 (Spec 354 live wiring): a waste-choked byproduct bin
+        // blocks completion — the building stalls at full progress until
+        // its bin is dumped.
+        let bin_choked = match (&crafting, &inventory) {
+            (Some(crafting), Some(inventory)) => bin_chokes(crafting, inventory),
+            _ => false,
+        };
         if let Some(mut progress) = world.get_mut::<RefiningProgress>(building_entity) {
             progress.current += 1.0 * efficiency * efficiency_mod;
             if progress.is_complete() {
+                if bin_choked {
+                    progress.current = progress.max;
+                    continue;
+                }
                 finished_jobs.push((building_entity, input_cost, output_gain, pos, waste_chance));
 
                 // Rhythm update
@@ -383,16 +411,27 @@ fn apply_finished_refining_jobs(
             });
 
         if success {
-            // Spawn Waste
+            // Spawn Waste (Spec 354, Item 108 live wiring): a building
+            // with a byproduct bin captures its byproduct in the bin;
+            // bin-less buildings keep the historical ground spill.
             let mut rng = rand::thread_rng();
             if rng.gen_bool(waste_chance) {
-                world.spawn((
-                    ResourceItem {
-                        resource_type: ResourceType::Waste,
-                        amount: 1.0,
-                    },
-                    pos,
-                ));
+                let captured = match (
+                    world.get::<CraftingBuilding>(entity).cloned(),
+                    world.get_mut::<Inventory>(entity),
+                ) {
+                    (Some(crafting), Some(mut inv)) => capture_byproducts(&crafting, &mut inv),
+                    _ => false,
+                };
+                if !captured {
+                    world.spawn((
+                        ResourceItem {
+                            resource_type: ResourceType::Waste,
+                            amount: 1.0,
+                        },
+                        pos,
+                    ));
+                }
             }
 
             // Paperwork Physicality: Spawn BuildingPermit as item instead of adding to global storage

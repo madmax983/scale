@@ -51,7 +51,7 @@ See `design/IDEAS.md` for unspecced concepts.
 - [ ] `345` Planetary Quirks — `specs/345-planetary-quirks.md`
 - [ ] `351` The Long-Haulers — `specs/351-the-long-haulers.md`
 - [ ] `353` Alien Domestication — `specs/353-alien-domestication.md`
-- [ ] `354` Industrial Byproducts — `specs/354-industrial-byproducts.md`
+- [x] `354` Industrial Byproducts — `specs/354-industrial-byproducts.md` — live wiring landed (Item 108): the pre-existing module was dead (no live building carried it); bins now attach at placement, refining completions generate Waste byproducts, full bins choke production, dumping drains to ground items via the real BeautyGrid
 - [ ] `356` Orbital Crossfire — `specs/356-orbital-crossfire.md`
 - [ ] `357` Graffiti & Signage — `specs/357-graffiti-and-signage.md`
 - [ ] `359` Shift Work — `specs/359-shift-work.md`

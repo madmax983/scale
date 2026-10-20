@@ -518,6 +518,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "informant" => handle_informant_command(world, &parts),
         "transplant" => handle_transplant_command(world, &parts),
         "organs" => print_organ_ledger(world),
+        "waste" | "byproducts" => print_waste_report(world),
+        "dump_waste" => handle_dump_waste_command(world, &parts),
         "heritage" => print_heritage(world),
         "curio" => print_curio_ledger(world),
         "rumors" => print_rumors(world),
@@ -3243,8 +3245,11 @@ fn print_stats(world: &mut World) {
         .get_resource::<scale::layer3::map::GalaxyTopology>()
         .map_or(0, |t| t.revision);
 
+    // Spec 354: total industrial waste burden (full panel: `waste`).
+    let waste_total = scale::layer1::crafting::byproducts::waste_total(world);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={}",
         tick,
         scenario,
         pops,
@@ -3282,6 +3287,7 @@ fn print_stats(world: &mut World) {
         artifacts,
         scions,
         resources.organs,
+        waste_total,
         martyrdom,
         feral,
         fringe,
@@ -6548,6 +6554,16 @@ fn print_help() {
                 ),
                 ("organs", "", "Show organ stock, price, and horror (Spec 270)"),
                 (
+                    "waste",
+                    "",
+                    "Show industrial byproducts: stored, ground, and binned waste (Spec 354)",
+                ),
+                (
+                    "dump_waste <x> <y> [n]",
+                    "",
+                    "Dump n binned waste at a tile, degrading its beauty (Spec 354)",
+                ),
+                (
                     "heritage",
                     "",
                     "Heritage report: era, stamped buildings, venerable sites (Spec 332)",
@@ -8095,6 +8111,55 @@ fn handle_transplant_command(world: &mut World, parts: &[&str]) {
 }
 
 /// Show organ stock, market price, and active horror (Spec 270).
+/// Industrial byproducts panel (Spec 354): stored / ground / binned waste.
+fn print_waste_report(world: &mut World) {
+    let summary = scale::layer1::crafting::byproducts::waste_summary(world);
+    let body = scale::layer1::crafting::byproducts::format_waste_summary(&summary);
+    print_dashboard_panel(
+        "INDUSTRIAL BYPRODUCTS",
+        &body,
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Dump a building's byproduct bin onto its tile (Spec 354):
+/// `dump_waste <x> <y> [amount]` (default: the whole bin).
+fn handle_dump_waste_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::crafting::byproducts::{DumpWasteAction, Inventory};
+    use scale::layer1::economy::resources::ResourceType;
+    use scale::layer1::GridPosition;
+    let (Ok(x), Ok(y)) = (
+        parts.get(1).map_or("", |v| *v).parse::<i32>(),
+        parts.get(2).map_or("", |v| *v).parse::<i32>(),
+    ) else {
+        println!("Usage: dump_waste <x> <y> [amount]");
+        return;
+    };
+    let binned = world
+        .query::<(&GridPosition, &Inventory)>()
+        .iter(world)
+        .find(|(p, _)| p.x == x && p.y == y)
+        .map(|(_, inv)| inv.get_amount(&ResourceType::Waste));
+    let Some(binned) = binned else {
+        println!("No byproduct bin at ({x}, {y}) — dump_waste targets a refining building.");
+        return;
+    };
+    if binned == 0 {
+        println!("The byproduct bin at ({x}, {y}) is already empty.");
+        return;
+    }
+    let amount = parts
+        .get(3)
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(binned)
+        .min(binned);
+    world.spawn(DumpWasteAction { x, y, amount });
+    println!(
+        "Dumping {amount} waste from the bin at ({x}, {y}) — it lands on the ground there and drags the tile's beauty down until hauled. Run `tick` to process it."
+    );
+}
+
 fn print_organ_ledger(world: &mut World) {
     use scale::layer1::economy::organ_market::{ORGAN_PRICE_CREDITS, OrganMarketConfig};
     use scale::layer1::economy::resources::{ColonyResources, ResourceType};

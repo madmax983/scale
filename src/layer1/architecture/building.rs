@@ -1737,6 +1737,23 @@ fn configure_advanced_refiners(entity: &mut EntityWorldMut, building_type: Build
 fn configure_refining_buildings(entity: &mut EntityWorldMut, building_type: BuildingType) {
     configure_basic_refiners(entity, building_type);
     configure_advanced_refiners(entity, building_type);
+    // Spec 354 (Item 108 live wiring): waste-generating refiners carry a
+    // byproduct bin from placement, so the live refining path generates
+    // real byproducts instead of the module sitting dead in tests.
+    if let Some(recipe) =
+        crate::layer1::crafting::byproducts::recipe_for_building_type(building_type)
+    {
+        entity.insert((
+            crate::layer1::crafting::byproducts::CraftingBuilding {
+                current_recipe: Some(recipe),
+                work_progress: 0.0,
+            },
+            crate::layer1::crafting::byproducts::Inventory {
+                capacity: crate::layer1::crafting::byproducts::BYPRODUCT_BIN_CAPACITY,
+                items: vec![],
+            },
+        ));
+    }
 }
 
 fn configure_production(entity: &mut EntityWorldMut, building_type: BuildingType) {
