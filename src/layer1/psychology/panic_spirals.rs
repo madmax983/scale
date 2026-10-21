@@ -281,41 +281,36 @@ fn pressure_field(world: &mut World) -> Option<PressureField> {
     // Tiles a pop cannot step onto because a building blocks them
     // (public access points — airlocks, gates — stay passable, matching
     // `is_tile_walkable_data`).
-    let mut blocked: HashSet<(i32, i32)> = HashSet::new();
-    {
-        let mut q =
-            world.query::<(&GridPosition, &Building, Option<&AccessControl>)>();
-        for (pos, building, access) in q.iter(world) {
-            let public = matches!(access, Some(a) if a.mode == AccessMode::Public);
-            if building.building_type.is_obstacle() && !public {
-                blocked.insert((pos.x, pos.y));
-            }
-        }
-    }
-    let terrain_walkable: Vec<bool> = {
+    let mut walkable_tiles: Vec<bool> = {
         let terrain = world.get_resource::<TerrainGrid>();
         let mut v = vec![true; width * height];
         if let Some(t) = terrain {
             for y in 0..height {
                 for x in 0..width {
-                    v[y * width + x] =
-                        t.get(x, y).is_some_and(TerrainType::is_walkable);
+                    v[y * width + x] = t.get(x, y).is_some_and(TerrainType::is_walkable);
                 }
             }
         }
         v
     };
-    let walkable = |x: i32, y: i32, blocked: &HashSet<(i32, i32)>, tw: &[bool]| -> bool {
-        if x < 0 || y < 0 {
-            return false;
+    {
+        let mut q = world.query::<(&GridPosition, &Building, Option<&AccessControl>)>();
+        for (pos, building, access) in q.iter(world) {
+            let public = matches!(access, Some(a) if a.mode == AccessMode::Public);
+            if building.building_type.is_obstacle() && !public {
+                if let (Ok(ux), Ok(uy)) = (usize::try_from(pos.x), usize::try_from(pos.y)) {
+                    if ux < width && uy < height {
+                        walkable_tiles[uy * width + ux] = false;
+                    }
+                }
+            }
         }
+    }
+    let walkable = |x: i32, y: i32, tw: &[bool]| -> bool {
         let (Ok(ux), Ok(uy)) = (usize::try_from(x), usize::try_from(y)) else {
             return false;
         };
-        if ux >= width || uy >= height || blocked.contains(&(x, y)) {
-            return false;
-        }
-        tw.get(uy * width + ux).copied().unwrap_or(false)
+        ux < width && uy < height && tw[uy * width + ux]
     };
 
     const DIRS: [(i32, i32); 8] = [
@@ -334,7 +329,7 @@ fn pressure_field(world: &mut World) -> Option<PressureField> {
         let d = dist[(y as usize) * width + (x as usize)];
         for (dx, dy) in DIRS {
             let (nx, ny) = (x + dx, y + dy);
-            if !walkable(nx, ny, &blocked, &terrain_walkable) {
+            if !walkable(nx, ny, &walkable_tiles) {
                 continue;
             }
             let nidx = (ny as usize) * width + (nx as usize);
