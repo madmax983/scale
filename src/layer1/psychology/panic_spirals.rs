@@ -30,6 +30,7 @@ use crate::layer1::building::Building;
 use crate::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
 use crate::layer1::culture::funeral::Corpse;
 use crate::layer1::defense::is_walkable;
+use crate::layer1::designation::{Designation, DesignationType};
 use crate::layer1::economy::items::CarryingItem;
 use crate::layer1::eva_suit::{EvaSuit, EVA_AIR_LOW_FRACTION};
 use crate::layer1::execution::components::{AtTarget, MovementTarget};
@@ -639,7 +640,13 @@ pub fn panic_flee_system(world: &mut World) {
         (1, 1),
     ];
     let panickers: Vec<(Entity, GridPosition, GridPosition)> = {
-        let mut q = world.query_filtered::<(Entity, &GridPosition, &Panic), With<Pop>>();
+        // Item 110 Gap 2: a pop answering a Douse designation
+        // ([`FireBrigade`]) does not flee — brigade duty overrides panic
+        // flight for that pop only. Everyone else flees exactly as before.
+        let mut q = world.query_filtered::<
+            (Entity, &GridPosition, &Panic),
+            (With<Pop>, Without<FireBrigade>),
+        >();
         q.iter(world)
             .map(|(e, pos, panic)| (e, *pos, panic.fled_from))
             .collect()
@@ -792,6 +799,208 @@ pub fn vacuum_return_system(world: &mut World) {
             world.entity_mut(e).remove::<MovementTarget>();
             world.entity_mut(e).remove::<AtTarget>();
             if let Some(mut grid_pos) = world.get_mut::<GridPosition>(e) {
+                grid_pos.x = nx;
+                grid_pos.y = ny;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Item 110 Gap 2: the fire brigade — Douse stays executable under panic
+// ---------------------------------------------------------------------------
+//
+// Balance forensics 2026-10-20 (l2r2k_11): the one fire counterplay verb,
+// the Douse designation, is executed through utility AI — and utility AI
+// excludes panicked pops (`Without<Panic>` in `collect_pop_data`). A fire
+// panics every pop within radius 6 for 60 ticks, longer than the whole
+// observed cascade (~40 ticks): at the first sample after ignition 26/27
+// pops were panicking and nobody could douse. The brigade is the minimal
+// seam that fixes exactly that, in the style of [`vacuum_return_system`]
+// (a stateless world-system drive that bypasses utility AI for one
+// survival verb):
+//
+// - A Douse designation on a burning tile drafts the nearest eligible
+//   living pop as its brigadier — panicked or not. Panic itself is
+//   untouched: radius, duration, spread, and the utility-AI exclusion
+//   all stay exactly as specced (1371); the brigadier still carries
+//   their [`Panic`] and still calms on the normal timer.
+// - The brigadier is marked [`FireBrigade`]: `panic_flee_system` skips
+//   them (duty overrides flight for that one pop), and this system steps
+//   them one walkable tile per tick toward the fire — never onto a
+//   burning tile — and douses from adjacency (Chebyshev <= 1), the same
+//   effect as `execution::general_work::handle_douse` (every Fire on the
+//   tile despawned, designation completed).
+// - Undesignated fires draft nobody: without a keeper's Douse order the
+//   colony's panic behavior is unchanged. Non-panicked pops were never
+//   blocked (utility AI already routes them to Douse designations);
+//   this system simply guarantees the designation stays executable when
+//   the only nearby pops are the panicking ones.
+// - Markers are recomputed from scratch every tick (nearest-pop draft),
+//   so a completed designation, an extinguished fire, or a dead
+//   brigadier never leaves a stale exemption behind.
+
+/// Marker: this pop is answering a Douse designation (Item 110 Gap 2).
+///
+/// Inserted and removed only by [`fire_brigade_system`], recomputed every
+/// tick. While held, `panic_flee_system` skips the pop and the brigade
+/// system walks them toward their designated fire.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct FireBrigade;
+
+/// Is this pop eligible for brigade draft? Mirrors the exemption list of
+/// [`vacuum_return_system`] (possessed, dormant origin pops, the phased
+/// stalker, cryo) plus the dead, the healthless-dead, and hidden
+/// stowaways — a survival drive never drafts pops another system owns.
+fn brigade_eligible(world: &World, pop: Entity) -> bool {
+    if world.get::<Dead>(pop).is_some() {
+        return false;
+    }
+    if world.get::<Health>(pop).is_some_and(|h| h.current <= 0.0) {
+        return false;
+    }
+    world.get::<crate::layer1::direct_link::Possessed>(pop).is_none()
+        && world
+            .get::<crate::layer1::culture::lawbound::DormantAutomaton>(pop)
+            .is_none()
+        && world
+            .get::<crate::layer1::culture::bloomtouched::DormantTouched>(pop)
+            .is_none()
+        && world
+            .get::<crate::layer1::culture::chronostalker::Chronostalker>(pop)
+            .is_none()
+        && world
+            .get::<crate::layer1::culture::chronostalker::DormantStalker>(pop)
+            .is_none()
+        && world
+            .get::<crate::layer1::culture::chronostalker::Phased>(pop)
+            .is_none()
+        && world.get::<crate::layer1::cryo::CryoStasis>(pop).is_none()
+        && world.get::<Stowaway>(pop).is_none()
+}
+
+/// Douse every Fire on `pos` for brigadier `pop`, completing the
+/// designation — the same effect as the utility-AI work path
+/// (`handle_douse`), reached here without utility AI.
+fn brigade_douse(world: &mut World, pop: Entity, designation: Entity, pos: GridPosition) {
+    let fires: Vec<Entity> = {
+        let mut q = world.query::<(Entity, &GridPosition, &Fire)>();
+        q.iter(world)
+            .filter(|(_, fire_pos, _)| **fire_pos == pos)
+            .map(|(entity, _, _)| entity)
+            .collect()
+    };
+    for fire in fires {
+        world.despawn(fire);
+    }
+    if world.get_entity(designation).is_ok() {
+        world.despawn(designation);
+    }
+    if let Some(mut log) = world.get_resource_mut::<crate::shared::log::MessageLog>() {
+        log.add(format!("Doused the fire at ({}, {})", pos.x, pos.y));
+    }
+    world.entity_mut(pop).remove::<FireBrigade>();
+}
+
+/// Fire brigade: Douse designations draft their nearest eligible pop —
+/// panicked or not — and walk them to the fire (Item 110 Gap 2).
+pub fn fire_brigade_system(world: &mut World) {
+    const DIRS: [(i32, i32); 8] = [
+        (-1, -1),
+        (-1, 0),
+        (-1, 1),
+        (0, -1),
+        (0, 1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
+    ];
+
+    // Burning tiles right now.
+    let fire_tiles: HashSet<(i32, i32)> = {
+        let mut q = world.query_filtered::<&GridPosition, With<Fire>>();
+        q.iter(world).map(|p| (p.x, p.y)).collect()
+    };
+
+    // Douse duties: designations sitting on a burning tile.
+    let mut duties: Vec<(Entity, GridPosition)> = {
+        let mut q = world.query::<(Entity, &GridPosition, &Designation)>();
+        q.iter(world)
+            .filter(|(_, _, des)| des.designation_type == DesignationType::Douse)
+            .filter(|(_, pos, _)| fire_tiles.contains(&(pos.x, pos.y)))
+            .map(|(e, pos, _)| (e, *pos))
+            .collect()
+    };
+    duties.sort_by_key(|(e, _)| e.index());
+
+    // Candidate workforce: every living pop, panicked included — that
+    // inclusion is the entire point of the brigade.
+    let mut pops: Vec<(Entity, GridPosition)> = {
+        let mut q = world.query_filtered::<(Entity, &GridPosition), With<Pop>>();
+        q.iter(world).map(|(e, p)| (e, *p)).collect()
+    };
+    pops.retain(|(e, _)| brigade_eligible(world, *e));
+    pops.sort_by_key(|(e, _)| e.index());
+
+    // Draft: nearest eligible pop per duty, one duty per pop.
+    let mut assigned: HashMap<Entity, (Entity, GridPosition)> = HashMap::new();
+    let mut taken: HashSet<Entity> = HashSet::new();
+    for (designation, duty_pos) in &duties {
+        let nearest = pops
+            .iter()
+            .filter(|(e, _)| !taken.contains(e))
+            .min_by_key(|(_, pos)| (pos.distance_chebyshev(*duty_pos), pos.x, pos.y));
+        if let Some((pop, _)) = nearest {
+            assigned.insert(*pop, (*designation, *duty_pos));
+            taken.insert(*pop);
+        }
+    }
+
+    // Refresh markers from scratch: holders not drafted this tick lose
+    // the marker (their panic flight resumes); draftees gain it.
+    let holders: Vec<Entity> = {
+        let mut q = world.query_filtered::<Entity, With<FireBrigade>>();
+        q.iter(world).collect()
+    };
+    for holder in holders {
+        if !assigned.contains_key(&holder) {
+            world.entity_mut(holder).remove::<FireBrigade>();
+        }
+    }
+    for pop in assigned.keys() {
+        world.entity_mut(*pop).insert(FireBrigade);
+    }
+
+    // Act: douse from adjacency, otherwise step toward the fire.
+    for (pop, (designation, duty_pos)) in &assigned {
+        let Some(pos) = world.get::<GridPosition>(*pop).copied() else {
+            continue;
+        };
+        if pos.distance_chebyshev(*duty_pos) <= 1 {
+            brigade_douse(world, *pop, *designation, *duty_pos);
+            continue;
+        }
+        // One walkable step that strictly closes the distance, never
+        // onto a burning tile (the brigadier works from adjacency —
+        // stepping into 5 HP/tick fire to reach it would be a death
+        // sentence, not counterplay).
+        let current = pos.distance_chebyshev(*duty_pos);
+        let mut best: Option<(i32, i32, u32)> = None;
+        for (dx, dy) in DIRS {
+            let (nx, ny) = (pos.x + dx, pos.y + dy);
+            if fire_tiles.contains(&(nx, ny)) {
+                continue;
+            }
+            let d = GridPosition { x: nx, y: ny }.distance_chebyshev(*duty_pos);
+            if d >= current || !is_walkable(world, nx, ny) {
+                continue;
+            }
+            if best.is_none_or(|(_, _, bd)| d < bd) {
+                best = Some((nx, ny, d));
+            }
+        }
+        if let Some((nx, ny, _)) = best {
+            if let Some(mut grid_pos) = world.get_mut::<GridPosition>(*pop) {
                 grid_pos.x = nx;
                 grid_pos.y = ny;
             }
@@ -1832,5 +2041,128 @@ mod tests {
 
         assert!(world.get::<Panic>(pop).is_some());
         assert!(world.get::<CarryingItem>(pop).is_none());
+    }
+
+    // ------------------------------------------------------------------
+    // Item 110 Gap 2: fire brigade — Douse executable under panic (RED
+    // first: before the brigade existed, a panicked pop could never
+    // execute a Douse designation — utility AI excludes `Panic` pops and
+    // no other system moved them toward a fire).
+    // ------------------------------------------------------------------
+
+    fn spawn_douse_designation(world: &mut World, x: i32, y: i32) -> Entity {
+        world
+            .spawn((
+                Designation {
+                    designation_type: DesignationType::Douse,
+                },
+                GridPosition { x, y },
+            ))
+            .id()
+    }
+
+    fn fire_count(world: &mut World) -> usize {
+        world.query::<&Fire>().iter(world).count()
+    }
+
+    #[test]
+    fn test_panicked_pop_douses_designated_fire_from_adjacency() {
+        let mut world = setup_open_field();
+        world.insert_resource(crate::shared::log::MessageLog::default());
+        let fire_pos = GridPosition { x: 10, y: 10 };
+        spawn_fire(&mut world, fire_pos.x, fire_pos.y);
+        let designation = spawn_douse_designation(&mut world, fire_pos.x, fire_pos.y);
+        // The only nearby pop is panicking — the l2r2k_11 shape.
+        let pop = spawn_pop(&mut world, 10, 11);
+        world.entity_mut(pop).insert(Panic::new(fire_pos));
+
+        fire_brigade_system(&mut world);
+
+        assert_eq!(fire_count(&mut world), 0, "brigadier must douse the fire");
+        assert!(
+            world.get_entity(designation).is_err(),
+            "douse completes the designation"
+        );
+        assert!(
+            world.get::<Panic>(pop).is_some(),
+            "brigade duty does not cure panic — the pop stays panicked"
+        );
+    }
+
+    #[test]
+    fn test_panicked_pop_walks_to_designated_fire_through_panic_chain() {
+        // The live-schedule shape: flee runs in the same chain as the
+        // brigade (brigade last, as registered in simulation.rs). A
+        // panicked pop four tiles out must still reach and douse the
+        // fire instead of fleeing in circles until it burns down.
+        let mut world = setup_open_field();
+        world.insert_resource(crate::shared::log::MessageLog::default());
+        let fire_pos = GridPosition { x: 10, y: 10 };
+        spawn_fire(&mut world, fire_pos.x, fire_pos.y);
+        spawn_douse_designation(&mut world, fire_pos.x, fire_pos.y);
+        let pop = spawn_pop(&mut world, 10, 14);
+        world.entity_mut(pop).insert(Panic::new(fire_pos));
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(
+            (
+                panic_flee_system,
+                vacuum_return_system,
+                fire_brigade_system,
+            )
+                .chain(),
+        );
+        for _ in 0..15 {
+            schedule.run(&mut world);
+            if fire_count(&mut world) == 0 {
+                break;
+            }
+        }
+
+        assert_eq!(
+            fire_count(&mut world),
+            0,
+            "panicked brigadier must reach and douse the designated fire"
+        );
+        let pos = world.get::<GridPosition>(pop).copied().unwrap();
+        assert!(
+            pos.distance_chebyshev(fire_pos) <= 1,
+            "brigadier ends adjacent to the fire tile, got {pos:?}"
+        );
+    }
+
+    #[test]
+    fn test_undesignated_fire_drafts_no_brigade() {
+        // No keeper order, no brigade: panic behavior is unchanged and
+        // the fire is left for the normal (non-panicked) work path.
+        let mut world = setup_open_field();
+        let fire_pos = GridPosition { x: 10, y: 10 };
+        spawn_fire(&mut world, fire_pos.x, fire_pos.y);
+        let pop = spawn_pop(&mut world, 10, 11);
+        world.entity_mut(pop).insert(Panic::new(fire_pos));
+
+        fire_brigade_system(&mut world);
+
+        assert_eq!(fire_count(&mut world), 1, "undesignated fire must remain");
+        assert!(
+            world.get::<FireBrigade>(pop).is_none(),
+            "no draft without a Douse designation"
+        );
+    }
+
+    #[test]
+    fn test_calm_pop_also_answers_brigade() {
+        // The brigade is not panic-only: when the nearest pop happens to
+        // be calm, the designation is still guaranteed executable.
+        let mut world = setup_open_field();
+        world.insert_resource(crate::shared::log::MessageLog::default());
+        let fire_pos = GridPosition { x: 10, y: 10 };
+        spawn_fire(&mut world, fire_pos.x, fire_pos.y);
+        spawn_douse_designation(&mut world, fire_pos.x, fire_pos.y);
+        spawn_pop(&mut world, 11, 10);
+
+        fire_brigade_system(&mut world);
+
+        assert_eq!(fire_count(&mut world), 0, "calm brigadier douses too");
     }
 }

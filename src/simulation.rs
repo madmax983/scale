@@ -127,6 +127,12 @@ pub fn build_simulation_schedule() -> Schedule {
             // Item 97: survival return — suffocating / low-air pops in
             // vacuum head back to pressure after panic flight resolves.
             crate::layer1::psychology::panic_spirals::vacuum_return_system,
+            // Item 110 Gap 2: fire brigade — Douse designations draft the
+            // nearest pop (panicked or not) and walk them to the fire, so
+            // the fire response stays executable while the colony panics.
+            // Runs last in the chain: brigade duty overrides this tick's
+            // panic flight for the drafted pop only.
+            crate::layer1::psychology::panic_spirals::fire_brigade_system,
         )
             .chain(),
     );

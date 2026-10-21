@@ -750,16 +750,36 @@ pub fn retrograde_chronicle_bridge(
 pub fn grid_overload_fire_bridge(
     mut events: EventReader<crate::layer1::energy::GridOverloadEvent>,
     mut commands: Commands,
-    grid_positions: Query<&GridPosition>,
+    mut chronicle: EventWriter<AddChronicleEvent>,
+    grid_positions: Query<(&GridPosition, Option<&crate::layer1::building::Building>)>,
     existing_fires: Query<&GridPosition, With<crate::layer1::fire::Fire>>,
 ) {
     for event in events.read() {
-        if let Ok(pos) = grid_positions.get(event.victim) {
+        if let Ok((pos, building)) = grid_positions.get(event.victim) {
             // Check if fire already exists at this position
             let already_burning = existing_fires.iter().any(|p| *p == *pos);
 
             if !already_burning {
                 commands.spawn((crate::layer1::fire::Fire::default(), *pos));
+
+                // Item 110 Gap 1 (ignition telegraph): an overload
+                // ignition used to spawn Fire with NO telegraph at all —
+                // no Chronicle, no log line naming fire risk; the first
+                // Chronicle signal in the l2r2k_11 cascade was the panic
+                // sighting itself, ~4 ticks before the first building
+                // died (balance forensics 2026-10-20). Chronicle the
+                // ignition the tick it happens, naming the victim
+                // building and the overload cause, at Major importance.
+                // The already-burning guard above is also the spam
+                // guard: repeat overloads on a burning tile stay silent.
+                let label = building.map_or("power grid component", |b| b.building_type.label());
+                chronicle.send(AddChronicleEvent {
+                    text: format!(
+                        "Fire! A grid overload has set the {label} at ({}, {}) ablaze!",
+                        pos.x, pos.y
+                    ),
+                    importance: EventImportance::Major,
+                });
             }
         }
     }
@@ -3922,5 +3942,89 @@ mod thermal_chronicle_tests {
             .run_system_once(thermal_damage_chronicle_bridge)
             .unwrap();
         assert!(chronicle_texts(&mut world).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod grid_overload_fire_tests {
+    use super::*;
+    use bevy_ecs::system::RunSystemOnce;
+
+    fn overload_world() -> (World, Entity) {
+        let mut world = World::new();
+        world.init_resource::<Events<crate::layer1::energy::GridOverloadEvent>>();
+        world.init_resource::<Events<AddChronicleEvent>>();
+        let victim = world
+            .spawn((
+                crate::layer1::building::Building {
+                    building_type: crate::layer1::building::BuildingType::LifeSupport,
+                },
+                GridPosition { x: 7, y: 9 },
+            ))
+            .id();
+        (world, victim)
+    }
+
+    fn chronicle_texts(world: &mut World) -> Vec<String> {
+        let events = world.resource::<Events<AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        reader.read(events).map(|e| e.text.clone()).collect()
+    }
+
+    #[test]
+    fn grid_overload_ignition_is_chronicled() {
+        // Item 110 Gap 1: the overload bridge spawned Fire in total
+        // silence. The ignition must now be chronicled the same tick,
+        // naming the victim building and the overload cause.
+        let (mut world, victim) = overload_world();
+        world
+            .resource_mut::<Events<crate::layer1::energy::GridOverloadEvent>>()
+            .send(crate::layer1::energy::GridOverloadEvent { victim });
+        world.run_system_once(grid_overload_fire_bridge).unwrap();
+        // Commands land on a second run's flush in run_system_once
+        // harnesses; the Fire spawn is a command.
+        world.run_system_once(grid_overload_fire_bridge).unwrap();
+
+        let fire_count = world
+            .query::<&crate::layer1::fire::Fire>()
+            .iter(&world)
+            .count();
+        assert_eq!(fire_count, 1, "overload should ignite exactly one Fire");
+
+        let texts = chronicle_texts(&mut world);
+        assert!(
+            texts.iter().any(|t| {
+                t.contains("grid overload") && t.contains("Life Support")
+            }),
+            "ignition must be chronicled with cause + building, got: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn grid_overload_on_burning_tile_stays_silent() {
+        // Spam guard: a repeat overload on an already-burning tile must
+        // not re-chronicle (and must not stack a second Fire).
+        let (mut world, victim) = overload_world();
+        world.spawn((
+            crate::layer1::fire::Fire::default(),
+            GridPosition { x: 7, y: 9 },
+        ));
+        world
+            .resource_mut::<Events<crate::layer1::energy::GridOverloadEvent>>()
+            .send(crate::layer1::energy::GridOverloadEvent { victim });
+        world.run_system_once(grid_overload_fire_bridge).unwrap();
+
+        assert_eq!(
+            world
+                .query::<&crate::layer1::fire::Fire>()
+                .iter(&world)
+                .count(),
+            1,
+            "no second Fire on a burning tile"
+        );
+        assert!(
+            chronicle_texts(&mut world).is_empty(),
+            "no chronicle for a repeat ignition on a burning tile"
+        );
     }
 }

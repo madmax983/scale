@@ -1064,18 +1064,36 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
 
     // Item 77 Phase 2 (Layer 2 Ready maintenance lane ONLY — Classic,
     // Ground Survival, and Social Drama numbers are untouched): atmosphere
-    // redundancy inside the hull. A second LifeSupport on the free (0, 1)
-    // interior tile and a Generator on the free (0, -1) interior tile.
-    // Both are cardinal-adjacent to the CommandCenter's power consumer on
-    // the center tile, so both join the Lander's grid: if either
-    // LifeSupport is sabotaged to scrap, the other keeps the hull
-    // pressurized, and the Generator is a second power source behind the
-    // boosted Lander. This is maintenance relief that does not decay —
-    // the lane Mark designated "much easier to maintain".
-    let redundant_life_support_pos = crate::layer1::GridPosition {
-        x: layout.center.x,
-        y: layout.center.y + 1,
-    };
+    // redundancy and a Generator on the free (0, -1) interior tile,
+    // cardinal-adjacent to the CommandCenter's power consumer on the
+    // center tile, so it joins the Lander's grid: if either LifeSupport
+    // is sabotaged to scrap, the other keeps the hull pressurized, and
+    // the Generator is a second power source behind the boosted Lander.
+    // This is maintenance relief that does not decay — the lane Mark
+    // designated "much easier to maintain".
+    //
+    // Item 110 Gap 3 (fire geometry): the second LifeSupport used to sit
+    // on the (0, 1) interior tile — inside the same 3x3 starter heart as
+    // the primary LifeSupport, both Farms, the Stockpile, the Generator
+    // and the DroneHub. One ignition in the heart was adjacent to
+    // everything critical, and the l2r2k_11 cascade took both
+    // "redundant" units ~11 ticks apart (balance forensics 2026-10-20).
+    // Redundancy that shares a fire neighborhood is not redundancy: the
+    // second unit now lives in a sealed annex off the hull at distance
+    // 4 in the first workable direction (east, then west, then north;
+    // see the direction search below) — Chebyshev >= 3 from the primary
+    // unit and every other heart building (5 for an east annex) —
+    // reached by a power/pressure tunnel: the starter wall at distance
+    // 2 becomes a metal PowerPole, a second metal PowerPole at
+    // distance 3 continues the cardinal power chain
+    // (Lander -> tunnel poles -> annex LifeSupport, all one grid), and
+    // metal walls at distance 4 (flanks) and 5 (cap) seal the annex cell.
+    // PowerPoles have no flow transmissivity, so hull pressure diffuses
+    // through the tunnel and the annex unit still pressurizes the hull
+    // if the primary dies (and vice versa). Metal, not the wood default:
+    // a flammable tunnel would be a fire bridge into the annex. If the
+    // annex tiles are somehow unplaceable, fall back to the legacy
+    // (0, 1) interior tile so the lane never loses its second unit.
     let generator_pos = crate::layer1::GridPosition {
         x: layout.center.x,
         y: layout.center.y - 1,
@@ -1092,11 +1110,154 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
             .iter(world)
             .any(|(building, p)| building.building_type == kind && *p == pos)
     };
+    // Annex direction search: the starter-site guarantee covers only
+    // the 5x5 shell, so any single annex direction can be blocked by
+    // worldgen (rock, water, a ruin on an annex tile). Try east, west,
+    // then north; the first viable annex wins. (South is the airlock
+    // side — its ring tile is the Airlock, not a wall, so no tunnel can
+    // start there.) Every direction keeps the annex unit >= 3 tiles
+    // (Chebyshev) from the primary LifeSupport and every other heart
+    // building.
+    //
+    // A Rock tile on the annex footprint counts as viable: it is
+    // clearable site prep (the landing clearing already guarantees the
+    // 5x5 shell, and rock is mineable terrain). Measured on worldgen:
+    // single Rock outcrops otherwise veto whole directions — in one
+    // 30-world sample 2 worlds fell back with every direction blocked
+    // by exactly one Rock tile. Water stays a hard blocker: site prep
+    // does not drain lakes. Viable Rock tiles are cleared to Grass
+    // when the annex is built (below).
+    let annex_tile_viable = |world: &World, pos: crate::layer1::GridPosition| -> bool {
+        if crate::layer1::building::can_place_building(world, pos.x, pos.y) {
+            return true;
+        }
+        let (Ok(ux), Ok(uy)) = (usize::try_from(pos.x), usize::try_from(pos.y)) else {
+            return false;
+        };
+        world
+            .get_resource::<crate::layer1::TerrainGrid>()
+            .and_then(|terrain| terrain.get(ux, uy))
+            .is_some_and(|tile| tile == crate::layer1::terrain::TerrainType::Rock)
+    };
+    let legacy_pos = crate::layer1::GridPosition {
+        x: layout.center.x,
+        y: layout.center.y + 1,
+    };
+    let mut annex_plan: Option<(
+        crate::layer1::GridPosition,
+        crate::layer1::GridPosition,
+        crate::layer1::GridPosition,
+        [crate::layer1::GridPosition; 3],
+    )> = None;
+    for (ux, uy) in [(1, 0), (-1, 0), (0, -1)] {
+        let (px, py) = (-uy, ux);
+        let at = |k: i32, p: i32| crate::layer1::GridPosition {
+            x: layout.center.x + ux * k + px * p,
+            y: layout.center.y + uy * k + py * p,
+        };
+        let tunnel_wall_pos = at(2, 0);
+        let tunnel_far_pos = at(3, 0);
+        let annex_pos = at(4, 0);
+        let annex_wall_positions = [at(4, -1), at(4, 1), at(5, 0)];
+        let ok = building_at(
+            world,
+            tunnel_wall_pos,
+            crate::layer1::building::BuildingType::Wall,
+        ) && annex_tile_viable(world, tunnel_far_pos)
+            && annex_tile_viable(world, annex_pos)
+            && annex_wall_positions
+                .iter()
+                .all(|pos| annex_tile_viable(world, *pos));
+        if ok {
+            annex_plan = Some((
+                tunnel_wall_pos,
+                tunnel_far_pos,
+                annex_pos,
+                annex_wall_positions,
+            ));
+            break;
+        }
+    }
+    let annex_ok = annex_plan.is_some();
+    let (tunnel_wall_pos, tunnel_far_pos, annex_pos, annex_wall_positions) =
+        annex_plan.unwrap_or((legacy_pos, legacy_pos, legacy_pos, [legacy_pos; 3]));
+    let redundant_life_support_pos = if annex_ok { annex_pos } else { legacy_pos };
     if !building_at(
         world,
         redundant_life_support_pos,
         crate::layer1::building::BuildingType::LifeSupport,
     ) {
+        if annex_ok {
+            // Site prep: clear Rock outcrops on the annex footprint to
+            // Grass (the viability rule above counts them as clearable).
+            for clear_pos in [tunnel_far_pos, annex_pos]
+                .into_iter()
+                .chain(annex_wall_positions)
+            {
+                let (Ok(ux), Ok(uy)) = (
+                    usize::try_from(clear_pos.x),
+                    usize::try_from(clear_pos.y),
+                ) else {
+                    continue;
+                };
+                if let Some(mut terrain) =
+                    world.get_resource_mut::<crate::layer1::TerrainGrid>()
+                {
+                    if terrain.get(ux, uy)
+                        == Some(crate::layer1::terrain::TerrainType::Rock)
+                    {
+                        terrain.set(ux, uy, crate::layer1::terrain::TerrainType::Grass);
+                    }
+                }
+            }
+            // Open the tunnel: the tunnel-mouth starter wall becomes
+            // the first PowerPole of the annex power/pressure chain.
+            let wall_entity = world
+                .query::<(
+                    Entity,
+                    &crate::layer1::building::Building,
+                    &crate::layer1::map::GridPosition,
+                )>()
+                .iter(world)
+                .find(|(_, building, pos)| {
+                    building.building_type == crate::layer1::building::BuildingType::Wall
+                        && **pos == tunnel_wall_pos
+                })
+                .map(|(entity, _, _)| entity);
+            if let Some(entity) = wall_entity {
+                world.despawn(entity);
+                world
+                    .resource_mut::<OccupiedTiles>()
+                    .0
+                    .remove(&(tunnel_wall_pos.x, tunnel_wall_pos.y));
+            }
+            for pole_pos in [tunnel_wall_pos, tunnel_far_pos] {
+                crate::layer1::building::spawn_building(
+                    world,
+                    pole_pos.x,
+                    pole_pos.y,
+                    crate::layer1::building::BuildingType::PowerPole,
+                    crate::layer1::building::MaterialType::Metal,
+                );
+                world
+                    .resource_mut::<OccupiedTiles>()
+                    .0
+                    .insert((pole_pos.x, pole_pos.y));
+            }
+            for wall_pos in annex_wall_positions {
+                crate::layer1::building::spawn_building(
+                    world,
+                    wall_pos.x,
+                    wall_pos.y,
+                    crate::layer1::building::BuildingType::Wall,
+                    crate::layer1::building::MaterialType::Metal,
+                );
+                world
+                    .resource_mut::<OccupiedTiles>()
+                    .0
+                    .insert((wall_pos.x, wall_pos.y));
+            }
+        }
         crate::layer1::building::spawn_building(
             world,
             redundant_life_support_pos.x,
@@ -1626,10 +1787,42 @@ mod tests {
                         | BuildingType::Airlock
                         | BuildingType::Lander
                         | BuildingType::LifeSupport
+                        | BuildingType::PowerPole
                 )
             })
             .map(|(building, pos)| (building.building_type, pos.x, pos.y))
             .collect();
+        // Item 110 Gap 3: trim Layer 2 Ready's annex in ABSOLUTE space
+        // before normalizing (an annex in any direction would otherwise
+        // shift the min-based normalization). The colony center is the
+        // Lander's tile minus STARTER_LANDER_OFFSET. The shared shell
+        // lives within Chebyshev 2 of the center; the annex unit (4),
+        // its walls (4-5) and the tunnel's far pole (3) sit outside and
+        // drop out. The tunnel mouth (distance 2) is a shared wall tile
+        // that L2R converts into a PowerPole — it still occupies the
+        // shared tile, so it is mapped back to Wall below. The shared
+        // center bridge pole (distance 0) was never part of the
+        // compared shell and drops out.
+        if let Some((_, lander_x, lander_y)) = shell
+            .iter()
+            .find(|(building_type, _, _)| *building_type == BuildingType::Lander)
+            .copied()
+        {
+            let (center_x, center_y) = (
+                lander_x - STARTER_LANDER_OFFSET.0,
+                lander_y - STARTER_LANDER_OFFSET.1,
+            );
+            let chebyshev = |x: i32, y: i32| (x - center_x).abs().max((y - center_y).abs());
+            shell.retain(|(_, x, y)| chebyshev(*x, *y) <= 2);
+            shell.retain(|(building_type, x, y)| {
+                *building_type != BuildingType::PowerPole || chebyshev(*x, *y) == 2
+            });
+            for entry in &mut shell {
+                if entry.0 == BuildingType::PowerPole {
+                    entry.0 = BuildingType::Wall;
+                }
+            }
+        }
         let min_x = shell.iter().map(|(_, x, _)| *x).min().unwrap_or(0);
         let min_y = shell.iter().map(|(_, _, y)| *y).min().unwrap_or(0);
         for (_, x, y) in &mut shell {
@@ -2300,6 +2493,49 @@ mod tests {
         assert!(
             metal >= 75.0,
             "Layer 2 Ready metal should include the 50-metal spare-LifeSupport earmark, got {metal}"
+        );
+    }
+
+    #[test]
+    fn test_layer2_ready_second_life_support_is_decluttered_from_heart() {
+        // Item 110 Gap 3: the redundant LifeSupport used to sit inside
+        // the 3x3 starter heart (offset (0, 1)), where one ignition was
+        // adjacent to both units — the l2r2k_11 cascade killed both
+        // ~11 ticks apart. The annex unit must sit >= 3 tiles (Chebyshev)
+        // from the primary unit and stay on the live power grid.
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Layer2Ready,
+        });
+
+        let positions: Vec<GridPosition> = world
+            .query::<(&Building, &GridPosition)>()
+            .iter(&world)
+            .filter(|(b, _)| b.building_type == BuildingType::LifeSupport)
+            .map(|(_, pos)| *pos)
+            .collect();
+        assert_eq!(positions.len(), 2, "Layer 2 Ready keeps two LifeSupports");
+        let separation = positions[0].distance_chebyshev(positions[1]);
+        assert!(
+            separation >= 3,
+            "the two LifeSupports must not share one fire neighborhood, separation is {separation}"
+        );
+
+        // The far (annex) unit must be on the same powered grid as the
+        // heart: grid stats computed from its own entity must still see
+        // the Lander + Generator production through the tunnel poles.
+        let annex = world
+            .query::<(Entity, &Building, &GridPosition)>()
+            .iter(&world)
+            .filter(|(_, b, _)| b.building_type == BuildingType::LifeSupport)
+            .max_by_key(|(_, _, pos)| pos.x)
+            .map(|(e, _, _)| e)
+            .expect("annex LifeSupport exists");
+        let (production, _) =
+            crate::layer1::energy::calculate_grid_stats(&mut world, annex);
+        assert!(
+            production >= 10.0,
+            "annex LifeSupport must share the heart grid (Lander + Generator), got {production}"
         );
     }
 

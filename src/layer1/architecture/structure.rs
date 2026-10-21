@@ -190,7 +190,7 @@ pub fn malfunction_system(world: &mut World) {
         Option<&crate::layer1::prototyping::Prototype>,
     )>();
 
-    for (entity, structure, pos, _building, prototype) in query.iter(world) {
+    for (entity, structure, pos, building, prototype) in query.iter(world) {
         let base_risk = calculate_malfunction_risk(structure.current_hp, structure.max_hp);
 
         // Apply Prototype modifier
@@ -198,11 +198,21 @@ pub fn malfunction_system(world: &mut World) {
         let risk = base_risk * modifier;
 
         if risk > 0.0 && rand::random::<f32>() < risk {
-            events.push((entity, *pos));
+            let label = building.map_or("building", |b| b.building_type.label());
+            events.push((entity, *pos, label));
         }
     }
 
-    for (_entity, pos) in events {
+    // Tiles already burning before this run: a further malfunction fire
+    // stacked on the same tile is not news (Item 110 Gap 1 spam guard).
+    let burning: std::collections::HashSet<(i32, i32)> = {
+        let mut q = world.query_filtered::<&GridPosition, With<crate::layer1::fire::Fire>>();
+        q.iter(world).map(|p| (p.x, p.y)).collect()
+    };
+
+    for (_entity, pos, label) in events {
+        let first_ignition = !burning.contains(&(pos.x, pos.y));
+
         // Trigger malfunction: Spawn Fire
         world.spawn((
             crate::layer1::fire::Fire {
@@ -218,6 +228,29 @@ pub fn malfunction_system(world: &mut World) {
                 "Malfunction at ({}, {}) due to lack of maintenance!",
                 pos.x, pos.y
             ));
+        }
+
+        // Item 110 Gap 1 (ignition telegraph): a malfunction ignition used
+        // to reach only the ephemeral MessageLog — the Chronicle never
+        // named the fire until pops panicked at its sight, by which point
+        // a wood building had ~10 ticks to live (balance forensics
+        // 2026-10-20, l2r2k_11). Chronicle the ignition the tick it
+        // happens, naming the building and the cause, at Major importance
+        // (the pyrokinetic fire-start pattern, one tier up: this fire was
+        // not chosen by anyone). Only the first ignition per burn is
+        // chronicled; repeat rolls on an already-burning tile stay log-only.
+        if first_ignition {
+            if let Some(mut chronicle_events) =
+                world.get_resource_mut::<Events<crate::layer1::chronicle::AddChronicleEvent>>()
+            {
+                chronicle_events.send(crate::layer1::chronicle::AddChronicleEvent {
+                    text: format!(
+                        "Fire! A malfunction has set the {label} at ({}, {}) ablaze!",
+                        pos.x, pos.y
+                    ),
+                    importance: crate::layer1::chronicle::EventImportance::Major,
+                });
+            }
         }
     }
 }
@@ -539,5 +572,55 @@ mod tests {
         );
         let s = world.get::<Structure>(building).unwrap();
         assert_eq!(s.current_hp, 100.0);
+    }
+
+    #[test]
+    fn test_malfunction_ignition_is_chronicled() {
+        // Item 110 Gap 1: a malfunction ignition used to reach only the
+        // ephemeral MessageLog — the Chronicle (the player's history)
+        // never named the fire until pops panicked at its sight. The
+        // ignition tick itself must now write a Major chronicle entry
+        // naming the building and the malfunction cause.
+        let mut world = World::new();
+        world.insert_resource(crate::shared::log::MessageLog::default());
+        world.init_resource::<Events<crate::layer1::chronicle::AddChronicleEvent>>();
+        world.spawn((
+            Building {
+                building_type: BuildingType::LifeSupport,
+            },
+            Structure {
+                current_hp: 0.0,
+                max_hp: 50.0,
+            },
+            GridPosition { x: 4, y: 4 },
+        ));
+
+        // Malfunction risk at 0 HP is (0.3 - 0.0) * 0.1 = 3% per run;
+        // loop until ignition (no ignition in 2000 rolls is ~1e-27).
+        let mut ignited = false;
+        for _ in 0..2000 {
+            super::malfunction_system(&mut world);
+            if world.query::<&Fire>().iter(&world).next().is_some() {
+                ignited = true;
+                break;
+            }
+        }
+        assert!(
+            ignited,
+            "a ruined building should eventually malfunction into flame"
+        );
+
+        let events = world.resource::<Events<crate::layer1::chronicle::AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        let sent: Vec<_> = reader.read(events).collect();
+        assert!(
+            sent.iter().any(|e| {
+                e.text.contains("malfunction")
+                    && e.text.contains("Life Support")
+                    && e.importance == crate::layer1::chronicle::EventImportance::Major
+            }),
+            "ignition must be chronicled at Major with cause + building, got: {:?}",
+            sent.iter().map(|e| &e.text).collect::<Vec<_>>()
+        );
     }
 }
