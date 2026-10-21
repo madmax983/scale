@@ -8284,7 +8284,7 @@ fn handle_dump_waste_command(world: &mut World, parts: &[&str]) {
         .find(|(p, _)| p.x == x && p.y == y)
         .map(|(_, inv)| inv.get_amount(&ResourceType::Waste));
     let Some(binned) = binned else {
-        println!("No byproduct bin at ({x}, {y}) — dump_waste targets a refining building.");
+        println!("No byproduct bin at ({x}, {y}) — dump_waste targets a building with a byproduct bin.");
         return;
     };
     if binned == 0 {

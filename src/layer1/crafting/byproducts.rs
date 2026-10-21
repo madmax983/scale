@@ -108,6 +108,14 @@ pub fn recipe_for_building_type(building_type: BuildingType) -> Option<Recipe> {
         BuildingType::Smithy => (vec![(ResourceType::Tools, 1)], 10.0),
         BuildingType::Weaver | BuildingType::Tailor => (vec![], 10.0),
         BuildingType::Refinery => (vec![(ResourceType::Fuel, 1)], 20.0),
+        // Item 116: the two refiners Item 108 left alone. Office's
+        // primary (a building permit) IS a ResourceType and its
+        // refining seam is live once placement grants RefiningProgress.
+        // Recycler's bin is driven by its live recycling seam (its
+        // refining recipe is dead — see the Item 116 report); its
+        // primary mirrors the refining table's nutrient paste output.
+        BuildingType::Office => (vec![(ResourceType::BuildingPermit, 1)], 10.0),
+        BuildingType::Recycler => (vec![(ResourceType::NutrientPaste, 5)], 10.0),
         _ => return None,
     };
     Some(Recipe {
@@ -725,3 +733,379 @@ mod observability_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod live_wiring_116_tests {
+    //! Item 116 live-wiring tests: Recycler + Office byproduct bins.
+    //! Recycler's live seam is `recycle_processing_system` (its refining
+    //! recipe is dead: no RefiningProgress at placement, bio-waste/paste
+    //! caps stuck at 0, ledger ignores both fields). Office's refining
+    //! seam is real but unwired (no RefiningProgress at placement).
+
+    use super::*;
+    use crate::layer1::building::{try_place_building, Building, BuildingMap, BuildingType, OccupiedTiles};
+    use crate::layer1::pop::Pop;
+    use crate::layer1::refining::process_refining_system;
+    use crate::layer1::resources::{ColonyResources, RefiningProgress, ResourceItem};
+    use crate::layer1::terrain::{TerrainGrid, TerrainType};
+    use crate::layer1::utility_ai::{ActionType, PopAction};
+    use crate::layer1::GridPosition;
+
+    fn placement_world_116() -> World {
+        let mut world = World::new();
+        world.insert_resource(TerrainGrid {
+            width: 100,
+            height: 100,
+            tiles: vec![TerrainType::Grass; 100 * 100],
+        });
+        world.insert_resource(OccupiedTiles::default());
+        world.insert_resource(BuildingMap::default());
+        world.init_resource::<Events<crate::layer1::ancestral_graves::SacrilegeEvent>>();
+        world.init_resource::<Events<crate::layer1::core::events::BuildingRemovedEvent>>();
+        world.init_resource::<Events<crate::layer1::core::events::BuildingCompletedEvent>>();
+        // TechState::default() has total_capacity 0, and unlock() runs
+        // update_corruption — a tech unlocked into zero capacity is
+        // corrupted instantly. Grant capacity first (same pattern as
+        // the tech module's own unlock test).
+        let mut tech = crate::layer1::tech::TechState {
+            total_capacity: 100.0,
+            ..Default::default()
+        };
+        tech.unlock(crate::layer1::tech::Tech::Medical);
+        world.insert_resource(tech);
+        world.insert_resource(ColonyResources {
+            wood: 100_000.0,
+            stone: 100_000.0,
+            ore: 100_000.0,
+            metal: 100_000.0,
+            max_wood: 100_000.0,
+            max_planks: 100_000.0,
+            ..Default::default()
+        });
+        world
+    }
+
+    fn place(world: &mut World, x: i32, y: i32, bt: BuildingType) -> Entity {
+        assert!(
+            try_place_building(world, x, y, bt),
+            "placement of {bt:?} at ({x},{y}) should succeed"
+        );
+        let mut q = world.query::<(Entity, &GridPosition, &Building)>();
+        q.iter(world)
+            .find(|(_, p, b)| p.x == x && p.y == y && b.building_type == bt)
+            .map(|(e, _, _)| e)
+            .expect("placed building entity")
+    }
+
+    fn spawn_refine_worker(world: &mut World, x: i32, y: i32) {
+        world.spawn((
+            Pop,
+            GridPosition { x, y },
+            PopAction {
+                current: ActionType::Refine,
+                ..Default::default()
+            },
+        ));
+    }
+
+    #[test]
+    fn live_placed_recycler_gets_byproduct_bin() {
+        let mut world = placement_world_116();
+        let rec = place(&mut world, 5, 5, BuildingType::Recycler);
+        let crafting = world.get::<CraftingBuilding>(rec).unwrap_or_else(|| {
+            panic!("a live-placed Recycler must carry a CraftingBuilding (Item 116)")
+        });
+        let recipe = crafting
+            .current_recipe
+            .as_ref()
+            .expect("recycler recipe must be set");
+        assert!(
+            recipe
+                .byproducts
+                .iter()
+                .any(|(r, n)| *r == ResourceType::Waste && *n >= 1),
+            "recycler recipe must declare a Waste byproduct, got {:?}",
+            recipe.byproducts
+        );
+        let bin = world
+            .get::<Inventory>(rec)
+            .expect("a live-placed Recycler must carry a byproduct Inventory bin");
+        assert_eq!(bin.capacity, BYPRODUCT_BIN_CAPACITY);
+        // The recycler's physical-item inventory (its live input seam)
+        // must still be present alongside the byproduct bin.
+        assert!(
+            world
+                .get::<crate::layer1::inventory::Inventory>(rec)
+                .is_some(),
+            "placed Recycler must keep its physical Inventory for hauler delivery"
+        );
+        assert!(world.get::<crate::layer1::recycling::Recycler>(rec).is_some());
+    }
+
+    #[test]
+    fn live_placed_office_gets_bin_and_refining_progress() {
+        let mut world = placement_world_116();
+        let office = place(&mut world, 5, 5, BuildingType::Office);
+        assert!(
+            world.get::<Inventory>(office).is_some(),
+            "a live-placed Office must carry a byproduct Inventory bin (Item 116)"
+        );
+        assert!(
+            world.get::<CraftingBuilding>(office).is_some(),
+            "a live-placed Office must carry a CraftingBuilding (Item 116)"
+        );
+        assert!(
+            world.get::<RefiningProgress>(office).is_some(),
+            "a live-placed Office must carry RefiningProgress so its real refining seam can run (Item 116)"
+        );
+        // Admin function must survive the wiring.
+        assert!(world.get::<crate::layer1::admin::Office>(office).is_some());
+        assert!(
+            world
+                .get::<crate::layer1::admin::AdminProvider>(office)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn live_office_refining_completion_fills_bin_not_ground() {
+        let mut world = placement_world_116();
+        let mut offices = Vec::new();
+        for i in 0..80 {
+            let (x, y) = (5 + (i % 9) * 3, 5 + (i / 9) * 3);
+            if try_place_building(&mut world, x, y, BuildingType::Office) {
+                let found = {
+                    let mut q = world.query::<(Entity, &GridPosition, &Building)>();
+                    q.iter(&world)
+                        .find(|(_, p, b)| {
+                            p.x == x && p.y == y && b.building_type == BuildingType::Office
+                        })
+                        .map(|(e, _, _)| e)
+                };
+                if let Some(e) = found {
+                    offices.push(e);
+                    {
+                        let mut prog = world.get_mut::<RefiningProgress>(e).unwrap();
+                        prog.current = 9.9;
+                        prog.max = 10.0;
+                    }
+                    spawn_refine_worker(&mut world, x, y);
+                }
+            }
+        }
+        assert!(offices.len() >= 60, "need many offices, placed {}", offices.len());
+        process_refining_system(&mut world);
+        let permits = world
+            .query::<&ResourceItem>()
+            .iter(&world)
+            .filter(|i| i.resource_type == ResourceType::BuildingPermit)
+            .count();
+        assert!(permits >= 40, "offices should complete and spawn permits, got {permits}");
+        let mut binned = 0u32;
+        for e in &offices {
+            if let Some(inv) = world.get::<Inventory>(*e) {
+                binned += inv.get_amount(&ResourceType::Waste);
+            }
+        }
+        assert!(
+            binned >= 1,
+            "office refining completions must generate Waste byproduct into live bins (0.1 chance x many offices)"
+        );
+        let ground_waste = world
+            .query::<&ResourceItem>()
+            .iter(&world)
+            .filter(|i| i.resource_type == ResourceType::Waste)
+            .count();
+        assert_eq!(
+            ground_waste, 0,
+            "binned offices capture their byproduct; ground spawn is the no-bin fallback"
+        );
+    }
+
+    #[test]
+    fn live_full_bin_blocks_office_refining_completion() {
+        let mut world = placement_world_116();
+        let office = place(&mut world, 5, 5, BuildingType::Office);
+        {
+            let mut inv = world.get_mut::<Inventory>(office).unwrap();
+            let cap = inv.capacity;
+            inv.add(ResourceType::Waste, cap);
+        }
+        {
+            let mut prog = world.get_mut::<RefiningProgress>(office).unwrap();
+            prog.current = 9.9;
+            prog.max = 10.0;
+        }
+        spawn_refine_worker(&mut world, 5, 5);
+        let wood_before = world.resource::<ColonyResources>().wood;
+        process_refining_system(&mut world);
+        let res = world.resource::<ColonyResources>();
+        assert_eq!(res.wood, wood_before, "a waste-choked office must not consume inputs");
+        let permits = world
+            .query::<&ResourceItem>()
+            .iter(&world)
+            .filter(|i| i.resource_type == ResourceType::BuildingPermit)
+            .count();
+        assert_eq!(permits, 0, "a waste-choked office must not produce permits");
+        let prog = world.get::<RefiningProgress>(office).unwrap();
+        assert!(
+            prog.current >= prog.max,
+            "choked office stays stuck at full progress, got {}",
+            prog.current
+        );
+    }
+
+    #[test]
+    fn live_placed_recycler_processing_fills_bin() {
+        let mut world = placement_world_116();
+        let rec = place(&mut world, 5, 5, BuildingType::Recycler);
+        {
+            // Raise the bin capacity for this test only: at 0.5/item the
+            // stock cap-20 bin legitimately chokes mid-batch (that
+            // behavior has its own test below); here we isolate capture.
+            let mut bin = world.get_mut::<Inventory>(rec).unwrap();
+            bin.capacity = 10_000;
+        }
+        {
+            let mut inv = world
+                .get_mut::<crate::layer1::inventory::Inventory>(rec)
+                .unwrap();
+            inv.capacity = 100;
+            inv.items = (0..40)
+                .map(|_| crate::layer1::inventory::InventoryItem {
+                    item_type: crate::layer1::items::ItemType::Waste,
+                    entity: None,
+                })
+                .collect();
+        }
+        let mut schedule = Schedule::default();
+        schedule.add_systems(crate::layer1::recycling::recycle_processing_system);
+        schedule.run(&mut world);
+        let res = world.resource::<ColonyResources>();
+        assert!(
+            (res.rations - 20.0).abs() < f32::EPSILON,
+            "40 waste items should recycle into 20 rations, got {}",
+            res.rations
+        );
+        let bin = world.get::<Inventory>(rec).expect("recycler bin");
+        assert!(
+            bin.get_amount(&ResourceType::Waste) >= 1,
+            "recycling completions must capture Waste byproduct into the bin (0.5 chance x 40 items)"
+        );
+        let ground_waste = world
+            .query::<&ResourceItem>()
+            .iter(&world)
+            .filter(|i| i.resource_type == ResourceType::Waste)
+            .count();
+        assert_eq!(ground_waste, 0, "binned recycler captures its byproduct");
+    }
+
+    #[test]
+    fn live_placed_recycler_full_bin_blocks_processing() {
+        let mut world = placement_world_116();
+        let rec = place(&mut world, 5, 5, BuildingType::Recycler);
+        {
+            let mut bin = world.get_mut::<Inventory>(rec).unwrap();
+            let cap = bin.capacity;
+            bin.add(ResourceType::Waste, cap);
+        }
+        {
+            let mut inv = world
+                .get_mut::<crate::layer1::inventory::Inventory>(rec)
+                .unwrap();
+            inv.items = (0..2)
+                .map(|_| crate::layer1::inventory::InventoryItem {
+                    item_type: crate::layer1::items::ItemType::Waste,
+                    entity: None,
+                })
+                .collect();
+        }
+        let mut schedule = Schedule::default();
+        schedule.add_systems(crate::layer1::recycling::recycle_processing_system);
+        schedule.run(&mut world);
+        let res = world.resource::<ColonyResources>();
+        assert_eq!(
+            res.rations, 0.0,
+            "a waste-choked recycler must not process items until its bin is dumped"
+        );
+        let inv = world
+            .get::<crate::layer1::inventory::Inventory>(rec)
+            .unwrap();
+        assert_eq!(inv.items.len(), 2, "choked recycler leaves its input items unprocessed");
+    }
+
+    #[test]
+    fn live_recycler_dump_drains_bin_to_ground() {
+        let mut world = placement_world_116();
+        let mut beauty = BeautyGrid::new(20, 20);
+        beauty.set(5, 5, 10.0);
+        world.insert_resource(beauty);
+        let rec = place(&mut world, 5, 5, BuildingType::Recycler);
+        {
+            let mut bin = world.get_mut::<Inventory>(rec).unwrap();
+            bin.add(ResourceType::Waste, 5);
+        }
+        world.spawn(DumpWasteAction { x: 5, y: 5, amount: 5 });
+        let mut schedule = Schedule::default();
+        schedule.add_systems(waste_dumping_system);
+        schedule.run(&mut world);
+        let bin = world.get::<Inventory>(rec).unwrap();
+        assert_eq!(bin.get_amount(&ResourceType::Waste), 0, "dumping must drain the recycler bin");
+        let ground: f32 = world
+            .query::<(&ResourceItem, &GridPosition)>()
+            .iter(&world)
+            .filter(|(i, p)| i.resource_type == ResourceType::Waste && p.x == 5 && p.y == 5)
+            .map(|(i, _)| i.amount)
+            .sum();
+        assert_eq!(ground, 5.0, "dumped recycler waste must become a real ground Waste item");
+    }
+
+    #[test]
+    fn live_full_sim_world_placed_recycler_and_office_get_bins() {
+        let mut world = crate::setup::setup_world_with_config(crate::setup::SetupConfig::default());
+        {
+            let mut res = world.resource_mut::<ColonyResources>();
+            res.wood = 100_000.0;
+            res.stone = 100_000.0;
+            res.metal = 100_000.0;
+            res.max_wood = 100_000.0;
+        }
+        if let Some(mut tech) = world.get_resource_mut::<crate::layer1::tech::TechState>() {
+            tech.total_capacity = tech.total_capacity.max(100.0);
+            tech.unlock(crate::layer1::tech::Tech::Medical);
+        }
+        let mut placed_office = None;
+        let mut placed_recycler = None;
+        'outer: for x in 4..60 {
+            for y in 4..60 {
+                if placed_office.is_none()
+                    && try_place_building(&mut world, x, y, BuildingType::Office)
+                {
+                    placed_office = Some((x, y));
+                }
+                if placed_recycler.is_none()
+                    && try_place_building(&mut world, x, y, BuildingType::Recycler)
+                {
+                    placed_recycler = Some((x, y));
+                }
+                if placed_office.is_some() && placed_recycler.is_some() {
+                    break 'outer;
+                }
+            }
+        }
+        let (ox, oy) = placed_office.expect("an office should be placeable in a live world");
+        let (rx, ry) = placed_recycler.expect("a recycler should be placeable in a live world");
+        crate::simulation::run_simulation_tick(&mut world);
+        let mut q = world.query::<(&GridPosition, &Inventory)>();
+        let positions: Vec<(i32, i32)> = q.iter(&world).map(|(p, _)| (p.x, p.y)).collect();
+        assert!(
+            positions.contains(&(ox, oy)),
+            "office placed in a full live world must carry a byproduct bin after a tick"
+        );
+        assert!(
+            positions.contains(&(rx, ry)),
+            "recycler placed in a full live world must carry a byproduct bin after a tick"
+        );
+    }
+}
+

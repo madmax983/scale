@@ -1,7 +1,14 @@
+use crate::layer1::architecture::building::BuildingType;
+use crate::layer1::crafting::byproducts::{
+    bin_chokes, capture_byproducts, CraftingBuilding, Inventory as ByproductInventory,
+};
 use crate::layer1::inventory::Inventory;
 use crate::layer1::items::ItemType;
-use crate::layer1::resources::ColonyResources;
+use crate::layer1::refining::get_refining_recipe;
+use crate::layer1::resources::{ColonyResources, ResourceItem, ResourceType};
+use crate::layer1::GridPosition;
 use bevy_ecs::prelude::*;
+use rand::Rng;
 
 /// Component for the Recycler building.
 #[derive(Component, Default, Debug)]
@@ -13,40 +20,81 @@ pub struct Recycler {
 }
 
 /// System to process organic matter and waste into rations.
+///
+/// Item 116 (Spec 354): a Recycler carrying a byproduct bin generates
+/// Waste byproducts as it works. The roll mirrors the Recycler entry in
+/// the real refining table (`get_refining_recipe`, waste_chance 0.5) —
+/// the bin changes where the waste goes, not how much is rolled. A
+/// choked bin (cannot fit the next byproduct) halts processing: items
+/// stay in the physical inventory until the bin is dumped. Recyclers
+/// without a bin (hand-spawned) keep the historical behavior plus the
+/// refining system's ground-spill fallback for rolled byproducts.
+#[allow(clippy::type_complexity)]
 pub fn recycle_processing_system(
-    mut recycler_query: Query<&mut Inventory, With<Recycler>>,
+    mut recycler_query: Query<
+        (
+            &mut Inventory,
+            Option<&GridPosition>,
+            Option<&CraftingBuilding>,
+            Option<&mut ByproductInventory>,
+        ),
+        With<Recycler>,
+    >,
     mut resources: ResMut<ColonyResources>,
     mut commands: Commands,
 ) {
-    for mut inventory in &mut recycler_query {
+    let waste_chance = get_refining_recipe(BuildingType::Recycler, &resources).3;
+    let mut rng = rand::thread_rng();
+    for (mut inventory, pos, crafting, mut bin) in &mut recycler_query {
         let mut indices_to_remove = Vec::new();
 
         for (i, item) in inventory.items.iter().enumerate() {
+            if !matches!(item.item_type, ItemType::Corpse(_) | ItemType::Waste) {
+                continue;
+            }
+
+            // Choke: a bin that cannot fit the next byproduct blocks
+            // processing until it is dumped (Spec 354).
+            if let (Some(crafting), Some(bin_ref)) = (crafting, bin.as_deref()) {
+                if bin_chokes(crafting, bin_ref) {
+                    break;
+                }
+            }
+
             match item.item_type {
                 ItemType::Corpse(corpse_entity) => {
                     // Process Corpse
-                    // Despawn the corpse entity
                     commands.entity(corpse_entity).despawn();
                     // Add Rations (e.g. 50.0)
                     resources.add_rations(50.0);
-                    indices_to_remove.push(i);
                 }
                 ItemType::Waste => {
-                    // Process Waste
-                    // Ratio: 2 Waste -> 1 Ration
-                    // Assuming 1 item = 1.0 unit? ResourceItem has amount.
-                    // InventoryItem usually represents 1 unit or a stack?
-                    // ItemType doesn't have amount.
-                    // If Inventory represents discrete items, then ItemType::Waste is 1 unit?
-                    // Let's assume 1 item = 1.0 waste.
-                    // If we need 2 waste, we need 2 items.
-                    // But usually Waste is a fluid/bulk resource.
-                    // If Inventory contains "Waste" items, they are probably distinct chunks.
-                    // Let's say 1 Waste Item -> 0.5 Ration (so 2 items = 1 ration).
+                    // Process Waste: 1 Waste Item -> 0.5 Ration
+                    // (2 items = 1 ration).
                     resources.add_rations(0.5);
-                    indices_to_remove.push(i);
                 }
-                _ => {}
+                _ => unreachable!(),
+            }
+            indices_to_remove.push(i);
+
+            // Byproduct: capture into the bin; bin-less recyclers spill
+            // to the ground, mirroring the refining seam's fallback.
+            if rng.gen_bool(waste_chance) {
+                let captured = match (crafting, bin.as_deref_mut()) {
+                    (Some(crafting), Some(bin_mut)) => capture_byproducts(crafting, bin_mut),
+                    _ => false,
+                };
+                if !captured {
+                    if let Some(pos) = pos {
+                        commands.spawn((
+                            ResourceItem {
+                                resource_type: ResourceType::Waste,
+                                amount: 1.0,
+                            },
+                            *pos,
+                        ));
+                    }
+                }
             }
         }
 

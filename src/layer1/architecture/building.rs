@@ -1734,12 +1734,9 @@ fn configure_advanced_refiners(entity: &mut EntityWorldMut, building_type: Build
     configure_advanced_refiners_high_tech(entity, building_type);
 }
 
-fn configure_refining_buildings(entity: &mut EntityWorldMut, building_type: BuildingType) {
-    configure_basic_refiners(entity, building_type);
-    configure_advanced_refiners(entity, building_type);
-    // Spec 354 (Item 108 live wiring): waste-generating refiners carry a
-    // byproduct bin from placement, so the live refining path generates
-    // real byproducts instead of the module sitting dead in tests.
+/// Spec 354: attach a byproduct bin (CraftingBuilding + bin Inventory)
+/// to a building whose production generates waste byproducts.
+fn insert_byproduct_bin(entity: &mut EntityWorldMut, building_type: BuildingType) {
     if let Some(recipe) =
         crate::layer1::crafting::byproducts::recipe_for_building_type(building_type)
     {
@@ -1754,6 +1751,15 @@ fn configure_refining_buildings(entity: &mut EntityWorldMut, building_type: Buil
             },
         ));
     }
+}
+
+fn configure_refining_buildings(entity: &mut EntityWorldMut, building_type: BuildingType) {
+    configure_basic_refiners(entity, building_type);
+    configure_advanced_refiners(entity, building_type);
+    // Spec 354 (Item 108 live wiring): waste-generating refiners carry a
+    // byproduct bin from placement, so the live refining path generates
+    // real byproducts instead of the module sitting dead in tests.
+    insert_byproduct_bin(entity, building_type);
 }
 
 fn configure_production(entity: &mut EntityWorldMut, building_type: BuildingType) {
@@ -1839,9 +1845,24 @@ fn configure_civic_services(entity: &mut EntityWorldMut, building_type: Building
                 AdminProvider { amount: 10.0 },
                 Office::default(),
                 ShiftSchedule::default(),
+                // Item 116: the Office's refining recipe (wood ->
+                // building permits, waste_chance 0.1) is real and the
+                // refining system handles it, but placement never
+                // granted RefiningProgress, so the seam never ran live.
+                RefiningProgress {
+                    current: 0.0,
+                    max: 10.0,
+                },
             ));
+            insert_byproduct_bin(entity, building_type);
         }
         BuildingType::Recycler => {
+            // Item 116: the Recycler's live production seam is
+            // recycle_processing_system (physical Waste/Corpse items);
+            // it carries a Spec 354 byproduct bin alongside its
+            // physical Inventory. (Its refining-table recipe stays
+            // unwired: no live ledger path — see the Item 116 report.)
+            insert_byproduct_bin(entity, building_type);
             entity.insert((
                 crate::layer1::recycling::Recycler::default(),
                 Inventory::default(),
