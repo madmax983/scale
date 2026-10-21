@@ -357,6 +357,9 @@ pub struct PopBundle {
     /// construction — do not imitate StressTracker's opportunistic
     /// insertion.
     pub dissatisfaction: crate::layer1::social::dissatisfaction::Dissatisfaction,
+    /// Night-shift adaptation tracker (Spec 359). Bundled for the
+    /// same total-coverage reason as the dissatisfaction ledger.
+    pub night_shift: crate::layer1::social::shift_work::NightShiftAdaptation,
     /// Spoken dialect.
     pub dialect: Dialect,
     /// Linguistic knowledge.
@@ -420,6 +423,7 @@ impl PopBundle {
             dietary_history: DietaryHistory::default(),
             wallet: Wallet { credits: 50.0 },
             dissatisfaction: crate::layer1::social::dissatisfaction::Dissatisfaction::default(),
+            night_shift: crate::layer1::social::shift_work::NightShiftAdaptation::default(),
             dialect: Dialect::default(),
             linguistics: Linguistics::default(),
             gut_biome: GutBiome::default(),

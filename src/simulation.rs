@@ -299,6 +299,9 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::social::dissatisfaction::ColonyWalletMedian>();
     world.init_resource::<crate::layer1::social::dissatisfaction::GrindChronicleState>();
     world.init_resource::<crate::layer1::social::dissatisfaction::SimmeringDisplay>();
+    // Spec 359 Shift Work: night-worker census (first-tick pattern —
+    // the effects system writes it on tick one).
+    world.init_resource::<crate::layer1::social::shift_work::NightShiftStats>();
     world.init_resource::<crate::layer1::agriculture::compost::CompostSoil>();
     // Spec 345 Planetary Quirks: centralized global modifiers derived
     // from PlanetaryTraits (init only — never clobber a derived value).

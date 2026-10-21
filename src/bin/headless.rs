@@ -501,6 +501,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "crossfire" => handle_crossfire_command(world, &parts),
         "crossfires" => print_crossfire(world),
         "graffiti" => print_graffiti(world),
+        "shift" => handle_shift_command(world, &parts),
         "tag" => handle_tag_command(world, &parts),
         "scrub" => handle_scrub_command(world, &parts),
         "drones" => print_drones(world),
@@ -3275,8 +3276,11 @@ fn print_stats(world: &mut World) {
     let (dissat_mean, dissat_max, simmering_count, bitter_count) =
         scale::layer1::social::dissatisfaction::dissatisfaction_stats(world);
 
+    // Spec 359: pops night-working right now (full panel: `shift`).
+    let nightworkers = scale::layer1::social::shift_work::night_worker_count(world);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={}",
         tick,
         scenario,
         pops,
@@ -3374,6 +3378,7 @@ fn print_stats(world: &mut World) {
         dissat_max,
         simmering_count,
         bitter_count,
+        nightworkers,
     );
 }
 
@@ -6517,6 +6522,7 @@ fn print_help() {
                 ("great_works", "gw", "List all Great Works projects"),
                 ("blackmarket", "bm", "Black Market panel (Spec 348): unmet needs, docked smugglers, corruption"),
                 ("misery", "", "The Grind panel (Spec 1387): per-source dissatisfaction means, band counts, worst-off pops"),
+                ("shift [<x> <y> [mode] | <type> [mode]]", "", "Shift work panel (Spec 359): building schedules + current night workers; with coordinates inspect/set one building, with a type name filter the panel or set every building of that type (modes: day|night|both|off|toggle)"),
                 ("setprice food <n>", "", "Debug lever (Spec 1387): set the colony food price"),
                 ("drainwallets", "", "Debug lever (Spec 1387): zero every pop's credits"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
@@ -9463,6 +9469,103 @@ fn print_crossfire(world: &mut World) {
     print_dashboard_panel(
         "ORBITAL CROSSFIRE",
         &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Shift work (Spec 359): `shift` lists every building's schedule
+/// plus the current night workers; `shift <x> <y>` inspects the
+/// building at a tile; `shift <x> <y> day|night|both|off|toggle`
+/// sets its schedule; `shift <type>` filters the panel by building
+/// type name (e.g. `shift Farm`); `shift <type> <mode>` sets the
+/// schedule of every building of that type.
+fn handle_shift_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::shift_work::{
+        building_schedule_at, set_building_schedule_at, set_buildings_of_type, shift_panel_lines,
+    };
+
+    // Set-by-type form: shift <type> <mode>
+    if let (Some(type_name), Some(mode)) = (parts.get(1), parts.get(2)) {
+        if type_name.parse::<i32>().is_err()
+            && matches!(
+                mode.to_lowercase().as_str(),
+                "day" | "night" | "both" | "off" | "toggle"
+            )
+        {
+            let n = set_buildings_of_type(world, type_name, mode);
+            if n > 0 {
+                print_dashboard_panel(
+                    "SHIFT SCHEDULE",
+                    &format!("{n} '{type_name}' building(s) set to '{mode}'."),
+                    Some(comfy_table::Color::Green),
+                    None,
+                );
+            } else {
+                print_dashboard_panel(
+                    "SHIFT SCHEDULE",
+                    &format!("No '{type_name}' buildings found."),
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            return;
+        }
+    }
+
+    // Coordinate form: shift <x> <y> [mode]
+    if let (Some(xs), Some(ys)) = (parts.get(1), parts.get(2)) {
+        if let (Ok(x), Ok(y)) = (xs.parse::<i32>(), ys.parse::<i32>()) {
+            if let Some(mode) = parts.get(3) {
+                match set_building_schedule_at(world, x, y, mode) {
+                    Some(msg) => print_dashboard_panel(
+                        "SHIFT SCHEDULE",
+                        &msg,
+                        Some(comfy_table::Color::Green),
+                        None,
+                    ),
+                    None => print_dashboard_panel(
+                        "SHIFT SCHEDULE",
+                        &format!("No building at ({x}, {y})."),
+                        Some(comfy_table::Color::Red),
+                        Some(comfy_table::Attribute::Bold),
+                    ),
+                }
+            } else {
+                match building_schedule_at(world, x, y) {
+                    Some(line) => print_dashboard_panel("SHIFT SCHEDULE", &line, None, None),
+                    None => print_dashboard_panel(
+                        "SHIFT SCHEDULE",
+                        &format!("No building at ({x}, {y})."),
+                        Some(comfy_table::Color::Red),
+                        Some(comfy_table::Attribute::Bold),
+                    ),
+                }
+            }
+            return;
+        }
+    }
+
+    // Panel form, optionally filtered by a building-type substring.
+    let lines = shift_panel_lines(world);
+    let body = match parts.get(1) {
+        Some(filter) => {
+            let needle = filter.to_lowercase();
+            let kept: Vec<&String> = lines
+                .iter()
+                .filter(|l| l.to_lowercase().contains(&needle) || l.starts_with("--"))
+                .collect();
+            if kept.is_empty() {
+                format!("No buildings match '{filter}'.")
+            } else {
+                kept.iter().map(|l| l.as_str()).collect::<Vec<_>>().join("\n")
+            }
+        }
+        None => lines.join("\n"),
+    };
+    print_dashboard_panel(
+        "SHIFT WORK",
+        &body,
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );

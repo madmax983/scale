@@ -449,4 +449,18 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Economy),
     );
+
+    // Spec 359 Shift Work: tracker coverage + the night-shift
+    // consequence layer, BEFORE the morale cache (same pattern and
+    // reason as the Grind block above). Separate add_systems call:
+    // the main Economy tuple is at Bevy's 20-system limit.
+    schedule.add_systems(
+        (
+            crate::layer1::social::shift_work::ensure_night_shift_tracker_system,
+            crate::layer1::social::shift_work::night_shift_effects_system
+                .after(crate::layer1::social::shift_work::ensure_night_shift_tracker_system)
+                .before(update_morale_cache_system),
+        )
+            .in_set(Layer1SystemSet::Economy),
+    );
 }

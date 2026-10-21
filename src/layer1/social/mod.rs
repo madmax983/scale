@@ -638,6 +638,12 @@ pub use morale::*;
 pub mod dissatisfaction;
 pub use dissatisfaction::*;
 
+/// Shift Work (Spec 359): the consequence layer for Spec 083's
+/// ShiftSchedule — night-work mood/rest effects and adaptation.
+/// No glob re-export: callers use the full path, mirroring the
+/// ship_stowaway precedent, so generic helper names stay namespaced.
+pub mod shift_work;
+
 /// Social stratification system (Spec 113).
 pub mod social_stratification;
 pub use social_stratification::*;

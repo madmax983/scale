@@ -275,6 +275,9 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<crate::layer1::social::dissatisfaction::ColonyWalletMedian>();
     world.init_resource::<crate::layer1::social::dissatisfaction::GrindChronicleState>();
     world.insert_resource(crate::layer1::social::dissatisfaction::SimmeringDisplay::default());
+    // Spec 359 Shift Work: night-worker census, present from setup so
+    // headless commands can read it before any tick runs.
+    world.insert_resource(crate::layer1::social::shift_work::NightShiftStats::default());
     // Spec 1384: colony suit status snapshot + scenario issue floor.
     world.insert_resource(crate::layer1::eva_suit::ColonySuitStatus::default());
     world.insert_resource(crate::layer1::eva_suit::ScenarioSuitFloor::default());
