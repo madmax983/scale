@@ -425,4 +425,28 @@ pub fn register(schedule: &mut Schedule) {
             .after(crate::layer1::husbandry::husbandry_production_system)
             .in_set(Layer1SystemSet::Economy),
     );
+
+    // Spec 1387 The Grind: dissatisfaction accrual + the "Ground Down"
+    // morale bridge, both BEFORE the morale cache so a condition that
+    // starts this tick casts its shadow this tick. Separate add_systems:
+    // the main Economy tuple above is at Bevy's 20-system limit.
+    schedule.add_systems(
+        (
+            crate::layer1::social::dissatisfaction::dissatisfaction_accrual_system
+                .before(update_morale_cache_system),
+            crate::layer1::social::dissatisfaction::dissatisfaction_bridge_system
+                .after(crate::layer1::social::dissatisfaction::dissatisfaction_accrual_system)
+                .before(update_morale_cache_system),
+            crate::layer1::social::dissatisfaction::dissatisfaction_memory_system
+                .after(crate::layer1::social::dissatisfaction::dissatisfaction_bridge_system)
+                .before(update_morale_cache_system),
+            crate::layer1::social::dissatisfaction::dissatisfaction_chronicle_system.after(
+                crate::layer1::social::dissatisfaction::dissatisfaction_bridge_system,
+            ),
+            crate::layer1::social::dissatisfaction::update_simmering_display_system.after(
+                crate::layer1::social::dissatisfaction::dissatisfaction_accrual_system,
+            ),
+        )
+            .in_set(Layer1SystemSet::Economy),
+    );
 }

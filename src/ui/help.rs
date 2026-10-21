@@ -159,6 +159,7 @@ pub fn guide_lines() -> Vec<Line<'static>> {
     vacuum_section(&mut lines);
     layer2_drones_section(&mut lines);
     controls_section(&mut lines);
+    grind_section(&mut lines);
     weird_stuff_section(&mut lines);
     lines.push(blank());
     lines.push(body(
@@ -492,6 +493,20 @@ fn controls_section(lines: &mut Vec<Line<'static>>) {
     lines.push(control(
         "This guide",
         "Ctrl+K, then 'Open Field Guide'. ↑/↓ scrolls it while it is focused.",
+    ));
+    lines.push(blank());
+}
+
+fn grind_section(lines: &mut Vec<Line<'static>>) {
+    lines.push(header("THE GRIND"));
+    lines.push(body(
+        "Misery here is structural, not a mood: wages that don't reach, bunks that don't exist, paste for every meal. It accrues while those conditions hold — and it lingers long after they lift.",
+    ));
+    lines.push(body(
+        "Inspect a colonist: the inspector names their top grievances in their own words. The status bar counts the simmering when enough of the colony is there.",
+    ));
+    lines.push(body(
+        "Counterplays are the conditions themselves: housing for everyone, variety on the plate, rest that is actually rest, wages that reach the food.",
     ));
     lines.push(blank());
 }

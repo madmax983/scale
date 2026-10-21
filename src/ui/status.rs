@@ -152,6 +152,7 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, world: &World) {
     tail_spans.extend(build_atmosphere_spans(world));
     tail_spans.extend(build_suit_spans(world));
     tail_spans.extend(crate::ui::reign_sky::build_reign_spans(world));
+    tail_spans.extend(build_simmering_spans(world));
     // Item 104: while any tail segment is live it deterministically
     // owns the tail. The Ctrl+K hint previously appeared iff the whole
     // line fit, so each LifeSupport power toggle also flipped the hint
@@ -352,6 +353,29 @@ fn build_suit_spans(world: &World) -> Vec<Span<'static>> {
         format!(" ⚠ suit air {days}d "),
         Style::default()
             .fg(Color::Red)
+            .add_modifier(Modifier::BOLD),
+    )]
+}
+
+/// The simmering segment (Spec 1387 §4.6, §10 DECIDED ON): reads the
+/// dwell-filtered `SimmeringDisplay` state — 20-tick ON-dwell, 30-tick
+/// linger — so a colony hovering at the share threshold does not
+/// strobe the bar (item 104 discipline). Yellow and bold, like the
+/// partial LifeSupport warning: misery is a margin warning, not an
+/// alarm. Occupies its own deterministic tail slot after reign & sky.
+fn build_simmering_spans(world: &World) -> Vec<Span<'static>> {
+    let Some(display) =
+        world.get_resource::<crate::layer1::social::dissatisfaction::SimmeringDisplay>()
+    else {
+        return Vec::new();
+    };
+    if !display.visible {
+        return Vec::new();
+    }
+    vec![Span::styled(
+        format!(" ⚠ {} colonists simmering ", display.simmering),
+        Style::default()
+            .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
     )]
 }

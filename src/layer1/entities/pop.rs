@@ -352,6 +352,11 @@ pub struct PopBundle {
     pub dietary_history: DietaryHistory,
     /// Personal currency.
     pub wallet: Wallet,
+    /// Structural dissatisfaction ledger (Spec 1387). Every pop-spawn
+    /// site goes through this bundle, so coverage is total by
+    /// construction — do not imitate StressTracker's opportunistic
+    /// insertion.
+    pub dissatisfaction: crate::layer1::social::dissatisfaction::Dissatisfaction,
     /// Spoken dialect.
     pub dialect: Dialect,
     /// Linguistic knowledge.
@@ -414,6 +419,7 @@ impl PopBundle {
             admin_consumer: AdminConsumer { demand: 1.0 },
             dietary_history: DietaryHistory::default(),
             wallet: Wallet { credits: 50.0 },
+            dissatisfaction: crate::layer1::social::dissatisfaction::Dissatisfaction::default(),
             dialect: Dialect::default(),
             linguistics: Linguistics::default(),
             gut_biome: GutBiome::default(),

@@ -6,28 +6,38 @@ pub(crate) fn evaluate_sabotage(
     data: &PopEvalData,
     buffer: &UtilityAIBuffer,
 ) -> Option<(ActionType, f32, Option<Entity>)> {
-    if data.is_nostalgic {
-        let best_utility = 100.0;
-        let mut best_target = None;
-        let mut closest_dist = i32::MAX;
+    // Lane 1 (unchanged): nostalgia at full heat.
+    // Lane 2 (Spec 1387 §4.5.3): a Bitter pop cold-sabotages advanced
+    // tech at 60 + 40×total — below the 100.0 of an active breakdown;
+    // sabotage is cold, breaks are hot.
+    let best_utility = if data.is_nostalgic {
+        100.0
+    } else if data.dissatisfaction_total
+        >= crate::layer1::social::dissatisfaction::BAND_BITTER
+    {
+        60.0 + 40.0 * data.dissatisfaction_total
+    } else {
+        return None;
+    };
+    let mut best_target = None;
+    let mut closest_dist = i32::MAX;
 
-        for structure in &buffer.all_structures {
-            if structure.entity == data.entity {
-                continue;
-            }
-
-            if structure.is_advanced_tech {
-                let dist = manhattan_distance(&data.pos, &structure.pos);
-                if dist < closest_dist {
-                    closest_dist = dist;
-                    best_target = Some(structure.entity);
-                }
-            }
+    for structure in &buffer.all_structures {
+        if structure.entity == data.entity {
+            continue;
         }
 
-        if best_target.is_some() {
-            return Some((ActionType::Sabotage, best_utility, best_target));
+        if structure.is_advanced_tech {
+            let dist = manhattan_distance(&data.pos, &structure.pos);
+            if dist < closest_dist {
+                closest_dist = dist;
+                best_target = Some(structure.entity);
+            }
         }
+    }
+
+    if best_target.is_some() {
+        return Some((ActionType::Sabotage, best_utility, best_target));
     }
     None
 }

@@ -112,6 +112,8 @@ pub struct PopEvaluationQuery {
         Option<&'static crate::layer1::economy::existential_audit::ExistentialCrisis>,
     pub temporal_fugue: Option<&'static crate::layer1::mind::temporal_fugue::TemporalFugue>,
     pub cultural_drift: Option<&'static CulturalDrift>,
+    pub dissatisfaction:
+        Option<&'static crate::layer1::social::dissatisfaction::Dissatisfaction>,
 }
 
 impl PopEvalData {
@@ -149,6 +151,7 @@ impl PopEvalData {
             has_temporal_fugue: item.temporal_fugue.is_some(),
             is_fringe: item.cultural_drift.is_some_and(|d| d.is_fringe()),
             wears_eva_suit: false,
+            dissatisfaction_total: item.dissatisfaction.map_or(0.0, |d| d.total()),
         }
     }
 }
@@ -236,6 +239,9 @@ pub struct PopEvalData {
     pub is_fringe: bool,
     /// Whether the pop currently wears an EVA suit (Spec 1384).
     pub wears_eva_suit: bool,
+    /// Structural dissatisfaction total (Spec 1387), 0.0 when the pop
+    /// carries no ledger. Read by the sabotage evaluator's Bitter gate.
+    pub dissatisfaction_total: f32,
 }
 
 #[cfg(test)]
@@ -273,6 +279,7 @@ impl PopEvalData {
             has_temporal_fugue: false,
             is_fringe: false,
             wears_eva_suit: false,
+            dissatisfaction_total: 0.0,
         }
     }
 }

@@ -73,6 +73,10 @@ pub enum MemoryType {
     SurvivedFamine,
     /// Was there at the founding of the colony (Spec 341).
     ColonyFounder,
+    /// Ground down by structural conditions (Spec 1387) — a summary of
+    /// the dissatisfaction ledger at a Bitter crossing; deliberately
+    /// small next to the bridge modifier, which does the heavy lifting.
+    GroundDown,
 }
 
 impl MemoryType {
@@ -93,6 +97,7 @@ impl MemoryType {
             Self::LearnedFromMentor | Self::TaughtNovice => 0.05, // Spec 339: the warmth of craft passed on
             Self::SurvivedFamine => -0.10, // Spec 341: the hunger years leave a mark
             Self::ColonyFounder => 0.05, // Spec 341: quiet pride of the first landing
+            Self::GroundDown => -0.1, // Spec 1387: summary of the ledger; the bridge does the heavy lifting
             Self::SawCorpse => -0.05,
             Self::SleptInAwfulRoom => -0.1,
             Self::SleptInDullRoom => -0.05,
@@ -118,6 +123,7 @@ impl MemoryType {
             Self::LearnedFromMentor | Self::TaughtNovice => 0.002, // Spec 339: Fast (500 ticks), like other craft joys
             Self::SurvivedFamine => 0.0005, // Spec 341: slow fade, like WitnessedDeath
             Self::ColonyFounder => 0.0002, // Spec 341: founding is identity — fades slowest of all
+            Self::GroundDown => 0.0005, // Spec 1387: slow fade — outlives the ledger's decay tail
             Self::SawCorpse | Self::AdmiredArt | Self::DisgustedByVermin => 0.01, // Very fast fade (100 ticks)
             Self::InspectorImpressed | Self::InspectorDisappointed | Self::FakePositive => 0.005, // Medium-long duration (~200 ticks)
             // Room thoughts last 1 day (100 ticks)

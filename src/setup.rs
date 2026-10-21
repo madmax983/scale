@@ -270,6 +270,11 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(crate::layer1::pressure::ColonyAtmosphere::default());
     // Item 104: dwell-filtered LifeSupport warning the status bar reads.
     world.insert_resource(crate::layer1::pressure::LifeSupportWarningDisplay::default());
+    // Spec 1387 The Grind: dissatisfaction epoch median, chronicle state,
+    // and the dwell-filtered simmering display the status bar reads.
+    world.init_resource::<crate::layer1::social::dissatisfaction::ColonyWalletMedian>();
+    world.init_resource::<crate::layer1::social::dissatisfaction::GrindChronicleState>();
+    world.insert_resource(crate::layer1::social::dissatisfaction::SimmeringDisplay::default());
     // Spec 1384: colony suit status snapshot + scenario issue floor.
     world.insert_resource(crate::layer1::eva_suit::ColonySuitStatus::default());
     world.insert_resource(crate::layer1::eva_suit::ScenarioSuitFloor::default());

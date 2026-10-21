@@ -414,13 +414,24 @@ pub fn chronicle_rumor_bridge_system(
 /// [`UNMET_LEISURE_THRESHOLD`](crate::layer1::economy::black_market::UNMET_LEISURE_THRESHOLD).
 pub fn update_unmet_luxury_system(
     mut stats: ResMut<crate::layer1::black_market::ColonyStats>,
-    pops: Query<&crate::layer1::needs::Needs, With<crate::layer1::pop::Pop>>,
+    pops: Query<
+        (
+            &crate::layer1::needs::Needs,
+            Option<&crate::layer1::social::dissatisfaction::Dissatisfaction>,
+        ),
+        With<crate::layer1::pop::Pop>,
+    >,
 ) {
+    // Spec 1387 §4.5.4: misery counts as unmet — a Bitter pop seeks
+    // relief even with leisure satisfied. Spawn caps/cooldowns unchanged.
     let unmet_count = pops
         .iter()
-        .filter(|needs| {
+        .filter(|(needs, dissat)| {
             needs.leisure
                 < crate::layer1::economy::black_market::UNMET_LEISURE_THRESHOLD
+                || dissat.is_some_and(|d| {
+                    d.total() >= crate::layer1::social::dissatisfaction::BAND_BITTER
+                })
         })
         .count();
     stats.unmet_luxury = unmet_count.try_into().unwrap_or(u32::MAX);

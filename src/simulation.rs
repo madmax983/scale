@@ -287,6 +287,12 @@ fn init_simulation_resources(world: &mut World) {
     // (init only — never clobber a scenario-granted value).
     world.init_resource::<crate::layer1::eva_suit::ColonySuitStatus>();
     world.init_resource::<crate::layer1::eva_suit::ScenarioSuitFloor>();
+    // Spec 1387 The Grind: epoch wallet median, chronicle state, and the
+    // dwell-filtered simmering display (first-tick pattern — the accrual
+    // and bridge systems read/write these on tick one).
+    world.init_resource::<crate::layer1::social::dissatisfaction::ColonyWalletMedian>();
+    world.init_resource::<crate::layer1::social::dissatisfaction::GrindChronicleState>();
+    world.init_resource::<crate::layer1::social::dissatisfaction::SimmeringDisplay>();
     world.init_resource::<crate::layer1::agriculture::compost::CompostSoil>();
     // Spec 345 Planetary Quirks: centralized global modifiers derived
     // from PlanetaryTraits (init only — never clobber a derived value).

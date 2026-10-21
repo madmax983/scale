@@ -575,6 +575,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "buildings" => print_buildings(world),
         "great_works" | "gw" => print_great_works(world),
         "blackmarket" | "bm" => print_black_market(world),
+        "misery" => print_misery(world),
+        "setprice" => handle_setprice_command(world, &parts),
+        "drainwallets" => handle_drainwallets_command(world),
         "smuggler" => handle_smuggler_command(world),
         "greatwork" => handle_greatwork_command(world, &parts),
         "contribute" => handle_contribute_command(world, &parts),
@@ -3267,8 +3270,13 @@ fn print_stats(world: &mut World) {
     // Spec 357: active graffiti markings (full panel: `graffiti`).
     let graffiti_total = scale::layer1::graffiti::graffiti_count(world);
 
+    // Spec 1387: colony dissatisfaction means/max, and the simmering /
+    // bitter head counts (drives the squeeze-lever evidence in §6).
+    let (dissat_mean, dissat_max, simmering_count, bitter_count) =
+        scale::layer1::social::dissatisfaction::dissatisfaction_stats(world);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={}",
         tick,
         scenario,
         pops,
@@ -3362,6 +3370,10 @@ fn print_stats(world: &mut World) {
         crossfire_total,
         impact_sites,
         graffiti_total,
+        dissat_mean,
+        dissat_max,
+        simmering_count,
+        bitter_count,
     );
 }
 
@@ -5982,6 +5994,105 @@ fn print_black_market(world: &mut World) {
     );
 }
 
+/// The Grind panel (headless `misery` command, Spec 1387 §4.7):
+/// per-source colony mean channels, band counts, and the five
+/// worst-off pops with their top grievance in the module's own words.
+fn print_misery(world: &mut World) {
+    use scale::layer1::pop::PopName;
+    use scale::layer1::social::dissatisfaction::{Dissatisfaction, GrindBand, GrindSource};
+
+    let mut sums = [0.0f32; 5];
+    let mut count = 0usize;
+    let mut bands = [0usize; 4];
+    let mut rows: Vec<(String, f32, String)> = Vec::new();
+    {
+        let mut query = world.query::<(&Dissatisfaction, Option<&PopName>)>();
+        for (dissat, name) in query.iter(world) {
+            count += 1;
+            for source in GrindSource::ALL {
+                sums[source.index()] += dissat.channel(source);
+            }
+            let total = dissat.total();
+            bands[match dissat.band() {
+                GrindBand::Content => 0,
+                GrindBand::Simmering => 1,
+                GrindBand::Bitter => 2,
+                GrindBand::Breaking => 3,
+            }] += 1;
+            let top = dissat
+                .top_sources()
+                .into_iter()
+                .flatten()
+                .next()
+                .map_or_else(|| "—".to_string(), |(s, _)| s.label().to_string());
+            rows.push((
+                name.map_or_else(|| "?".to_string(), |n| n.0.clone()),
+                total,
+                top,
+            ));
+        }
+    }
+    rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let denom = count.max(1) as f32;
+    let mut body = format!(
+        "Pops tracked: {count}\nBands: content {} · simmering {} · bitter {} · breaking {}\nPer-source means:",
+        bands[0], bands[1], bands[2], bands[3]
+    );
+    for source in GrindSource::ALL {
+        body.push_str(&format!(
+            "\n  {}: {:.2}",
+            source.short_name(),
+            sums[source.index()] / denom
+        ));
+    }
+    body.push_str("\nWorst off:");
+    for (name, total, top) in rows.iter().take(5) {
+        body.push_str(&format!("\n  {name}: {total:.2} — {top}"));
+    }
+    print_dashboard_panel(
+        "THE GRIND",
+        &body,
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug lever (headless `setprice food <n>`, Spec 1387 §6): writes
+/// `ColonyPrices.food_price` so a squeeze can be driven from the REPL.
+fn handle_setprice_command(world: &mut World, parts: &[&str]) {
+    let value = match (parts.get(1), parts.get(2)) {
+        (Some(&"food"), Some(n)) => n.parse::<f32>().ok(),
+        _ => None,
+    };
+    let Some(value) = value else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: setprice food <amount>",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    if let Some(mut prices) = world.get_resource_mut::<scale::layer1::economy::ColonyPrices>() {
+        prices.food_price = value;
+        println!("food_price set to {value:.2}");
+    } else {
+        println!("no ColonyPrices resource in this world");
+    }
+}
+
+/// Debug lever (headless `drainwallets`, Spec 1387 §6): zeroes every
+/// pop's credits — the squeeze, in one command.
+fn handle_drainwallets_command(world: &mut World) {
+    let mut drained = 0usize;
+    let mut query = world.query::<&mut scale::layer1::economy::Wallet>();
+    for mut wallet in query.iter_mut(world) {
+        wallet.credits = 0.0;
+        drained += 1;
+    }
+    println!("drained {drained} wallets to 0 credits");
+}
+
 /// Debug trigger (headless `smuggler` command, Spec 348): a smuggler
 /// answers immediately and docks with a ready trade, bypassing the
 /// unmet-needs gate and the spawn cooldown.
@@ -6405,6 +6516,9 @@ fn print_help() {
                 ("designations", "d", "List all active designations"),
                 ("great_works", "gw", "List all Great Works projects"),
                 ("blackmarket", "bm", "Black Market panel (Spec 348): unmet needs, docked smugglers, corruption"),
+                ("misery", "", "The Grind panel (Spec 1387): per-source dissatisfaction means, band counts, worst-off pops"),
+                ("setprice food <n>", "", "Debug lever (Spec 1387): set the colony food price"),
+                ("drainwallets", "", "Debug lever (Spec 1387): zero every pop's credits"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
                 (
                     "greatwork start <skyhook|aegis|spire>",

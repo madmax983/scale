@@ -632,6 +632,12 @@ pub use taboo::*;
 pub mod morale;
 pub use morale::*;
 
+/// The Grind (Spec 1387): structural dissatisfaction ledger — the
+/// upstream misery engine feeding the morale cache via a persistent
+/// "Ground Down" bridge modifier.
+pub mod dissatisfaction;
+pub use dissatisfaction::*;
+
 /// Social stratification system (Spec 113).
 pub mod social_stratification;
 pub use social_stratification::*;

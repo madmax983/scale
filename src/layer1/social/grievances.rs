@@ -71,6 +71,7 @@ type GrievancePopQuery<'a> = (
     Option<&'a mut GrievanceCooldown>,
     Option<&'a Traits>,
     Option<&'a StressTracker>,
+    Option<&'a crate::layer1::social::morale::Morale>,
 );
 
 pub fn post_grievance_system(
@@ -83,7 +84,9 @@ pub fn post_grievance_system(
     let mut rng = thread_rng();
 
     // Iterate pops
-    for (entity, needs, relationships, mut cooldown, traits, stress) in pops.iter_mut() {
+    for (entity, needs, relationships, mut cooldown, traits, stress, morale_comp) in
+        pops.iter_mut()
+    {
         // Check cooldown
         if let Some(ref cd) = cooldown {
             if timestamp < cd.last_post_tick + POST_COOLDOWN {
@@ -91,8 +94,11 @@ pub fn post_grievance_system(
             }
         }
 
-        // Check morale
-        let morale = needs.morale();
+        // Check morale — Spec 1387 re-point: use the cached effective
+        // morale (which sums the "Ground Down" bridge modifier) when the
+        // pop carries a Morale component, falling back to needs morale
+        // exactly like `check_stress_breakdown_system` does.
+        let morale = morale_comp.map_or_else(|| needs.morale(), |m| m.value);
         let sentiment = if morale < 0.2 {
             Some(Sentiment::Negative)
         } else if morale > 0.8 {

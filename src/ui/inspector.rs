@@ -1025,6 +1025,16 @@ fn push_mind_info<'a>(layout: &mut InspectorLayout<'a>, world: &'a World, entity
         layout.push(1, move |f, a| render_dietary_history(f, a, history));
     }
 
+    // Spec 1387 §4.6: the grind, named — band label plus the top two
+    // grievances in the module's own words. Below 0.05 it stays quiet.
+    if let Some(dissat) =
+        world.get::<crate::layer1::social::dissatisfaction::Dissatisfaction>(entity)
+    {
+        if dissat.total() >= 0.05 {
+            layout.push(1, move |f, a| render_dissatisfaction(f, a, dissat));
+        }
+    }
+
     if let Some(bio) = world.get::<Biography>(entity) {
         layout.push_min(1, move |f, a| render_biography(f, a, bio, world));
     }
@@ -1532,6 +1542,24 @@ fn render_dietary_history(frame: &mut Frame, area: Rect, history: &DietaryHistor
     }
     frame.render_widget(
         Paragraph::new(text).style(Style::default().fg(Color::Gray)),
+        area,
+    );
+}
+
+/// Spec 1387 §4.6 inspector block: "Ground down — {band}" plus the
+/// pop's top two grievance lines (copy owned by `GrindSource::label`).
+fn render_dissatisfaction(
+    frame: &mut Frame,
+    area: Rect,
+    dissat: &crate::layer1::social::dissatisfaction::Dissatisfaction,
+) {
+    let mut text = format!("Ground down — {}", dissat.band().label());
+    for source in dissat.top_sources().into_iter().flatten() {
+        text.push_str(" · ");
+        text.push_str(source.0.label());
+    }
+    frame.render_widget(
+        Paragraph::new(text).style(Style::default().fg(Color::Yellow)),
         area,
     );
 }

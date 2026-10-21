@@ -25,6 +25,10 @@ use std::collections::HashMap;
 /// Colony food below this is a shortage: anxious pops start hiding food.
 pub const SHORTAGE_FOOD_THRESHOLD: f32 = 10.0;
 
+/// Spec 1387 §4.5.5: per-tick stash chance for a Bitter pop — hoarding
+/// as an assertion of control. Half the shortage-path rate.
+pub const STASH_MISERY_CHANCE: f64 = 0.005;
+
 /// Mood label applied colony-wide when rooms are searched (Spec 350).
 pub const SEARCH_ROOMS_MORALE_LABEL: &str = "Rooms Searched";
 
@@ -93,12 +97,19 @@ impl PrivateStash {
 pub fn stash_creation_system(
     mut commands: Commands,
     mut resources: ResMut<ColonyResources>,
-    query: Query<(Entity, &Traits), With<Pop>>,
+    query: Query<
+        (
+            Entity,
+            &Traits,
+            Option<&crate::layer1::social::dissatisfaction::Dissatisfaction>,
+        ),
+        With<Pop>,
+    >,
 ) {
     let mut rng = rand::thread_rng();
 
     if resources.food < SHORTAGE_FOOD_THRESHOLD {
-        for (entity, traits) in query.iter() {
+        for (entity, traits, _) in query.iter() {
             if (traits.has(Trait::Anxious) || traits.has(Trait::Hoarder)) && resources.food >= 1.0 {
                 // Throttle stash creation with a probability.
                 // Balance (2026-10-14 baseline): 0.001 produced 3 stashes
@@ -114,6 +125,26 @@ pub fn stash_creation_system(
                     stash.add(ResourceType::Food, 1.0);
                     commands.spawn(stash);
                 }
+            }
+        }
+    }
+
+    // Spec 1387 §4.5.5: parallel misery trigger — a Bitter pop hoards
+    // to control *something*, no trait required, even while the colony
+    // is fed. The shortage path above is untouched.
+    if resources.food >= 1.0 {
+        for (entity, _, dissat) in query.iter() {
+            let bitter = dissat.is_some_and(|d| {
+                d.total() >= crate::layer1::social::dissatisfaction::BAND_BITTER
+            });
+            if bitter && resources.food >= 1.0 && rng.gen_bool(STASH_MISERY_CHANCE) {
+                resources.food -= 1.0;
+                let mut stash = PrivateStash {
+                    owner: Some(entity),
+                    ..Default::default()
+                };
+                stash.add(ResourceType::Food, 1.0);
+                commands.spawn(stash);
             }
         }
     }
