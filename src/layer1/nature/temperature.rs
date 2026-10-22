@@ -328,7 +328,13 @@ pub fn update_temperature_system(
         // them on pressurized tiles with LifeSupport intact. The cooling
         // branch mirrors the winter fix exactly: a symmetric capped push
         // toward 20C, so heating behavior is unchanged below 20C.
-        if b.building_type == BuildingType::LifeSupport {
+        // POWER GATE (item 121, balance-loop Bug #1): thermoregulation is
+        // powered work — an inactive PowerConsumer means the unit is off,
+        // exactly like the Heater/Smelter arms above and the pressure
+        // system (`power.is_none_or(|p| p.active)`). A LifeSupport with NO
+        // PowerConsumer at all still runs unconditionally (legacy spawns
+        // and the thermoregulation regression tests rely on that).
+        if b.building_type == BuildingType::LifeSupport && !power.is_some_and(|p| !p.active) {
             for dy in -4i32..=4 {
                 for dx in -4i32..=4 {
                     if dx.abs() + dy.abs() > 4 {
@@ -890,6 +896,208 @@ mod tests {
                 assert!(
                     t < 35.0,
                     "Habitat tile ({},{}) at {:.1}C above heatstroke threshold",
+                    10 + dx,
+                    10 + dy,
+                    t
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_unpowered_lifesupport_does_not_heat_habitat() {
+        // Item 121 (balance-loop Bug #1): a LifeSupport whose PowerConsumer
+        // is inactive must NOT thermoregulate — the Heater and Smelter arms
+        // already gate on `power.is_some_and(|p| !p.active)`, and the
+        // pressure system treats an inactive consumer as off. Before the
+        // fix, the habitat block ran unconditionally, so an unpowered
+        // LifeSupport heated its habitat for free. Cold-grid twin of the
+        // winter-wipe regression test: same -5C winter night, but the
+        // LifeSupport carries an inactive PowerConsumer, so habitat tiles
+        // must stay BELOW the 10C hypothermia threshold (near ambient).
+        let mut world = World::new();
+        world.insert_resource(SeasonState {
+            current_season: Season::Winter,
+        });
+        world.insert_resource(DayNightCycle {
+            time_of_day: TimeOfDay::Night,
+            day_count: 0,
+            ticks_per_day: 1000,
+        });
+        let mut grid = TemperatureGrid::new(20, 20, -5.0);
+        grid.ambient = -5.0;
+        world.insert_resource(grid);
+        world.insert_resource(TerrainGrid {
+            width: 20,
+            height: 20,
+            tiles: vec![TerrainType::Grass; 400],
+        });
+
+        // LifeSupport at center (10,10) with an INACTIVE PowerConsumer.
+        world.spawn((
+            Building {
+                building_type: BuildingType::LifeSupport,
+            },
+            GridPosition { x: 10, y: 10 },
+            PowerConsumer {
+                demand: 10.0,
+                active: false,
+            },
+        ));
+
+        for _ in 0..300 {
+            world.run_system_once(update_temperature_system).unwrap();
+        }
+
+        let grid = world.resource::<TemperatureGrid>();
+        for dy in -4i32..=4 {
+            for dx in -4i32..=4 {
+                if dx.abs() + dy.abs() > 4 {
+                    continue;
+                }
+                let t = grid.get_safe(10 + dx, 10 + dy);
+                assert!(
+                    t < 10.0,
+                    "Unpowered LifeSupport heated habitat tile ({},{}) to {:.1}C — thermoregulation must be power-gated",
+                    10 + dx,
+                    10 + dy,
+                    t
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_unpowered_lifesupport_does_not_cool_habitat() {
+        // Item 121, hot-grid twin: same summer heat load as the heatstroke
+        // regression test (30C ambient, daytime solar, housing ring +
+        // generator inside the habitat), but the LifeSupport's
+        // PowerConsumer is inactive, so nothing cools the habitat and at
+        // least one habitat tile must reach the 35C heatstroke threshold.
+        let mut world = World::new();
+        world.insert_resource(SeasonState {
+            current_season: Season::Summer,
+        });
+        world.insert_resource(DayNightCycle {
+            time_of_day: TimeOfDay::Day,
+            day_count: 0,
+            ticks_per_day: 1000,
+        });
+        let mut grid = TemperatureGrid::new(20, 20, 30.0);
+        grid.ambient = 30.0;
+        world.insert_resource(grid);
+        world.insert_resource(TerrainGrid {
+            width: 20,
+            height: 20,
+            tiles: vec![TerrainType::Grass; 400],
+        });
+
+        // LifeSupport at center (10,10) with an INACTIVE PowerConsumer.
+        world.spawn((
+            Building {
+                building_type: BuildingType::LifeSupport,
+            },
+            GridPosition { x: 10, y: 10 },
+            PowerConsumer {
+                demand: 10.0,
+                active: false,
+            },
+        ));
+
+        for (x, y) in [
+            (9, 9),
+            (10, 9),
+            (11, 9),
+            (9, 10),
+            (11, 10),
+            (9, 11),
+            (10, 11),
+            (11, 11),
+        ] {
+            world.spawn((
+                Building {
+                    building_type: BuildingType::Housing,
+                },
+                GridPosition { x, y },
+            ));
+        }
+        world.spawn((
+            Building {
+                building_type: BuildingType::Generator,
+            },
+            GridPosition { x: 12, y: 10 },
+        ));
+
+        for _ in 0..300 {
+            world.run_system_once(update_temperature_system).unwrap();
+        }
+
+        let grid = world.resource::<TemperatureGrid>();
+        let mut max_habitat = f32::MIN;
+        for dy in -4i32..=4 {
+            for dx in -4i32..=4 {
+                if dx.abs() + dy.abs() > 4 {
+                    continue;
+                }
+                max_habitat = max_habitat.max(grid.get_safe(10 + dx, 10 + dy));
+            }
+        }
+        assert!(
+            max_habitat >= 35.0,
+            "Unpowered LifeSupport cooled the habitat — hottest habitat tile only {max_habitat:.1}C, expected >= 35C heatstroke threshold with no cooling"
+        );
+    }
+
+    #[test]
+    fn test_powered_lifesupport_still_thermoregulates() {
+        // Item 121, positive control: a LifeSupport with an ACTIVE
+        // PowerConsumer must thermoregulate exactly like the no-consumer
+        // case in the winter-wipe regression test — habitat held at or
+        // above the 10C hypothermia threshold through a -5C winter night.
+        let mut world = World::new();
+        world.insert_resource(SeasonState {
+            current_season: Season::Winter,
+        });
+        world.insert_resource(DayNightCycle {
+            time_of_day: TimeOfDay::Night,
+            day_count: 0,
+            ticks_per_day: 1000,
+        });
+        let mut grid = TemperatureGrid::new(20, 20, -5.0);
+        grid.ambient = -5.0;
+        world.insert_resource(grid);
+        world.insert_resource(TerrainGrid {
+            width: 20,
+            height: 20,
+            tiles: vec![TerrainType::Grass; 400],
+        });
+
+        // LifeSupport at center (10,10) with an ACTIVE PowerConsumer.
+        world.spawn((
+            Building {
+                building_type: BuildingType::LifeSupport,
+            },
+            GridPosition { x: 10, y: 10 },
+            PowerConsumer {
+                demand: 10.0,
+                active: true,
+            },
+        ));
+
+        for _ in 0..300 {
+            world.run_system_once(update_temperature_system).unwrap();
+        }
+
+        let grid = world.resource::<TemperatureGrid>();
+        for dy in -4i32..=4 {
+            for dx in -4i32..=4 {
+                if dx.abs() + dy.abs() > 4 {
+                    continue;
+                }
+                let t = grid.get_safe(10 + dx, 10 + dy);
+                assert!(
+                    t >= 10.0,
+                    "Powered LifeSupport failed to hold habitat tile ({},{}) above hypothermia threshold: {:.1}C",
                     10 + dx,
                     10 + dy,
                     t
