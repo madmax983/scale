@@ -8,7 +8,7 @@
 //! ignition chance of only 0.005/tick, so the ignition roll cannot
 //! race the telegraph in these tests.
 
-use super::grid_strain::{grid_strain_ticks, GridStrainTracker};
+use super::grid_strain::{grid_strain_episode_active, grid_strain_ticks, GridStrainTracker};
 use super::{power_grid_system, PowerConsumer, PowerSource};
 use crate::layer1::chronicle::{chronicle_event_handler_system, Chronicle};
 use crate::layer1::map::GridPosition;
@@ -147,6 +147,40 @@ fn warning_rearms_after_strain_clears() {
         strain_texts(&world, "straining").len(),
         2,
         "warning must re-arm after the strain clears"
+    );
+}
+
+#[test]
+fn episode_stays_active_through_flicker_dip() {
+    // Item 120 / balance Bug #3: during a <=4-tick flicker dip the
+    // consecutive counter reads 0, but the episode is still armed —
+    // STATS must be able to say so via grid_strain_episode_active.
+    let (mut world, mut schedule, consumer) = strained_world();
+    run_ticks(&mut world, &mut schedule, 15);
+    assert_eq!(grid_strain_ticks(&world), 15);
+    assert!(
+        grid_strain_episode_active(&world),
+        "episode must be active while strained past the warning"
+    );
+
+    // 2-tick dip: counter resets, episode must still read active.
+    set_demand(&mut world, consumer, 5.0);
+    run_ticks(&mut world, &mut schedule, 2);
+    assert_eq!(
+        grid_strain_ticks(&world),
+        0,
+        "counter reads 0 during a flicker dip (pre-existing behavior)"
+    );
+    assert!(
+        grid_strain_episode_active(&world),
+        "episode must stay active through a dip inside the clear window"
+    );
+
+    // Full clear window (5 unstrained ticks total): episode re-arms.
+    run_ticks(&mut world, &mut schedule, 3);
+    assert!(
+        !grid_strain_episode_active(&world),
+        "episode must clear after the full 5-tick clear window"
     );
 }
 

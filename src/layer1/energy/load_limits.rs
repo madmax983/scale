@@ -19,6 +19,7 @@ pub fn evaluate_grid_load_system(
     existing_fires: Query<&GridPosition, With<Fire>>,
     mut temperature_grid: ResMut<TemperatureGrid>,
     mut commands: Commands,
+    mut chronicle: EventWriter<crate::layer1::chronicle::AddChronicleEvent>,
 ) {
     // Group consumers by tile to find local demand
     let mut tile_demand = HashMap::new();
@@ -62,6 +63,26 @@ pub fn evaluate_grid_load_system(
                 let has_fire = existing_fires.iter().any(|p| p.x == pos.x && p.y == pos.y);
                 if !has_fire {
                     commands.spawn((Fire::default(), *pos));
+
+                    // Item 120 / balance Bug #4 (ignition telegraph): this
+                    // cable-lane ignition used to spawn Fire with no
+                    // Chronicle entry at all, and no downstream fire
+                    // system chronicles new fires (fire_spread /
+                    // fire_damage / fire_pressure_check are all silent),
+                    // so the first signal was a pop panicking at the
+                    // sight of it. Chronicle the ignition the tick it
+                    // happens, naming the cable-overload cause and the
+                    // tile, at Major importance — the Item 114 pattern
+                    // used by the malfunction and grid-overload lanes.
+                    // The has_fire guard above is also the spam guard:
+                    // an already-burning tile never re-chronicles.
+                    chronicle.send(crate::layer1::chronicle::AddChronicleEvent {
+                        text: format!(
+                            "Fire! A cable overload has set the power cable at ({}, {}) ablaze!",
+                            pos.x, pos.y
+                        ),
+                        importance: crate::layer1::chronicle::EventImportance::Major,
+                    });
                 }
             }
         }
@@ -105,6 +126,9 @@ mod tests {
         ));
 
         // Add a temperature grid
+        world
+            .init_resource::<bevy_ecs::event::Events<crate::layer1::chronicle::AddChronicleEvent>>(
+            );
         world.insert_resource(TemperatureGrid::new(10, 10, 0.0));
 
         // Act: Evaluate grid
@@ -151,6 +175,9 @@ mod tests {
             pos,
         ));
 
+        world
+            .init_resource::<bevy_ecs::event::Events<crate::layer1::chronicle::AddChronicleEvent>>(
+            );
         world.insert_resource(TemperatureGrid::new(10, 10, 0.0));
 
         let _ = world.run_system_once(evaluate_grid_load_system);
@@ -162,8 +189,83 @@ mod tests {
     }
 
     #[test]
+    fn test_extreme_overload_chronicles_cable_fire() {
+        // Item 120 / balance Bug #4: the per-tile cable lane spawns Fire
+        // directly at demand > capacity * 2.0. Unlike the malfunction
+        // lane (structure.rs) and the grid-overload bridge
+        // (integration.rs), it sent no Chronicle entry, and no downstream
+        // fire system chronicles new fires — so this ignition was silent.
+        // The spawn must chronicle a Major cable-overload ignition naming
+        // the tile, exactly once per new fire (the has_fire guard is the
+        // spam guard).
+        let mut world = World::new();
+        world
+            .init_resource::<bevy_ecs::event::Events<crate::layer1::chronicle::AddChronicleEvent>>(
+            );
+
+        let pos = GridPosition { x: 3, y: 3 };
+        world.spawn((
+            PowerCable {
+                capacity: 50.0,
+                current_load: 0.0,
+            },
+            pos,
+        ));
+        world.spawn((
+            PowerConsumer {
+                demand: 300.0,
+                active: true,
+            },
+            pos,
+        ));
+        world.insert_resource(TemperatureGrid::new(10, 10, 0.0));
+
+        let _ = world.run_system_once(evaluate_grid_load_system);
+
+        let mut fire_query = world.query_filtered::<&GridPosition, With<Fire>>();
+        assert!(
+            fire_query.iter(&world).any(|p| p.x == 3 && p.y == 3),
+            "Massive overload must start a fire"
+        );
+
+        let events = world
+            .resource::<bevy_ecs::event::Events<crate::layer1::chronicle::AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        let sent: Vec<_> = reader.read(events).collect();
+        assert_eq!(
+            sent.len(),
+            1,
+            "cable ignition must chronicle exactly once, got: {:?}",
+            sent.iter().map(|e| e.text.clone()).collect::<Vec<_>>()
+        );
+        assert!(
+            sent[0].text.contains("cable overload") && sent[0].text.contains("(3, 3)"),
+            "chronicle must name the cable-overload cause and tile, got: {}",
+            sent[0].text
+        );
+        assert!(
+            matches!(
+                sent[0].importance,
+                crate::layer1::chronicle::EventImportance::Major
+            ),
+            "cable ignition chronicle must be Major, following item 114"
+        );
+
+        // Second tick on the already-burning tile: no duplicate entry.
+        let _ = world.run_system_once(evaluate_grid_load_system);
+        let events = world
+            .resource::<bevy_ecs::event::Events<crate::layer1::chronicle::AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        let total = reader.read(events).count();
+        assert_eq!(total, 1, "burning-tile re-run must not re-chronicle");
+    }
+
+    #[test]
     fn test_batteries_buffer_surges() {
         let mut world = World::new();
+        world
+            .init_resource::<bevy_ecs::event::Events<crate::layer1::chronicle::AddChronicleEvent>>(
+            );
 
         let pos = GridPosition { x: 2, y: 2 };
         world.spawn((

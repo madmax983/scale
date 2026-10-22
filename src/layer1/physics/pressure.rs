@@ -379,7 +379,13 @@ pub fn lifesupport_damage_warning_system(    mut commands: Commands,
         }
 
         if changed {
-            commands.entity(entity).insert(state);
+            // try_insert: an overload cascade (fire / explosion / sabotage)
+            // can destroy this LifeSupport after this system queues the
+            // insert but before deferred commands apply; a plain insert
+            // then panics with B0003 (Item 120, balance Bug #1). Same
+            // guarded pattern as the suffocation and power-alert sites
+            // below (Item 77 Phase 2).
+            commands.entity(entity).try_insert(state);
         }
     }
 }
@@ -1678,6 +1684,54 @@ mod tests {
         let mut reader = events.get_cursor();
         let count = reader.read(events).count();
         assert_eq!(count, 1, "Warning should fire once, not every tick");
+    }
+
+    #[test]
+    fn test_lifesupport_damage_warning_survives_despawn_before_apply() {
+        // Item 120 / balance Bug #1 (B0003): an overload cascade can
+        // destroy the LifeSupport after this system queues its deferred
+        // LifeSupportAlertState insert but before commands apply. The
+        // real system is called directly; the entity is then despawned
+        // (the cascade landing first), and applying the system's command
+        // buffer must not panic. Pre-fix this panics with B0003
+        // ("Could not insert a bundle (LifeSupportAlertState) for entity
+        // ... because it doesn't exist") at the insert site.
+        use bevy_ecs::system::SystemState;
+        use crate::layer1::chronicle::AddChronicleEvent;
+
+        let mut world = World::new();
+        world.init_resource::<Events<AddChronicleEvent>>();
+        let ls = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::LifeSupport,
+                },
+                GridPosition { x: 5, y: 5 },
+                Structure {
+                    current_hp: 20.0, // 40%: inside the 50% warning band
+                    max_hp: 50.0,
+                },
+            ))
+            .id();
+
+        let mut state: SystemState<(
+            Commands,
+            Query<(
+                Entity,
+                &Building,
+                &Structure,
+                Option<&LifeSupportAlertState>,
+            )>,
+            EventWriter<AddChronicleEvent>,
+        )> = SystemState::new(&mut world);
+        let (commands, query, chronicle) = state.get_mut(&mut world);
+        lifesupport_damage_warning_system(commands, query, chronicle);
+
+        // The cascade destroys the unit before deferred commands apply.
+        world.despawn(ls);
+
+        // Pre-fix: panics B0003 here. Post-fix (try_insert): silent no-op.
+        state.apply(&mut world);
     }
 
     // -----------------------------------------------------------------

@@ -155,3 +155,17 @@ pub fn grid_strain_ticks(world: &World) -> u32 {
         .get_resource::<GridStrainTracker>()
         .map_or(0, |t| t.consecutive_strained_ticks)
 }
+
+/// STATS helper (Item 120, balance Bug #3): whether a strain episode is
+/// still armed. `grid_strain_ticks` reads the consecutive-strained
+/// counter, which resets to 0 on the first unstrained tick — so during
+/// a flicker dip of up to [`STRAIN_CLEAR_TICKS`] ticks the counter
+/// reads 0 while the episode (and its already-fired warnings) is still
+/// live. An episode is active while either warning flag is latched;
+/// the flags clear only after the full clear window, exactly when the
+/// tracker re-arms.
+pub fn grid_strain_episode_active(world: &World) -> bool {
+    world
+        .get_resource::<GridStrainTracker>()
+        .is_some_and(|t| t.warned || t.escalated)
+}
