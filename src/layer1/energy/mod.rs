@@ -20,6 +20,9 @@ mod auroral_tests;
 mod blackout_tests;
 #[cfg(test)]
 mod instability_tests;
+pub mod grid_strain;
+#[cfg(test)]
+mod grid_strain_tests;
 pub mod load_limits;
 pub mod phantom_grid;
 #[cfg(test)]
@@ -225,6 +228,9 @@ pub fn power_grid_system(world: &mut World) {
         for mut consumer in consumers.iter_mut(world) {
             consumer.active = false;
         }
+        // Blackout sheds all load: count it as an unstrained tick so a
+        // strain episode can re-arm while the protocol is active.
+        update_grid_strain(world, 1.0, None);
         return;
     }
 
@@ -247,6 +253,10 @@ pub fn power_grid_system(world: &mut World) {
 
     // Clear global buffer state
     buffer.visited.clear();
+
+    // Item 117: worst grid ratio this tick, for the strain telegraph.
+    let mut worst_ratio = 1.0f32;
+    let mut worst_example: Option<(Option<String>, (i32, i32))> = None;
 
     for start_pos in grid_map.keys().copied() {
         if buffer.visited.contains(&start_pos) {
@@ -311,18 +321,88 @@ pub fn power_grid_system(world: &mut World) {
             1.0
         };
 
-        handle_overload(
+        let grid_ratio = handle_overload(
             world,
             &buffer.grid_entities,
             total_nameplate_production,
             total_demand,
         );
+        if grid_ratio > worst_ratio {
+            worst_ratio = grid_ratio;
+            worst_example = buffer.grid_entities.first().and_then(|e| {
+                world.get::<GridPosition>(*e).map(|p| {
+                    (
+                        world
+                            .get::<crate::layer1::building::Building>(*e)
+                            .map(|b| b.building_type.label().to_string()),
+                        (p.x, p.y),
+                    )
+                })
+            });
+        }
 
         activate_consumers(world, &buffer.grid_entities, net, supply_ratio);
     }
 
+    // Item 117: feed the worst grid's ratio to the strain tracker once
+    // per tick (not once per grid), so consecutive-tick counting is a
+    // colony clock, and chronicle any warning that comes due.
+    update_grid_strain(world, worst_ratio, worst_example);
+
     // Re-insert the buffer for the next frame
     world.insert_resource(buffer);
+}
+
+/// Item 117: advance the grid-strain tracker by one tick and, when a
+/// warning comes due, chronicle it. First warning is Standard (nothing
+/// has happened yet — Major is reserved for the Item 114 ignition
+/// itself); the escalated warning is Major (ignition is overdue in
+/// expectation and imminent). No-op for the Chronicle when the event
+/// resource was never initialized (minimal test worlds).
+fn update_grid_strain(
+    world: &mut World,
+    worst_ratio: f32,
+    example: Option<(Option<String>, (i32, i32))>,
+) {
+    if !world.contains_resource::<grid_strain::GridStrainTracker>() {
+        world.insert_resource(grid_strain::GridStrainTracker::default());
+    }
+    let warning = world
+        .resource_mut::<grid_strain::GridStrainTracker>()
+        .observe(worst_ratio, example);
+    let Some(kind) = warning else { return };
+
+    let (ratio, label, pos) = {
+        let tracker = world.resource::<grid_strain::GridStrainTracker>();
+        (
+            tracker.last_ratio,
+            tracker.example_label.clone(),
+            tracker.example_pos,
+        )
+    };
+    let pct = ratio * 100.0;
+    let around = match (label, pos) {
+        (Some(label), Some((x, y))) => format!(" around the {label} at ({x}, {y})"),
+        (None, Some((x, y))) => format!(" around ({x}, {y})"),
+        _ => String::new(),
+    };
+    let (text, importance) = match kind {
+        grid_strain::StrainWarning::First => (
+            format!(
+                "Warning: the power grid is straining under overload — demand at {pct:.0}% of capacity{around}. Shed load or add generation before it catches fire."
+            ),
+            crate::layer1::chronicle::EventImportance::Standard,
+        ),
+        grid_strain::StrainWarning::Escalated => (
+            format!(
+                "The power grid is at breaking point — demand has held at {pct:.0}% of capacity{around}. Fire is imminent if load is not shed at once."
+            ),
+            crate::layer1::chronicle::EventImportance::Major,
+        ),
+    };
+    if world.contains_resource::<Events<crate::layer1::chronicle::AddChronicleEvent>>() {
+        world.send_event(crate::layer1::chronicle::AddChronicleEvent { text, importance });
+    }
 }
 
 /// System to process fuel consumption for power sources.
@@ -430,7 +510,7 @@ fn handle_overload(
     grid_entities: &[Entity],
     total_nameplate_production: f32,
     total_demand: f32,
-) {
+) -> f32 {
     // Overload is a wiring-capacity phenomenon: demand measured against the
     // grid's installed (nameplate) production, NOT prototype-discounted
     // output. Prototype inefficiency already manifests as brownout —
@@ -470,6 +550,8 @@ fn handle_overload(
             }
         }
     }
+
+    overload_ratio
 }
 
 fn activate_consumers(world: &mut World, grid_entities: &[Entity], net: f32, supply_ratio: f32) {
