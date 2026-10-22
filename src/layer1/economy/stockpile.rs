@@ -1,4 +1,7 @@
-use crate::layer1::resources::{ColonyResources, BASE_MAX_FOOD, BASE_MAX_STONE, BASE_MAX_WOOD};
+use crate::layer1::resources::{
+    ColonyResources, BASE_MAX_BIOLOGICAL_WASTE, BASE_MAX_FOOD, BASE_MAX_NUTRIENT_PASTE,
+    BASE_MAX_STONE, BASE_MAX_WOOD,
+};
 use bevy_ecs::prelude::*;
 
 /// Component that increases the maximum resource capacity of the colony.
@@ -46,11 +49,20 @@ pub fn update_resource_caps_system(
     resources.max_wood = BASE_MAX_WOOD + total_wood_bonus;
     resources.max_stone = BASE_MAX_STONE + total_stone_bonus;
     resources.max_waste = total_waste_bonus; // No base capacity for waste
+    // Item 118: wire the Recycler ledger recipe's caps, which no system
+    // ever raised from 0.0 before. Biological waste is stored with the
+    // waste stream, so the waste bonus (Landfill: 100) raises its cap
+    // over a base capacity; nutrient paste is a foodstuff (it counts in
+    // `total_food`), so the food bonus raises its cap over a base.
+    resources.max_biological_waste = BASE_MAX_BIOLOGICAL_WASTE + total_waste_bonus;
+    resources.max_nutrient_paste = BASE_MAX_NUTRIENT_PASTE + total_food_bonus;
 
     resources.food = resources.food.min(resources.max_food);
     resources.wood = resources.wood.min(resources.max_wood);
     resources.stone = resources.stone.min(resources.max_stone);
     resources.waste = resources.waste.min(resources.max_waste);
+    resources.biological_waste = resources.biological_waste.min(resources.max_biological_waste);
+    resources.nutrient_paste = resources.nutrient_paste.min(resources.max_nutrient_paste);
 }
 
 #[cfg(test)]

@@ -404,6 +404,12 @@ fn apply_finished_refining_jobs(
                     resources.add_clothing(output.clothing);
                 resources.add_eva_suits(output.eva_suits);
                     resources.add_fuel(output.fuel);
+                    // Item 118: credit the Recycler ledger recipe's
+                    // output (and, symmetrically, any bio-waste output —
+                    // no current recipe produces one, so this is 0.0 for
+                    // every other building and changes nothing for them).
+                    resources.add_biological_waste(output.biological_waste);
+                    resources.add_nutrient_paste(output.nutrient_paste);
                     true
                 } else {
                     false
@@ -833,5 +839,305 @@ mod recycler_production_tests {
         assert!(can_refine);
         assert_eq!(input.biological_waste, 5.0);
         assert_eq!(output.nutrient_paste, 5.0);
+    }
+}
+
+#[cfg(test)]
+mod recycler_ledger_118_tests {
+    //! Item 118 — Recycler ledger-recipe revival. Item 116 found the
+    //! Recycler's refining-table recipe (biological_waste 5 ->
+    //! nutrient_paste 5, waste_chance 0.5) triple-dead: no
+    //! RefiningProgress at placement, bio-waste/paste caps stuck at 0.0,
+    //! and `can_afford`/`deduct` ignoring both fields (plus nothing in
+    //! live play producing ledger bio-waste). These tests exercise the
+    //! REAL seams: `ColonyResources::try_deduct`, the live
+    //! `update_resource_caps_system`, `try_place_building`,
+    //! `process_refining_system`, and the full live schedule via
+    //! `run_simulation_tick` (compost producer). Every test fails on
+    //! trunk 188a576d for one of those dead-wiring reasons.
+
+    use crate::layer1::building::{try_place_building, Building, BuildingMap, BuildingType, OccupiedTiles};
+    use crate::layer1::pop::Pop;
+    use crate::layer1::refining::{get_refining_recipe, process_refining_system};
+    use crate::layer1::resources::{ColonyResources, RefiningProgress};
+    use crate::layer1::stockpile::{update_resource_caps_system, Stockpile};
+    use crate::layer1::terrain::{TerrainGrid, TerrainType};
+    use crate::layer1::utility_ai::{ActionType, PopAction};
+    use crate::layer1::GridPosition;
+    use bevy_ecs::prelude::*;
+    use bevy_ecs::system::RunSystemOnce;
+
+    #[test]
+    fn ledger_try_deduct_covers_biological_waste() {
+        let cost = ColonyResources {
+            biological_waste: 5.0,
+            ..ColonyResources::zeroed()
+        };
+        let mut rich = ColonyResources {
+            biological_waste: 10.0,
+            ..ColonyResources::zeroed()
+        };
+        assert!(rich.can_afford(&cost), "10 bio-waste must afford a 5 cost");
+        assert!(rich.try_deduct(&cost), "deduct must succeed when affordable");
+        assert_eq!(rich.biological_waste, 5.0, "deduct must actually remove bio-waste");
+
+        let mut poor = ColonyResources {
+            biological_waste: 3.0,
+            ..ColonyResources::zeroed()
+        };
+        assert!(!poor.can_afford(&cost), "3 bio-waste must NOT afford a 5 cost");
+        assert!(!poor.try_deduct(&cost), "deduct must fail when unaffordable");
+        assert_eq!(poor.biological_waste, 3.0, "failed deduct must not change the balance");
+
+        let negative = ColonyResources {
+            biological_waste: -5.0,
+            ..ColonyResources::zeroed()
+        };
+        assert!(
+            !rich.can_afford(&negative),
+            "a negative bio-waste cost is an exploit and must be rejected"
+        );
+    }
+
+    #[test]
+    fn ledger_try_deduct_covers_nutrient_paste() {
+        let cost = ColonyResources {
+            nutrient_paste: 5.0,
+            ..ColonyResources::zeroed()
+        };
+        let mut rich = ColonyResources {
+            nutrient_paste: 10.0,
+            ..ColonyResources::zeroed()
+        };
+        assert!(rich.can_afford(&cost), "10 paste must afford a 5 cost");
+        assert!(rich.try_deduct(&cost));
+        assert_eq!(rich.nutrient_paste, 5.0, "deduct must actually remove nutrient paste");
+
+        let mut poor = ColonyResources {
+            nutrient_paste: 3.0,
+            ..ColonyResources::zeroed()
+        };
+        assert!(!poor.can_afford(&cost), "3 paste must NOT afford a 5 cost");
+        assert!(!poor.try_deduct(&cost));
+        assert_eq!(poor.nutrient_paste, 3.0);
+
+        let negative = ColonyResources {
+            nutrient_paste: -5.0,
+            ..ColonyResources::zeroed()
+        };
+        assert!(
+            !rich.can_afford(&negative),
+            "a negative paste cost is an exploit and must be rejected"
+        );
+    }
+
+    #[test]
+    fn live_caps_system_raises_bio_and_paste_caps() {
+        let mut world = World::new();
+        world.insert_resource(ColonyResources {
+            biological_waste: 999.0,
+            nutrient_paste: 999.0,
+            ..Default::default()
+        });
+        // A plain stockpile (no food/waste bonus) plus a Landfill-style
+        // stockpile (waste_bonus 100, the real Landfill configuration).
+        world.spawn(Stockpile::default());
+        world.spawn(Stockpile {
+            food_bonus: 0.0,
+            wood_bonus: 0.0,
+            stone_bonus: 0.0,
+            waste_bonus: 100.0,
+        });
+        world.run_system_once(update_resource_caps_system).unwrap();
+        let res = world.resource::<ColonyResources>();
+        assert_eq!(
+            res.max_biological_waste, 150.0,
+            "bio-waste cap = 50 base + waste storage bonus (Landfill 100)"
+        );
+        assert_eq!(
+            res.max_nutrient_paste, 50.0,
+            "nutrient-paste cap = 50 base + food storage bonus (0 here)"
+        );
+        assert_eq!(res.biological_waste, 150.0, "over-cap bio-waste must clamp to the cap");
+        assert_eq!(res.nutrient_paste, 50.0, "over-cap paste must clamp to the cap");
+    }
+
+    fn placement_world_118() -> World {
+        let mut world = World::new();
+        world.insert_resource(TerrainGrid {
+            width: 100,
+            height: 100,
+            tiles: vec![TerrainType::Grass; 100 * 100],
+        });
+        world.insert_resource(OccupiedTiles::default());
+        world.insert_resource(BuildingMap::default());
+        world.init_resource::<Events<crate::layer1::ancestral_graves::SacrilegeEvent>>();
+        world.init_resource::<Events<crate::layer1::core::events::BuildingRemovedEvent>>();
+        world.init_resource::<Events<crate::layer1::core::events::BuildingCompletedEvent>>();
+        // Same capacity-first unlock pattern as Item 116 (unlocking into
+        // zero capacity corrupts the tech instantly).
+        let mut tech = crate::layer1::tech::TechState {
+            total_capacity: 100.0,
+            ..Default::default()
+        };
+        tech.unlock(crate::layer1::tech::Tech::Medical);
+        world.insert_resource(tech);
+        world.insert_resource(ColonyResources {
+            wood: 100_000.0,
+            stone: 100_000.0,
+            ore: 100_000.0,
+            metal: 100_000.0,
+            max_wood: 100_000.0,
+            max_planks: 100_000.0,
+            biological_waste: 10.0,
+            max_biological_waste: 50.0,
+            max_nutrient_paste: 50.0,
+            ..Default::default()
+        });
+        world
+    }
+
+    fn place_recycler(world: &mut World, x: i32, y: i32) -> Entity {
+        assert!(
+            try_place_building(world, x, y, BuildingType::Recycler),
+            "Recycler placement at ({x},{y}) should succeed"
+        );
+        let mut q = world.query::<(Entity, &GridPosition, &Building)>();
+        q.iter(world)
+            .find(|(_, p, b)| p.x == x && p.y == y && b.building_type == BuildingType::Recycler)
+            .map(|(e, _, _)| e)
+            .expect("placed Recycler entity")
+    }
+
+    #[test]
+    fn live_placed_recycler_has_refining_progress() {
+        let mut world = placement_world_118();
+        let rec = place_recycler(&mut world, 5, 5);
+        assert!(
+            world.get::<RefiningProgress>(rec).is_some(),
+            "a live-placed Recycler must carry RefiningProgress so its ledger refining recipe can run (Item 118)"
+        );
+        // The Item 116 seams must survive: physical inventory, the
+        // Recycler marker, and the byproduct bin.
+        assert!(world.get::<crate::layer1::recycling::Recycler>(rec).is_some());
+        assert!(world.get::<crate::layer1::inventory::Inventory>(rec).is_some());
+        assert!(
+            world
+                .get::<crate::layer1::crafting::byproducts::Inventory>(rec)
+                .is_some(),
+            "placed Recycler must keep its Item 116 byproduct bin"
+        );
+    }
+
+    #[test]
+    fn live_recycler_completion_converts_biowaste_to_paste() {
+        let mut world = placement_world_118();
+        let rec = place_recycler(&mut world, 5, 5);
+        {
+            let mut prog = world.get_mut::<RefiningProgress>(rec).unwrap();
+            prog.current = 9.9;
+            prog.max = 10.0;
+        }
+        world.spawn((
+            Pop,
+            GridPosition { x: 5, y: 5 },
+            PopAction {
+                current: ActionType::Refine,
+                ..Default::default()
+            },
+        ));
+        // The recipe itself must be untouched: 5 -> 5 at waste_chance 0.5.
+        let res = *world.resource::<ColonyResources>();
+        let (can, input, output, chance) = get_refining_recipe(BuildingType::Recycler, &res);
+        assert!(can, "recipe must be reachable with 10 bio-waste and paste cap 50");
+        assert_eq!(input.biological_waste, 5.0);
+        assert_eq!(output.nutrient_paste, 5.0);
+        assert_eq!(chance, 0.5);
+
+        process_refining_system(&mut world);
+        let res = world.resource::<ColonyResources>();
+        assert_eq!(
+            res.biological_waste, 5.0,
+            "completion must deduct the 5 bio-waste input from the ledger"
+        );
+        assert_eq!(
+            res.nutrient_paste, 5.0,
+            "completion must credit the 5 nutrient paste output to the ledger"
+        );
+    }
+
+    #[test]
+    fn live_full_sim_compost_produces_biowaste_and_recycler_is_wired() {
+        let mut world =
+            crate::setup::setup_world_with_config(crate::setup::SetupConfig::default());
+        {
+            let mut res = world.resource_mut::<ColonyResources>();
+            res.wood = 100_000.0;
+            res.stone = 100_000.0;
+            res.metal = 100_000.0;
+            res.max_wood = 100_000.0;
+        }
+        if let Some(mut tech) = world.get_resource_mut::<crate::layer1::tech::TechState>() {
+            tech.total_capacity = tech.total_capacity.max(100.0);
+            tech.unlock(crate::layer1::tech::Tech::Medical);
+        }
+        // Place the Recycler in the live world first (Item 116 pattern:
+        // placement precedes ticking — after ticks, tech-capacity
+        // recomputation can corrupt the freshly unlocked Medical tech
+        // and block placement; that is pre-existing live behavior, not
+        // this item's concern).
+        let mut placed = None;
+        'outer: for x in 4..60 {
+            for y in 4..60 {
+                if try_place_building(&mut world, x, y, BuildingType::Recycler) {
+                    placed = Some((x, y));
+                    break 'outer;
+                }
+            }
+        }
+        let (rx, ry) = placed.expect("a Recycler should be placeable somewhere in a live world");
+        // One full live tick: the caps system (Economy set) must raise
+        // the bio-waste / paste caps off 0.0 in a real colony.
+        crate::simulation::run_simulation_tick(&mut world);
+        {
+            let res = world.resource::<ColonyResources>();
+            assert!(
+                res.max_biological_waste >= 50.0,
+                "live tick must raise the bio-waste cap, got {}",
+                res.max_biological_waste
+            );
+            assert!(
+                res.max_nutrient_paste >= 50.0,
+                "live tick must raise the nutrient-paste cap, got {}",
+                res.max_nutrient_paste
+            );
+        }
+        // A fully-decayed unburied corpse decomposes through the live
+        // compost chain and must produce ledger biological waste.
+        world.spawn((
+            crate::layer1::funeral::Corpse {
+                name: "Ledger Test Pop".to_string(),
+                decay: 1.0,
+            },
+            GridPosition { x: 10, y: 10 },
+        ));
+        crate::simulation::run_simulation_tick(&mut world);
+        {
+            let res = world.resource::<ColonyResources>();
+            assert!(
+                res.biological_waste >= 5.0,
+                "a decomposed corpse must produce ledger bio-waste in live play, got {}",
+                res.biological_waste
+            );
+        }
+        // And the Recycler placed in the same live world carries the
+        // refining seam, still present after live ticks.
+        let mut q = world.query::<(&GridPosition, &Building, Option<&RefiningProgress>)>();
+        assert!(
+            q.iter(&world).any(|(p, b, prog)| {
+                p.x == rx && p.y == ry && b.building_type == BuildingType::Recycler && prog.is_some()
+            }),
+            "Recycler placed in a full live world must carry RefiningProgress"
+        );
     }
 }

@@ -1860,12 +1860,23 @@ fn configure_civic_services(entity: &mut EntityWorldMut, building_type: Building
             // Item 116: the Recycler's live production seam is
             // recycle_processing_system (physical Waste/Corpse items);
             // it carries a Spec 354 byproduct bin alongside its
-            // physical Inventory. (Its refining-table recipe stays
-            // unwired: no live ledger path — see the Item 116 report.)
+            // physical Inventory.
+            // Item 118: its refining-table ledger recipe
+            // (biological_waste 5 -> nutrient_paste 5) is now wired
+            // live too — placement grants RefiningProgress (same
+            // {0, 10} as the Office fix in Item 116 and the basic
+            // refiners), so `process_refining_system` and the utility
+            // AI's Refine candidates can run it whenever the ledger
+            // holds bio-waste. The two seams coexist, exactly like
+            // the Office's Refine vs Administrator candidates.
             insert_byproduct_bin(entity, building_type);
             entity.insert((
                 crate::layer1::recycling::Recycler::default(),
                 Inventory::default(),
+                RefiningProgress {
+                    current: 0.0,
+                    max: 10.0,
+                },
                 crate::layer1::lighting::LightSource {
                     is_outdoor: true,
                     radius: 3.0,

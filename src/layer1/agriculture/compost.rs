@@ -17,6 +17,11 @@ pub const CORPSE_DECAY_TICKS: f32 = 100.0;
 pub const COMPOST_FERTILITY_BONUS: f32 = 0.5;
 /// Maximum enrichment bonus stackable on one tile.
 pub const MAX_ENRICHMENT_BONUS: f32 = 1.0;
+/// Ledger biological waste yielded per fully-decomposed corpse
+/// (Item 118). Decomposition is the live producer for the Recycler's
+/// ledger refining recipe: one corpse yields exactly one Recycler
+/// batch of feedstock (the recipe consumes 5.0 biological waste).
+pub const BIO_WASTE_PER_CORPSE: f32 = 5.0;
 /// Ticks between haunted-mood applications (once per shift, not per tick).
 pub const HAUNTED_MOOD_PERIOD_TICKS: u64 = 100;
 /// Mood penalty for working haunted soil.
@@ -74,16 +79,29 @@ pub fn tick_corpse_decay_system(mut corpses: Query<&mut crate::layer1::funeral::
 ///
 /// Runs on unburied corpses only (burial despawns the corpse first).
 /// Each decomposition enriches the tile and marks it haunted.
+///
+/// Item 118: decomposition also yields ledger biological waste — the
+/// feedstock the Recycler's refining recipe consumes (5 -> 5 nutrient
+/// paste). This is the recipe's live producer: no parallel waste
+/// system, just the existing compost seam crediting the existing
+/// ledger (clamped to the bio-waste cap by `add_biological_waste`).
+/// The ledger param is optional so worlds without a `ColonyResources`
+/// (isolated unit worlds) keep the historical soil-only behavior.
 pub fn compost_decomposition_system(
     mut commands: Commands,
     corpses: Query<
         (Entity, &crate::layer1::funeral::Corpse, &GridPosition),
     >,
     mut soil: ResMut<CompostSoil>,
+    resources: Option<ResMut<crate::layer1::economy::resources::ColonyResources>>,
 ) {
+    let mut resources = resources;
     for (entity, corpse, pos) in corpses.iter() {
         if corpse.decay >= 1.0 {
             soil.enrich(pos.x, pos.y, COMPOST_FERTILITY_BONUS);
+            if let Some(resources) = resources.as_deref_mut() {
+                resources.add_biological_waste(BIO_WASTE_PER_CORPSE);
+            }
             commands.entity(entity).despawn();
         }
     }
@@ -197,6 +215,34 @@ mod tests {
             "tile should gain fertility from compost"
         );
         assert!(soil.is_haunted(5, 5), "tile should be marked haunted");
+    }
+
+    #[test]
+    fn test_decomposed_corpse_yields_biological_waste() {
+        // Item 118: decomposition is the live producer for the
+        // Recycler's ledger recipe (biological_waste 5 -> nutrient
+        // paste 5). One fully-decomposed corpse yields exactly one
+        // Recycler batch of feedstock (5.0) into the colony ledger.
+        let mut world = World::new();
+        world.insert_resource(CompostSoil::default());
+        world.insert_resource(crate::layer1::economy::resources::ColonyResources {
+            max_biological_waste: 50.0,
+            ..Default::default()
+        });
+        let corpse = world.spawn(corpse_at(5, 5, 1.0)).id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(compost_decomposition_system);
+        schedule.run(&mut world);
+
+        assert!(world.get_entity(corpse).is_err(), "corpse should despawn");
+        let soil = world.resource::<CompostSoil>();
+        assert!(soil.enrichment_at(5, 5) > 0.0, "soil enrichment must be preserved");
+        let res = world.resource::<crate::layer1::economy::resources::ColonyResources>();
+        assert_eq!(
+            res.biological_waste, 5.0,
+            "one decomposed corpse must yield 5.0 ledger biological waste"
+        );
     }
 
     #[test]

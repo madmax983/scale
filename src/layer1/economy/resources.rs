@@ -294,8 +294,12 @@ impl Default for ColonyResources {
             max_cloth: 50.0,
             max_clothing: 50.0,
             max_waste: 0.0, // Defaults to 0, requires Landfill
-            max_biological_waste: 0.0,
-            max_nutrient_paste: 0.0,
+            // Item 118: base caps for the Recycler ledger recipe's
+            // input/output, matching the peer refined-goods caps
+            // (planks/rations 50). `update_resource_caps_system` wires
+            // storage bonuses on top of these bases every tick.
+            max_biological_waste: 50.0,
+            max_nutrient_paste: 50.0,
             max_rations: 50.0,
             max_fuel: 20.0,
             water: 0.0,
@@ -630,6 +634,26 @@ impl ColonyResources {
         }
     }
 
+    /// Adds biological waste, clamping to the maximum capacity.
+    /// (Item 118: the Recycler ledger recipe's input — produced by
+    /// corpse decomposition, consumed 5 at a time by Recycler refining.)
+    pub fn add_biological_waste(&mut self, amount: f32) {
+        if amount.is_finite() {
+            self.biological_waste =
+                (self.biological_waste + amount).clamp(0.0, self.max_biological_waste);
+        }
+    }
+
+    /// Adds nutrient paste, clamping to the maximum capacity.
+    /// (Item 118: the Recycler ledger recipe's output — a foodstuff,
+    /// eaten through the same meal fallback as before.)
+    pub fn add_nutrient_paste(&mut self, amount: f32) {
+        if amount.is_finite() {
+            self.nutrient_paste =
+                (self.nutrient_paste + amount).clamp(0.0, self.max_nutrient_paste);
+        }
+    }
+
     /// Adds hyper_valuable, clamping to the maximum capacity.
     pub fn add_hyper_valuable(&mut self, amount: f32) {
         if amount.is_finite() {
@@ -665,6 +689,8 @@ impl ColonyResources {
             || self.credits < 0.0
             || self.memory_cores < 0.0
             || self.void_ale < 0.0
+            || self.biological_waste < 0.0
+            || self.nutrient_paste < 0.0
     }
 
     /// Checks if all resource values are finite (not NaN or Infinity).
@@ -691,6 +717,8 @@ impl ColonyResources {
             && self.credits.is_finite()
             && self.memory_cores.is_finite()
             && self.void_ale.is_finite()
+            && self.biological_waste.is_finite()
+            && self.nutrient_paste.is_finite()
     }
 
     /// Checks if the colony can afford the given cost.
@@ -732,6 +760,8 @@ impl ColonyResources {
             && self.memory_cores >= cost.memory_cores
             && self.void_ale >= cost.void_ale
             && self.eva_suits >= cost.eva_suits
+            && self.biological_waste >= cost.biological_waste
+            && self.nutrient_paste >= cost.nutrient_paste
     }
 
     /// Deducts the given cost from the colony's resources.
@@ -762,6 +792,8 @@ impl ColonyResources {
         self.memory_cores -= cost.memory_cores;
         self.void_ale -= cost.void_ale;
         self.eva_suits -= cost.eva_suits;
+        self.biological_waste -= cost.biological_waste;
+        self.nutrient_paste -= cost.nutrient_paste;
     }
 
     /// Attempts to deduct the given cost from the colony's resources.
@@ -1000,6 +1032,12 @@ pub const BASE_MAX_FOOD: f32 = 50.0;
 pub const BASE_MAX_WOOD: f32 = 50.0;
 /// Base maximum stone capacity.
 pub const BASE_MAX_STONE: f32 = 20.0;
+/// Base maximum biological-waste capacity (Item 118: the Recycler
+/// ledger recipe's input; waste storage bonuses raise it).
+pub const BASE_MAX_BIOLOGICAL_WASTE: f32 = 50.0;
+/// Base maximum nutrient-paste capacity (Item 118: the Recycler
+/// ledger recipe's output; food storage bonuses raise it).
+pub const BASE_MAX_NUTRIENT_PASTE: f32 = 50.0;
 
 impl MiningProgress {
     /// Returns true if the work is finished.
