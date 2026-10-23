@@ -32,6 +32,7 @@ use crate::layer1::health::Health;
 use crate::layer1::map::GridPosition;
 use crate::layer1::pop::{Pop, PopBundle, PopName};
 use crate::layer1::pressure::PressureGrid;
+use crate::layer1::temperature::TemperatureGrid;
 use crate::layer1::psychology::needs::Needs;
 use crate::layer1::terrain::{TerrainGrid, TerrainType};
 
@@ -112,6 +113,21 @@ pub const SCUTTLE_PAYOUT_FRACTION: f32 = 0.40;
 /// How far (Chebyshev) the salvager may wander from the hulk before the
 /// tick nudges them back (only while unpossessed).
 pub const SALVAGER_TETHER_RADIUS: i32 = 2;
+/// The sealed cabin is also kept livable: thermal envelope radius (tiles)
+/// around the hulk. Covers the tether range and every breach tile
+/// (breach offsets reach Chebyshev 2), so the waiting salvager and their
+/// work tiles stay warm.
+pub const HULK_THERMAL_RADIUS: i32 = 2;
+/// Thermostat target (Celsius) for the hulk's thermal envelope — the
+/// Corsair skiff precedent (`SKIFF_ENVELOPE_TEMP`). The tethered salvager
+/// winters outside the habitat's LifeSupport radius; without the cabin's
+/// own heat they take 0.5/tick hypothermia all winter and die before any
+/// player possesses them (balance-loop Bug #2, item 123).
+pub const HULK_ENVELOPE_TEMP: f32 = 15.0;
+/// Max heat pushed per tick toward the envelope target (LifeSupport's
+/// cap, via the skiff). Thermostat-style: only pushes tiles below the
+/// target, so it can never overheat the cabin in summer.
+pub const HULK_HEAT_PER_TICK: f32 = 12.0;
 /// How close (Chebyshev) the salvager must be to the hulk to survey/strip.
 pub const WRECK_WORK_REACH: i32 = 2;
 /// How close (Chebyshev) a pop must be to the hulk to take up the spike.
@@ -1198,6 +1214,28 @@ pub fn salvager_tick(world: &mut World) {
                 grid.set(p.x, p.y, if patched { 1.0 } else { 0.0 });
             }
         }
+        // Thermostat-style heat (Corsair skiff pattern): the sealed cabin
+        // is a thermal envelope too — only pushes tiles below the target
+        // up, capped per tick, so it never overheats in summer. Runs
+        // before the thermal damage system. Protection is positional
+        // (the hulk's tiles), never marker-based: a possessed salvager
+        // working away from the wreck freezes like anyone else.
+        if let Some(mut tgrid) = world.get_resource_mut::<TemperatureGrid>() {
+            for dx in -HULK_THERMAL_RADIUS..=HULK_THERMAL_RADIUS {
+                for dy in -HULK_THERMAL_RADIUS..=HULK_THERMAL_RADIUS {
+                    let tx = hpos.x + dx;
+                    let ty = hpos.y + dy;
+                    let temp = tgrid.get_safe(tx, ty);
+                    if temp < HULK_ENVELOPE_TEMP {
+                        tgrid.add(
+                            tx,
+                            ty,
+                            (HULK_ENVELOPE_TEMP - temp).min(HULK_HEAT_PER_TICK),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     // --- Ration cache: feed the salvager ----------------------------------------
@@ -1963,6 +2001,82 @@ mod tests {
         let grid = world.resource::<PressureGrid>();
         assert!((grid.get(hpos.x, hpos.y) - 1.0).abs() < 0.01);
         assert!(grid.get(bpos.x, bpos.y) < 0.01, "open breach is vacuum");
+    }
+
+    #[test]
+    fn test_tick_warms_hulk_envelope_above_hypothermia() {
+        // Item 123 (balance-loop Bug #2): the waiting salvager is tethered
+        // to the hulk, excluded from utility AI, and the cabin held
+        // pressure but not heat — Jett froze at the wreck all winter.
+        // The sealed cabin is a thermal envelope too (Corsair skiff
+        // precedent): thermostat push toward 15C within the tether radius.
+        let mut world = setup();
+        let _hulk = spawn_hulk_direct(&mut world, 10, 10);
+        let salvager = salvager_of(&mut world);
+        // Deep winter everywhere: -5C, below the 10C hypothermia threshold.
+        world.insert_resource(TemperatureGrid::new(40, 40, -5.0));
+        for _ in 0..10 {
+            salvager_tick(&mut world);
+        }
+        let grid = world.resource::<TemperatureGrid>();
+        let spos = *world.get::<GridPosition>(salvager).unwrap();
+        assert!(
+            grid.get_safe(spos.x, spos.y) >= 10.0,
+            "waiting salvager's tile must stay above the hypothermia threshold, got {}",
+            grid.get_safe(spos.x, spos.y)
+        );
+        assert!(
+            grid.get_safe(12, 10) >= 10.0,
+            "envelope edge (tether radius) must stay above the hypothermia threshold"
+        );
+        // Outside the envelope stays freezing.
+        assert!(grid.get_safe(14, 10) < 10.0);
+    }
+
+    #[test]
+    fn test_tick_never_overheats_summer_hulk_envelope() {
+        let mut world = setup();
+        let _hulk = spawn_hulk_direct(&mut world, 10, 10);
+        // Hot summer day: 33C, just under the 35C heatstroke threshold.
+        world.insert_resource(TemperatureGrid::new(40, 40, 33.0));
+        salvager_tick(&mut world);
+        let t = world.resource::<TemperatureGrid>().get_safe(10, 10);
+        assert!(
+            t <= 35.0,
+            "thermostat heat must never push a summer tile over heatstroke, got {t}"
+        );
+        assert!((t - 33.0).abs() < f32::EPSILON, "summer tiles are untouched");
+    }
+
+    #[test]
+    fn test_possessed_salvager_away_from_hulk_still_freezes() {
+        // Item 123 hard constraint: the Salvager marker persists after
+        // possession, so protection must come from the vessel's envelope,
+        // never from a marker exemption. A possessed salvager working
+        // away from the hulk takes hypothermia damage like any other pop.
+        use bevy_ecs::system::RunSystemOnce;
+        let mut world = setup();
+        let _hulk = spawn_hulk_direct(&mut world, 10, 10);
+        let salvager = salvager_of(&mut world);
+        world.entity_mut(salvager).insert(Possessed);
+        *world.get_mut::<GridPosition>(salvager).unwrap() = GridPosition { x: 35, y: 35 };
+        world.insert_resource(TemperatureGrid::new(40, 40, -5.0));
+        world
+            .init_resource::<Events<crate::layer1::temperature::ThermalDamageEvent>>();
+        salvager_tick(&mut world);
+        assert!(
+            world.resource::<TemperatureGrid>().get_safe(35, 35) < 10.0,
+            "the envelope is local to the hulk — away tiles stay cold"
+        );
+        let before = world.get::<Health>(salvager).unwrap().current;
+        world
+            .run_system_once(crate::layer1::temperature::thermal_damage_system)
+            .unwrap();
+        let after = world.get::<Health>(salvager).unwrap().current;
+        assert!(
+            after < before,
+            "possessed salvager away from the hulk must take hypothermia damage (before {before}, after {after})"
+        );
     }
 
     #[test]

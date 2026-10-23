@@ -28,6 +28,7 @@ use crate::layer1::economy::Wallet;
 use crate::layer1::map::GridPosition;
 use crate::layer1::pop::{Pop, PopBundle, PopName};
 use crate::layer1::pressure::PressureGrid;
+use crate::layer1::temperature::TemperatureGrid;
 use crate::layer1::psychology::needs::Needs;
 use crate::layer1::social::morale::{MoodModifier, Morale};
 use crate::layer1::terrain::{TerrainGrid, TerrainType};
@@ -95,6 +96,17 @@ pub const SNACK_HUNGER_GATE: f32 = 0.95;
 pub const PILOT_TETHER_RADIUS: i32 = 2;
 /// Pressure envelope radius held around the shuttle.
 pub const SHUTTLE_PRESSURE_RADIUS: i32 = 2;
+/// The sealed shuttle is also kept livable: thermostat target (Celsius)
+/// for the thermal envelope held over the pressure-envelope tiles — the
+/// Corsair skiff precedent (`SKIFF_ENVELOPE_TEMP`). The tethered pilot
+/// winters outside the habitat's LifeSupport radius; without the
+/// shuttle's own heat they take 0.5/tick hypothermia all winter and die
+/// before any player possesses them (balance-loop Bug #2, item 123).
+pub const SHUTTLE_ENVELOPE_TEMP: f32 = 15.0;
+/// Max heat pushed per tick toward the envelope target (LifeSupport's
+/// cap, via the skiff). Thermostat-style: only pushes tiles below the
+/// target, so it can never overheat the shuttle in summer.
+pub const SHUTTLE_HEAT_PER_TICK: f32 = 12.0;
 /// How close (Chebyshev) the pilot must be to the shuttle to work the drive.
 pub const SHUTTLE_WORK_REACH: i32 = 2;
 /// How close (Chebyshev) a pop must be to the shuttle to take up the yoke.
@@ -1051,6 +1063,30 @@ pub fn pilot_tick(world: &mut World) {
                 }
             }
         }
+        // --- Thermal envelope ---------------------------------------------------
+        // Thermostat-style heat (Corsair skiff pattern): the sealed
+        // shuttle is a thermal envelope too — only pushes tiles below
+        // the target up, capped per tick, so it never overheats in
+        // summer. Runs before the thermal damage system. Protection is
+        // positional (the shuttle's tiles), never marker-based: a
+        // possessed pilot working away from the shuttle freezes like
+        // anyone else.
+        if let Some(mut tgrid) = world.get_resource_mut::<TemperatureGrid>() {
+            for dx in -SHUTTLE_PRESSURE_RADIUS..=SHUTTLE_PRESSURE_RADIUS {
+                for dy in -SHUTTLE_PRESSURE_RADIUS..=SHUTTLE_PRESSURE_RADIUS {
+                    let tx = shuttle_pos.x + dx;
+                    let ty = shuttle_pos.y + dy;
+                    let temp = tgrid.get_safe(tx, ty);
+                    if temp < SHUTTLE_ENVELOPE_TEMP {
+                        tgrid.add(
+                            tx,
+                            ty,
+                            (SHUTTLE_ENVELOPE_TEMP - temp).min(SHUTTLE_HEAT_PER_TICK),
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1587,6 +1623,86 @@ mod tests {
         world.get_mut::<LongshotDrive>(shuttle).unwrap().charge = DRIVE_CHARGE_MAX;
         pilot_tick(&mut world);
         assert_eq!(drive_of(&mut world).charge, DRIVE_CHARGE_MAX, "charge caps at max");
+    }
+
+    #[test]
+    fn test_tick_warms_shuttle_envelope_above_hypothermia() {
+        // Item 123 (balance-loop Bug #2): the waiting pilot is tethered
+        // to the shuttle, excluded from utility AI, and the shuttle held
+        // pressure but not heat — Wren froze aboard all winter. The
+        // sealed shuttle is a thermal envelope too (Corsair skiff
+        // precedent): thermostat push toward 15C within the pressure
+        // envelope radius.
+        let mut world = setup();
+        let _shuttle = spawn_shuttle_direct(&mut world, 10, 10);
+        let pilot = pilot_of(&mut world);
+        // Deep winter everywhere: -5C, below the 10C hypothermia threshold.
+        world.insert_resource(TemperatureGrid::new(40, 40, -5.0));
+        for _ in 0..10 {
+            pilot_tick(&mut world);
+        }
+        let grid = world.resource::<TemperatureGrid>();
+        let ppos = *world.get::<GridPosition>(pilot).unwrap();
+        assert!(
+            grid.get_safe(ppos.x, ppos.y) >= 10.0,
+            "waiting pilot's tile must stay above the hypothermia threshold, got {}",
+            grid.get_safe(ppos.x, ppos.y)
+        );
+        assert!(
+            grid.get_safe(10 + SHUTTLE_PRESSURE_RADIUS, 10) >= 10.0,
+            "envelope edge (pressure radius) must stay above the hypothermia threshold"
+        );
+        // Outside the envelope stays freezing.
+        assert!(grid.get_safe(10 + SHUTTLE_PRESSURE_RADIUS + 2, 10) < 10.0);
+    }
+
+    #[test]
+    fn test_tick_never_overheats_summer_shuttle_envelope() {
+        let mut world = setup();
+        let _shuttle = spawn_shuttle_direct(&mut world, 10, 10);
+        // Hot summer day: 33C, just under the 35C heatstroke threshold.
+        world.insert_resource(TemperatureGrid::new(40, 40, 33.0));
+        pilot_tick(&mut world);
+        let t = world.resource::<TemperatureGrid>().get_safe(10, 10);
+        assert!(
+            t <= 35.0,
+            "thermostat heat must never push a summer tile over heatstroke, got {t}"
+        );
+        assert!((t - 33.0).abs() < f32::EPSILON, "summer tiles are untouched");
+    }
+
+    #[test]
+    fn test_possessed_pilot_away_from_shuttle_still_freezes() {
+        // Item 123 hard constraint: the ImprobablePilot marker persists
+        // after possession, so protection must come from the vessel's
+        // envelope, never from a marker exemption. A possessed pilot
+        // working away from the shuttle takes hypothermia damage like
+        // any other pop.
+        use bevy_ecs::system::RunSystemOnce;
+        let mut world = setup();
+        let _shuttle = spawn_shuttle_direct(&mut world, 10, 10);
+        let pilot = pilot_of(&mut world);
+        world
+            .entity_mut(pilot)
+            .insert(crate::layer1::direct_link::Possessed);
+        *world.get_mut::<GridPosition>(pilot).unwrap() = GridPosition { x: 35, y: 35 };
+        world.insert_resource(TemperatureGrid::new(40, 40, -5.0));
+        world
+            .init_resource::<Events<crate::layer1::temperature::ThermalDamageEvent>>();
+        pilot_tick(&mut world);
+        assert!(
+            world.resource::<TemperatureGrid>().get_safe(35, 35) < 10.0,
+            "the envelope is local to the shuttle — away tiles stay cold"
+        );
+        let before = world.get::<Health>(pilot).unwrap().current;
+        world
+            .run_system_once(crate::layer1::temperature::thermal_damage_system)
+            .unwrap();
+        let after = world.get::<Health>(pilot).unwrap().current;
+        assert!(
+            after < before,
+            "possessed pilot away from the shuttle must take hypothermia damage (before {before}, after {after})"
+        );
     }
 
     #[test]
