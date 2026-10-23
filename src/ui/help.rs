@@ -42,10 +42,13 @@ pub struct FieldGuideUiState {
     pub scroll: u16,
     /// The largest scroll offset that can still show guide content,
     /// as computed by the renderer from the WRAPPED row count at the
-    /// pane's real width and published here on every draw (see
-    /// [`guide_max_scroll`]). The key handler clamps against this
-    /// value, so renderer and input share one bound. Zero until the
-    /// first render publishes it.
+    /// pane's real width (see [`guide_max_scroll`]). The renderer
+    /// cannot publish it here -- both app loops hold an immutable
+    /// world borrow across rendering, so render must never mutate
+    /// the world (item 122) -- so the shell plugin caches the bound
+    /// itself, clamps keys against the cache, and mirrors the value
+    /// into this field from the key handler. Zero until the first
+    /// key press after the first render.
     pub max_scroll: u16,
 }
 
@@ -552,9 +555,10 @@ pub fn render_field_guide(frame: &mut Frame, area: Rect, world: &World) -> u16 {
     let lines = guide_lines();
     // The bound must count WRAPPED rows at the inner width (see
     // `guide_max_scroll`); the unwrapped line count strands the tail
-    // of the guide (item 103). The caller publishes the returned
-    // bound into `FieldGuideUiState::max_scroll`, and the key
-    // handler clamps against that same value.
+    // of the guide (item 103). The caller (the shell plugin) caches
+    // the returned bound and the key handler clamps against that
+    // same value; the plugin also mirrors it into
+    // `FieldGuideUiState::max_scroll` from the key handler.
     let max_scroll = guide_max_scroll(&lines, inner.width, inner.height);
     let scroll = world
         .get_resource::<FieldGuideUiState>()

@@ -12,38 +12,41 @@ use crate::ui::help::{FieldGuideUiState, PAGE_SCROLL_LINES};
 /// [`super::TechPlugin`] (state lives in a world resource).
 pub struct FieldGuidePlugin {
     world: SharedWorld,
+    /// The wrapped scroll bound from the most recent render, cached
+    /// on the plugin itself. It used to be published into
+    /// `FieldGuideUiState` from `render`, but both app loops hold an
+    /// immutable world borrow across the whole shell render, so a
+    /// `borrow_mut` there panics with "RefCell already borrowed" --
+    /// on WASM that traps the draw loop and freezes the game
+    /// (item 122). Rendering must never mutate the world; the key
+    /// handler (which runs with no ambient borrow) clamps against
+    /// this cache instead.
+    last_max_scroll: u16,
 }
 
 impl FieldGuidePlugin {
     pub const fn new(world: SharedWorld) -> Self {
-        Self { world }
+        Self {
+            world,
+            last_max_scroll: 0,
+        }
     }
 }
 
 impl HypertilePlugin for FieldGuidePlugin {
     fn render(&mut self, area: Rect, buf: &mut Buffer, _is_focused: bool) {
-        // Ensure the state exists so the bound published below has a
-        // home even before the first key press.
-        {
-            let mut world = self.world.borrow_mut();
-            if !world.contains_resource::<FieldGuideUiState>() {
-                world.insert_resource(FieldGuideUiState::default());
-            }
-        }
+        // Immutable borrow ONLY (see `last_max_scroll`): the app
+        // loops hold `world.borrow()` across `render_with_shell`, so
+        // any `borrow_mut` in a plugin render panics (item 122).
+        // `render_field_guide` tolerates a missing `FieldGuideUiState`
+        // (scroll defaults to 0); the state is inserted lazily by
+        // `on_event`, which runs without an ambient borrow.
+        let world = self.world.borrow();
         let mut max_scroll = 0;
-        {
-            let world = self.world.borrow();
-            render_with_frame(area, buf, |frame| {
-                max_scroll = crate::ui::help::render_field_guide(frame, frame.area(), &world);
-            });
-        }
-        // Publish the renderer's wrapped bound: `on_event` clamps
-        // against this exact value, so key scrolling and rendering
-        // can never disagree about where the guide ends (item 103).
-        let mut world = self.world.borrow_mut();
-        if let Some(mut state) = world.get_resource_mut::<FieldGuideUiState>() {
-            state.max_scroll = max_scroll;
-        }
+        render_with_frame(area, buf, |frame| {
+            max_scroll = crate::ui::help::render_field_guide(frame, frame.area(), &world);
+        });
+        self.last_max_scroll = max_scroll;
     }
 
     fn on_event(&mut self, event: &HypertileEvent) -> EventOutcome {
@@ -58,15 +61,20 @@ impl HypertilePlugin for FieldGuidePlugin {
         if !world.contains_resource::<FieldGuideUiState>() {
             world.insert_resource(FieldGuideUiState::default());
         }
-        // Clamp against the bound the renderer publishes each frame
-        // (the wrapped row count at the real pane width, minus the
-        // visible rows). Until the first render publishes one this is
-        // 0 and keys are inert -- a focused pane has always rendered,
-        // so that lasts a frame at most. Sharing the renderer's bound
-        // is what stops End from overshooting into rows the renderer
-        // cannot show, which made Up look broken (item 103).
-        let max_scroll = world.resource::<FieldGuideUiState>().max_scroll;
+        // Clamp against the bound the renderer computed on its
+        // last frame (the wrapped row count at the real pane width,
+        // minus the visible rows), cached on the plugin because
+        // render cannot publish into the world (item 122). Until
+        // the first render this is 0 and keys are inert -- a
+        // focused pane has always rendered, so that lasts a frame
+        // at most. Sharing the renderer's bound is what stops End
+        // from overshooting into rows the renderer cannot show,
+        // which made Up look broken (item 103). The bound is also
+        // mirrored into the state below, so the resource still
+        // reflects it for any other reader.
+        let max_scroll = self.last_max_scroll;
         let mut state = world.resource_mut::<FieldGuideUiState>();
+        state.max_scroll = max_scroll;
         match chord.code {
             KeyCode::Up | KeyCode::Char('w') | KeyCode::Char('W') => {
                 state.scroll_by(-1, max_scroll);
@@ -160,11 +168,6 @@ mod tests {
 
         // Visible inner rows at this geometry: 14 - 1 (footer) - 2 (borders).
         let expected_max = empirical_wrapped_rows(44) - 11;
-        assert_eq!(
-            world.borrow().resource::<FieldGuideUiState>().max_scroll,
-            expected_max,
-            "render must publish its wrapped max_scroll for the key handler"
-        );
         assert!(
             usize::from(expected_max) > guide_lines().len(),
             "test geometry must wrap heavily (wrapped max beyond raw line count)"
@@ -176,6 +179,11 @@ mod tests {
             world.borrow().resource::<FieldGuideUiState>().scroll,
             expected_max,
             "End must stop at the renderer's wrapped max_scroll, not the raw line count"
+        );
+        assert_eq!(
+            world.borrow().resource::<FieldGuideUiState>().max_scroll,
+            expected_max,
+            "the key handler mirrors the renderer's bound into the state"
         );
 
         let outcome = plugin.on_event(&key(KeyCode::Up));

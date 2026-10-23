@@ -1185,3 +1185,102 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod palette_field_guide_regression_tests {
+    use super::*;
+    use crate::setup::setup_world;
+    use crate::simulation::run_simulation_tick;
+    use crate::ui::input::{route_root_input, InputContext, InputContextStack};
+    use crate::ui::render_with_shell;
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::{cell::RefCell, rc::Rc};
+
+    /// Item 122: opening the Field Guide through the command palette
+    /// froze the game on the first frame the pane rendered. Both app
+    /// loops hold `world.borrow()` across `render_with_shell`, and
+    /// the guide plugin's render used `borrow_mut` (to publish the
+    /// item-103 scroll bound), panicking with "RefCell already
+    /// borrowed" -- on WASM the panic traps ratzilla's draw callback
+    /// and the frame loop dies. This test mirrors the app loops'
+    /// borrow pattern exactly: an immutable borrow is held across
+    /// every render while the palette sequence and follow-up keys are
+    /// driven through `route_root_input`.
+    #[test]
+    fn palette_open_field_guide_renders_under_app_borrow() {
+        let world: SharedWorld = Rc::new(RefCell::new(setup_world()));
+        {
+            let mut w = world.borrow_mut();
+            *w.resource_mut::<GameState>() = GameState::Running;
+            w.resource_mut::<InputContextStack>()
+                .push(InputContext::Normal);
+        }
+        let config = world.borrow().resource::<ShellConfig>().clone();
+        let mut shell = build_default_shell(Rc::clone(&world), config);
+        let backend = TestBackend::new(100, 30);
+        let mut term = Terminal::new(backend).unwrap();
+
+        let mut frames = |shell: &mut UiShell, n: usize| {
+            for _ in 0..n {
+                {
+                    let mut w = world.borrow_mut();
+                    for _ in 0..3 {
+                        run_simulation_tick(&mut w);
+                    }
+                }
+                // The app loops' pattern: immutable borrow held
+                // across the entire shell render.
+                let w = world.borrow();
+                term.draw(|frame| render_with_shell(&w, shell, frame))
+                    .unwrap();
+            }
+        };
+
+        frames(&mut shell, 3);
+
+        // Ctrl+K -> type the filter -> Enter on "Open Field Guide".
+        route_root_input(
+            &world,
+            &mut shell,
+            GameKeyEvent::new(GameKeyCode::Char('k')).with_ctrl(),
+        );
+        assert!(shell.is_palette_open());
+        frames(&mut shell, 1);
+        for ch in "field guide".chars() {
+            route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::Char(ch)));
+        }
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::Enter));
+        assert!(!shell.is_palette_open());
+        assert!(shell.active_workspace_contains_plugin("field-guide"));
+
+        // The frames that used to panic: the guide pane renders
+        // while the caller holds the world borrow.
+        frames(&mut shell, 5);
+
+        // And "anything else" still works afterwards: the guide
+        // scrolls, an unbound key falls through, Esc and q behave.
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::Down));
+        frames(&mut shell, 1);
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::Down));
+        frames(&mut shell, 1);
+        let scroll = world
+            .borrow()
+            .get_resource::<crate::ui::help::FieldGuideUiState>()
+            .map_or(0, |state| state.scroll);
+        assert!(scroll > 0, "guide should scroll after palette open");
+        route_root_input(
+            &world,
+            &mut shell,
+            GameKeyEvent::new(GameKeyCode::Char('x')),
+        );
+        frames(&mut shell, 1);
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::Esc));
+        frames(&mut shell, 1);
+        route_root_input(
+            &world,
+            &mut shell,
+            GameKeyEvent::new(GameKeyCode::Char('q')),
+        );
+        frames(&mut shell, 1);
+    }
+}
