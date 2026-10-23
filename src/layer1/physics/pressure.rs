@@ -613,8 +613,9 @@ impl ColonyAtmosphere {
 /// fix). The bar therefore debounces the *display*: 20 ticks is twice
 /// the longest flicker run observed, so brownout flicker essentially
 /// never surfaces, while a genuine outage still warns at tick 20 —
-/// well ahead of the chronicle warning (100) and escalation (600),
-/// whose timers are untouched and compose independently.
+/// well ahead of the chronicle warning (100 duty ticks) and escalation
+/// (600 duty ticks), which run on their own per-entity duty-cycle
+/// accounting (Item 126) and compose independently.
 pub const LIFESUPPORT_WARNING_ON_DWELL_TICKS: u64 = 20;
 
 /// How many ticks the status-bar warning lingers after LifeSupport is
@@ -760,30 +761,85 @@ pub fn update_colony_atmosphere_system(
     };
 }
 
+/// Duty debt gained per unpowered tick (Item 126).
+///
+/// The debt is a leaky bucket in quarter-tick units: an unpowered tick
+/// adds [`LIFESUPPORT_DUTY_GAIN_PER_DARK_TICK`], a powered tick drains
+/// [`LIFESUPPORT_DUTY_DECAY_PER_POWERED_TICK`]. The break-even dark duty
+/// is therefore 1 in 5 ticks (20%): a unit dark less often than that
+/// drains back to zero and never warns, while anything chronically
+/// darker accumulates toward the warning threshold — however the dark
+/// ticks are interleaved with lit ones.
+pub const LIFESUPPORT_DUTY_GAIN_PER_DARK_TICK: u32 = 4;
+
+/// Duty debt drained per powered tick (Item 126). Deliberately slow —
+/// see [`LIFESUPPORT_DUTY_GAIN_PER_DARK_TICK`]: a single lit tick inside
+/// a flickering stretch barely dents the debt, so a chronic episode
+/// cannot re-arm (and re-warn) on a reprieve. Only sustained power —
+/// debt fully drained to zero — counts as a recovery.
+pub const LIFESUPPORT_DUTY_DECAY_PER_POWERED_TICK: u32 = 1;
+
 /// Per-entity alert state for the unpowered-LifeSupport warning.
-#[derive(Component, Debug, Clone, Copy, Default)]
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LifeSupportPowerAlertState {
-    /// Tick the current continuous unpowered stretch began.
-    unpowered_since: Option<u64>,
-    /// Whether the warning has fired for the current stretch.
+    /// Duty-cycle debt in quarter-ticks (Item 126): accumulates on
+    /// unpowered ticks, decays slowly on powered ticks, instead of the
+    /// old continuous counter that hard-reset on the first lit tick.
+    duty_debt: u32,
+    /// Last tick this state observed. Elapsed ticks since then are
+    /// charged to the current read, which reproduces the old
+    /// `tick - since` math exactly for a continuous stretch.
+    last_tick: Option<u64>,
+    /// Whether the warning has fired for the current episode.
     warned_unpowered: bool,
     /// Whether the sustained-outage escalation has fired (Item 99).
     escalated_unpowered: bool,
 }
 
-/// How long a LifeSupport must stay continuously unpowered before the
-/// colony warning fires.
+impl LifeSupportPowerAlertState {
+    /// Accumulated unpowered duty, in whole dark-tick equivalents
+    /// (Item 126; read by headless STATS as `ls_duty=`).
+    #[must_use]
+    pub fn duty_ticks(&self) -> u64 {
+        u64::from(self.duty_debt / LIFESUPPORT_DUTY_GAIN_PER_DARK_TICK)
+    }
+
+    /// Whether this unit is inside a warned/escalated episode that has
+    /// not yet re-armed (Item 126; read by headless STATS as
+    /// `ls_duty_episode=`). Mirrors `grid_strain_episode_active` /
+    /// `cable_heat_episode_active`: the debt counter alone cannot say
+    /// this, because it keeps draining through a reprieve while the
+    /// episode is still live.
+    #[must_use]
+    pub fn episode_active(&self) -> bool {
+        self.warned_unpowered || self.escalated_unpowered
+    }
+}
+
+/// How much duty debt a LifeSupport must accumulate before the colony
+/// warning fires, expressed in dark-tick equivalents.
 ///
-/// The power grid's brownout mechanic flickers consumers on undersized
-/// grids (the starter grid runs at half supply by design), so a warning
-/// on the first dark tick would spam the chronicle every few ticks and
-/// cry wolf. A unit on a grid with no production at all — the forensics
-/// bug this alert exists for — stays dark forever and crosses this
-/// threshold; a brownout flicker never comes close.
+/// Before Item 126 this counted *continuous* unpowered ticks. That
+/// counter was blind to brownout flicker: `activate_consumers` re-rolls
+/// every consumer independently each tick (`rng.gen_bool(supply_ratio)`),
+/// so on an undersized grid a LifeSupport alternates dark/lit with dark
+/// runs of a few ticks (Item 104 forensic sample: mean 2.07, max 10) and
+/// the continuous counter reset forever — the 2026-10-23 balance loop
+/// recorded zero power warnings across 60 colonies, including one that
+/// lost 23 pops inside the LifeSupport radius in winter with its only
+/// unit unpowered at every sample. Since Item 121, thermoregulation is
+/// power-gated, so a flickering unit is effectively unpowered for
+/// heating half the time and the colony deserves the telegraph.
+///
+/// The threshold itself is unchanged: a continuously dark unit
+/// accumulates exactly 1.0 debt-ticks per tick and still warns at 100.
+/// A 50%-duty flicker nets +1.5 debt-ticks per 2 ticks and warns after
+/// ~267 ticks; sparser patterns (dark duty at or below the 20%
+/// break-even) never accumulate at all.
 pub const UNPOWERED_WARNING_DELAY_TICKS: u64 = 100;
 
-/// How long a LifeSupport must stay continuously unpowered before the
-/// warning escalates (Item 99).
+/// How much duty debt a LifeSupport must accumulate before the warning
+/// escalates (Item 99), in dark-tick equivalents.
 ///
 /// The first warning cannot tell a recovering brownout from an outage
 /// that is still in force hours later — before Item 99 a unit dark for
@@ -791,7 +847,9 @@ pub const UNPOWERED_WARNING_DELAY_TICKS: u64 = 100;
 /// chronicle line, so the balance data's endemic sustained outages
 /// (final `ls_unpowered >= 1` in roughly half of colonies) read as
 /// already-answered news. At this duration the outage is the colony's
-/// condition, not an incident, and the chronicle says so — once.
+/// condition, not an incident, and the chronicle says so — once. A
+/// continuous outage still escalates at exactly 600 ticks; a 50%-duty
+/// flicker escalates after ~1600 ticks of chronic flicker.
 pub const UNPOWERED_ESCALATION_TICKS: u64 = 600;
 
 /// Colony-level alert: a LifeSupport unit with no power (Item 77 Phase 2).
@@ -799,16 +857,23 @@ pub const UNPOWERED_ESCALATION_TICKS: u64 = 600;
 /// Before Phase 2 this fact lived only in the inspector of the exact
 /// building ("Consumer Demand: 10 (Inactive)"), so a colony could coast on
 /// its one-time seeded air charge with a dead generator and never be told.
-/// The warning fires once per sustained power loss (see
-/// [`UNPOWERED_WARNING_DELAY_TICKS`]), escalates once if the outage is
+/// The warning fires once per episode (see
+/// [`UNPOWERED_WARNING_DELAY_TICKS`]), escalates once if the episode is
 /// still in force at [`UNPOWERED_ESCALATION_TICKS`] (Item 99), and both
-/// re-arm on repowering.
+/// re-arm only after a genuine recovery — sustained power that drains
+/// the duty debt back to zero (Item 126 hysteresis, mirroring the
+/// grid-strain / cable-heat episode pattern: a flicker dip or a brief
+/// reprieve never re-arms). Warning and escalation name the unit by
+/// position when it has one, so a multi-unit colony can tell WHICH
+/// LifeSupport is dark.
+#[allow(clippy::type_complexity)]
 pub fn lifesupport_power_warning_system(
     mut commands: Commands,
     time: Res<crate::shared::time::SimulationTime>,
     query: Query<(
         Entity,
         &crate::layer1::building::Building,
+        Option<&crate::layer1::map::GridPosition>,
         Option<&crate::layer1::energy::PowerConsumer>,
         Option<&LifeSupportPowerAlertState>,
     )>,
@@ -817,61 +882,82 @@ pub fn lifesupport_power_warning_system(
     use crate::layer1::building::BuildingType;
     use crate::layer1::chronicle::EventImportance;
 
-    for (entity, building, consumer, alert) in query.iter() {
+    // Duty-debt thresholds: the public constants are dark-tick
+    // equivalents; the bucket itself runs in quarter-ticks.
+    let warn_debt =
+        UNPOWERED_WARNING_DELAY_TICKS * u64::from(LIFESUPPORT_DUTY_GAIN_PER_DARK_TICK);
+    let escalate_debt =
+        UNPOWERED_ESCALATION_TICKS * u64::from(LIFESUPPORT_DUTY_GAIN_PER_DARK_TICK);
+
+    for (entity, building, pos, consumer, alert) in query.iter() {
         if building.building_type != BuildingType::LifeSupport {
             continue;
         }
         let powered = consumer.is_none_or(|c| c.active);
-        let state = alert.copied().unwrap_or_default();
+        let previous = alert.copied();
+        let mut state = previous.unwrap_or_default();
+
+        // Charge the elapsed ticks to the current read. The live
+        // schedule observes every tick (elapsed == 1); for a continuous
+        // stretch this makes the debt exactly `tick - first_dark_tick`,
+        // the old counter's math.
+        let elapsed = state
+            .last_tick
+            .map_or(0, |last| time.tick.saturating_sub(last));
         if powered {
-            if state.unpowered_since.is_some() || state.warned_unpowered {
-                commands.entity(entity).try_insert(LifeSupportPowerAlertState {
-                    unpowered_since: None,
-                    warned_unpowered: false,
-                    escalated_unpowered: false,
-                });
-            }
-            continue;
+            let decay =
+                elapsed.saturating_mul(u64::from(LIFESUPPORT_DUTY_DECAY_PER_POWERED_TICK));
+            state.duty_debt = u64::from(state.duty_debt).saturating_sub(decay) as u32;
+        } else {
+            let gain = elapsed.saturating_mul(u64::from(LIFESUPPORT_DUTY_GAIN_PER_DARK_TICK));
+            state.duty_debt = u64::from(state.duty_debt)
+                .saturating_add(gain)
+                .min(u64::from(u32::MAX)) as u32;
         }
-        let since = state.unpowered_since.unwrap_or(time.tick);
-        let dark_for = time.tick.saturating_sub(since);
-        if state.unpowered_since.is_none() {
-            commands.entity(entity).try_insert(LifeSupportPowerAlertState {
-                unpowered_since: Some(time.tick),
-                warned_unpowered: false,
-                escalated_unpowered: false,
-            });
-        } else if !state.warned_unpowered && dark_for >= UNPOWERED_WARNING_DELAY_TICKS {
+        state.last_tick = Some(time.tick);
+
+        // Hysteresis re-arm: only a genuine recovery — powered AND the
+        // debt fully drained — ends the episode. A brief reprieve
+        // inside a flickering stretch leaves the flags latched, so the
+        // episode cannot spam a second warning when the flicker resumes.
+        if powered && state.duty_debt == 0 {
+            state.warned_unpowered = false;
+            state.escalated_unpowered = false;
+        }
+
+        let unit = pos.map_or_else(String::new, |p| format!(" at ({}, {})", p.x, p.y));
+        if !state.warned_unpowered && u64::from(state.duty_debt) >= warn_debt {
             chronicle.send(crate::layer1::chronicle::AddChronicleEvent {
-                text: "LifeSupport has no power — the air is only what the hull already holds. Bridge it to a power source with a Power Pole or build a Generator.".to_string(),
+                text: format!(
+                    "LifeSupport{unit} has no power — the air is only what the hull already holds. Bridge it to a power source with a Power Pole or build a Generator."
+                ),
                 importance: EventImportance::Major,
             });
-            // try_insert: a LifeSupport can be destroyed (ruined) by
-            // another system in the same tick batch; warning about a
-            // building that no longer exists must not panic the schedule.
-            commands.entity(entity).try_insert(LifeSupportPowerAlertState {
-                unpowered_since: Some(since),
-                warned_unpowered: true,
-                escalated_unpowered: false,
-            });
+            state.warned_unpowered = true;
         } else if state.warned_unpowered
             && !state.escalated_unpowered
-            && dark_for >= UNPOWERED_ESCALATION_TICKS
+            && u64::from(state.duty_debt) >= escalate_debt
         {
             // Item 99: a sustained outage escalates once. The wording
             // deliberately avoids the first warning's "no power" phrasing
             // so chronicle readers can tell the two apart at a glance.
+            // The count is duty debt (dark-tick equivalents), so a
+            // chronic flicker reports the dark time it actually accrued.
             chronicle.send(crate::layer1::chronicle::AddChronicleEvent {
                 text: format!(
-                    "LifeSupport is STILL without power after {dark_for} ticks — no new air is being made, and the colony is living on what the hull trapped. This is no longer a flicker. Restore power now: bridge it with a Power Pole or build a Generator."
+                    "LifeSupport{unit} is STILL without power after {} unpowered ticks — no new air is being made, and the colony is living on what the hull trapped. This is no longer a flicker. Restore power now: bridge it with a Power Pole or build a Generator.",
+                    state.duty_ticks()
                 ),
                 importance: EventImportance::Major,
             });
-            commands.entity(entity).try_insert(LifeSupportPowerAlertState {
-                unpowered_since: Some(since),
-                warned_unpowered: true,
-                escalated_unpowered: true,
-            });
+            state.escalated_unpowered = true;
+        }
+
+        if previous != Some(state) {
+            // try_insert: a LifeSupport can be destroyed (ruined) by
+            // another system in the same tick batch; warning about a
+            // building that no longer exists must not panic the schedule.
+            commands.entity(entity).try_insert(state);
         }
     }
 }
@@ -1988,71 +2074,39 @@ mod tests {
 
     #[test]
     fn test_lifesupport_power_warning_fires_once_and_rearms() {
-        use crate::layer1::chronicle::AddChronicleEvent;
-        let mut app = bevy::prelude::App::new();
-        app.add_plugins(bevy::prelude::MinimalPlugins);
-        app.add_event::<AddChronicleEvent>();
-        app.insert_resource(crate::shared::time::SimulationTime::default());
-        let ls = app
-            .world_mut()
-            .spawn((
-                Building {
-                    building_type: BuildingType::LifeSupport,
-                },
-                GridPosition { x: 5, y: 5 },
-                crate::layer1::energy::PowerConsumer {
-                    demand: 10.0,
-                    active: false,
-                },
-            ))
-            .id();
-        app.add_systems(bevy::prelude::Update, lifesupport_power_warning_system);
-        let set_tick = |app: &mut bevy::prelude::App, tick: u64| {
-            app.world_mut()
-                .resource_mut::<crate::shared::time::SimulationTime>()
-                .tick = tick;
-        };
-        // Brownout-length flickers must NOT warn: the delay is what keeps
-        // the chronicle honest on undersized grids.
-        app.update();
-        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS - 1);
-        app.update();
-        let texts = chronicle_texts(&app);
+        // Rewritten for Item 126: the original version jumped
+        // `SimulationTime` between updates and re-armed on a SINGLE lit
+        // tick — that single-tick reset was the flicker blindness
+        // itself. This version drives the live system tick-by-tick and
+        // re-arms through a genuine recovery (sustained power draining
+        // the duty debt to zero). The sequential-duty regression guard
+        // (`test_lifesupport_power_warning_continuous_outage_sequential`)
+        // pins the warn-at-100 timing.
+        let (mut app, ls, mut cursor) = power_warning_app(false);
+        let seg = drive_power(&mut app, ls, &mut cursor, 0..=99, |_| false);
         assert_eq!(
-            texts.iter().filter(|t| t.contains("no power")).count(),
+            count_warnings(&seg),
             0,
-            "no warning before the sustained-loss delay, got {texts:?}"
+            "no warning before the sustained-loss delay, got {seg:?}"
         );
-        // Sustained loss: fires exactly once.
-        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS);
-        app.update();
-        app.update();
-        let texts = chronicle_texts(&app);
+        let seg = drive_power(&mut app, ls, &mut cursor, 100..=150, |_| false);
         assert_eq!(
-            texts.iter().filter(|t| t.contains("no power")).count(),
+            count_warnings(&seg),
             1,
-            "unpowered warning should fire once after the delay, got {texts:?}"
+            "unpowered warning should fire once after the delay, got {seg:?}"
         );
-        // Repower (re-arms), then a new sustained loss refires.
-        app.world_mut()
-            .get_mut::<crate::layer1::energy::PowerConsumer>(ls)
-            .unwrap()
-            .active = true;
-        app.update();
-        app.world_mut()
-            .get_mut::<crate::layer1::energy::PowerConsumer>(ls)
-            .unwrap()
-            .active = false;
-        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS + 10);
-        app.update();
-        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS * 2 + 10);
-        app.update();
-        let texts = chronicle_texts(&app);
-        // Cumulative count (fresh cursor reads the retained buffer).
+        // Genuine recovery: sustained power drains the debt (600
+        // quarter-ticks at the 150 mark) and re-arms the warning.
+        let seg = drive_power(&mut app, ls, &mut cursor, 151..=800, |_| true);
+        assert_eq!(count_warnings(&seg), 0, "no warnings while powered");
+        // A new sustained loss refires — but only after a full delay.
+        let seg = drive_power(&mut app, ls, &mut cursor, 801..=899, |_| false);
+        assert_eq!(count_warnings(&seg), 0, "no instant refire on re-loss");
+        let seg = drive_power(&mut app, ls, &mut cursor, 900..=905, |_| false);
         assert_eq!(
-            texts.iter().filter(|t| t.contains("no power")).count(),
-            2,
-            "warning should refire after a repower/re-loss cycle"
+            count_warnings(&seg),
+            1,
+            "warning should refire after a genuine recovery and a new sustained loss"
         );
     }
 
@@ -2061,7 +2115,43 @@ mod tests {
         // Item 99: the first warning (100 ticks) cannot distinguish a
         // brownout that recovered from an outage that is still killing
         // the colony hours later. A sustained outage must escalate
-        // exactly once, and re-arm on repowering like the first warning.
+        // exactly once, and re-arm after a genuine recovery (Item 126:
+        // sustained power draining the duty debt, not a single lit
+        // tick) like the first warning. Driven tick-by-tick against
+        // the live system.
+        let (mut app, ls, mut cursor) = power_warning_app(false);
+        let seg = drive_power(&mut app, ls, &mut cursor, 0..=100, |_| false);
+        assert_eq!(count_warnings(&seg), 1, "first warning at the delay");
+        assert_eq!(count_escalations(&seg), 0, "no escalation with the first warning");
+        let seg = drive_power(&mut app, ls, &mut cursor, 101..=599, |_| false);
+        assert_eq!(count_escalations(&seg), 0, "no escalation before the sustained threshold");
+        let seg = drive_power(&mut app, ls, &mut cursor, 600..=800, |_| false);
+        assert_eq!(count_warnings(&seg), 0, "warning does not refire");
+        assert_eq!(count_escalations(&seg), 1, "sustained outage escalates exactly once");
+        // Genuine recovery drains the debt (3200 quarter-ticks at the
+        // 800 mark) and re-arms both bands.
+        let seg = drive_power(&mut app, ls, &mut cursor, 801..=4100, |_| true);
+        assert_eq!(count_warnings(&seg) + count_escalations(&seg), 0);
+        // A fresh sustained outage warns and escalates again.
+        let seg = drive_power(&mut app, ls, &mut cursor, 4101..=4705, |_| false);
+        assert_eq!(count_warnings(&seg), 1, "warning re-arms after genuine recovery");
+        assert_eq!(count_escalations(&seg), 1, "escalation re-arms after genuine recovery");
+    }
+
+    // ---- Item 126: duty-cycle telegraph for flickering LifeSupport power ----
+    //
+    // These tests drive the LIVE `lifesupport_power_warning_system`
+    // tick-by-tick (the way the real schedule runs it) and drain the
+    // Chronicle through a persistent event cursor after every update,
+    // because Bevy's event buffers only retain a couple of frames.
+
+    fn power_warning_app(
+        active: bool,
+    ) -> (
+        bevy::prelude::App,
+        Entity,
+        bevy_ecs::event::EventCursor<crate::layer1::chronicle::AddChronicleEvent>,
+    ) {
         use crate::layer1::chronicle::AddChronicleEvent;
         let mut app = bevy::prelude::App::new();
         app.add_plugins(bevy::prelude::MinimalPlugins);
@@ -2076,54 +2166,176 @@ mod tests {
                 GridPosition { x: 5, y: 5 },
                 crate::layer1::energy::PowerConsumer {
                     demand: 10.0,
-                    active: false,
+                    active,
                 },
             ))
             .id();
         app.add_systems(bevy::prelude::Update, lifesupport_power_warning_system);
-        let set_tick = |app: &mut bevy::prelude::App, tick: u64| {
+        let cursor = app
+            .world()
+            .resource::<bevy::prelude::Events<AddChronicleEvent>>()
+            .get_cursor();
+        (app, ls, cursor)
+    }
+
+    /// Drive ticks `ticks` (inclusive), setting the consumer's `active`
+    /// flag from `active_for(tick)` before each update. Returns the
+    /// Chronicle texts emitted during this segment.
+    fn drive_power(
+        app: &mut bevy::prelude::App,
+        ls: Entity,
+        cursor: &mut bevy_ecs::event::EventCursor<crate::layer1::chronicle::AddChronicleEvent>,
+        ticks: std::ops::RangeInclusive<u64>,
+        mut active_for: impl FnMut(u64) -> bool,
+    ) -> Vec<String> {
+        use crate::layer1::chronicle::AddChronicleEvent;
+        let mut texts = Vec::new();
+        for tick in ticks {
+            app.world_mut()
+                .get_mut::<crate::layer1::energy::PowerConsumer>(ls)
+                .unwrap()
+                .active = active_for(tick);
             app.world_mut()
                 .resource_mut::<crate::shared::time::SimulationTime>()
                 .tick = tick;
-        };
-        let escalations = |app: &bevy::prelude::App| {
-            chronicle_texts(app)
-                .iter()
-                .filter(|t| t.contains("STILL"))
-                .count()
-        };
-        app.update();
-        set_tick(&mut app, UNPOWERED_WARNING_DELAY_TICKS);
-        app.update();
-        assert_eq!(escalations(&app), 0, "no escalation with the first warning");
-        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS - 1);
-        app.update();
-        assert_eq!(escalations(&app), 0, "no escalation before the sustained threshold");
-        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS);
-        app.update();
-        app.update();
-        assert_eq!(escalations(&app), 1, "sustained outage escalates exactly once");
-        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS * 4);
-        app.update();
-        assert_eq!(escalations(&app), 1, "escalation does not spam on longer outages");
-        // Repower re-arms: a fresh sustained outage escalates again.
-        app.world_mut()
-            .get_mut::<crate::layer1::energy::PowerConsumer>(ls)
-            .unwrap()
-            .active = true;
-        app.update();
-        app.world_mut()
-            .get_mut::<crate::layer1::energy::PowerConsumer>(ls)
-            .unwrap()
-            .active = false;
-        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS * 4 + 10);
-        app.update();
-        set_tick(&mut app, UNPOWERED_ESCALATION_TICKS * 5 + 10);
-        app.update();
-        // The re-loss first re-fires the plain warning (previous update);
-        // one more tick at the same sustained duration escalates again.
-        app.update();
-        assert_eq!(escalations(&app), 2, "escalation re-arms after repower/re-loss");
+            app.update();
+            let events = app
+                .world()
+                .resource::<bevy::prelude::Events<AddChronicleEvent>>();
+            texts.extend(cursor.read(events).map(|e| e.text.clone()));
+        }
+        texts
+    }
+
+    fn count_warnings(texts: &[String]) -> usize {
+        texts.iter().filter(|t| t.contains("no power")).count()
+    }
+
+    fn count_escalations(texts: &[String]) -> usize {
+        texts.iter().filter(|t| t.contains("STILL")).count()
+    }
+
+    #[test]
+    fn test_lifesupport_power_warning_fires_for_chronic_flicker() {
+        // Item 126: `power_grid_system`'s `activate_consumers` re-rolls
+        // every consumer independently each tick (`rng.gen_bool(supply_ratio)`),
+        // so on a brownout grid a LifeSupport alternates active/inactive
+        // and NEVER accumulates 100 *continuous* dark ticks — the old
+        // counter hard-reset on the first lit tick and stayed silent
+        // while the unit was effectively unpowered for heating (item 121
+        // power gate). A 50%-duty flicker sustained for hundreds of
+        // ticks is a chronic outage and must warn, then escalate, once
+        // each.
+        let (mut app, ls, mut cursor) = power_warning_app(false);
+        let seg = drive_power(&mut app, ls, &mut cursor, 0..=270, |tick| tick % 2 == 1);
+        assert_eq!(
+            count_warnings(&seg),
+            1,
+            "chronic 50%-duty flicker must produce the power warning, got {seg:?}"
+        );
+        let seg = drive_power(&mut app, ls, &mut cursor, 271..=1610, |tick| tick % 2 == 1);
+        assert_eq!(
+            count_warnings(&seg),
+            0,
+            "flicker episode must not spam the first warning, got {seg:?}"
+        );
+        assert_eq!(
+            count_escalations(&seg),
+            1,
+            "chronic flicker must escalate exactly once, got {seg:?}"
+        );
+    }
+
+    #[test]
+    fn test_lifesupport_power_warning_names_the_unit() {
+        // Item 126: with several LifeSupport units, a bare "LifeSupport
+        // has no power" does not say WHICH unit is dark. The warning
+        // must name the unit by its position.
+        let (mut app, ls, mut cursor) = power_warning_app(false);
+        let seg = drive_power(&mut app, ls, &mut cursor, 0..=100, |_| false);
+        let warnings: Vec<_> = seg.iter().filter(|t| t.contains("no power")).collect();
+        assert_eq!(warnings.len(), 1, "expected one warning, got {seg:?}");
+        assert!(
+            warnings[0].contains("(5, 5)"),
+            "warning must name the unit position, got {:?}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn test_lifesupport_power_warning_continuous_outage_sequential() {
+        // Regression guard: a continuous outage driven tick-by-tick
+        // warns at the same delay and escalates at the same threshold
+        // as the old continuous counter.
+        let (mut app, ls, mut cursor) = power_warning_app(false);
+        let seg = drive_power(&mut app, ls, &mut cursor, 0..=99, |_| false);
+        assert_eq!(count_warnings(&seg), 0, "no warning before the delay");
+        let seg = drive_power(&mut app, ls, &mut cursor, 100..=100, |_| false);
+        assert_eq!(count_warnings(&seg), 1, "warning at the delay");
+        let seg = drive_power(&mut app, ls, &mut cursor, 101..=599, |_| false);
+        assert_eq!(count_escalations(&seg), 0, "no early escalation");
+        let seg = drive_power(&mut app, ls, &mut cursor, 600..=700, |_| false);
+        assert_eq!(count_warnings(&seg), 0, "warning fires once only");
+        assert_eq!(count_escalations(&seg), 1, "escalation fires once");
+    }
+
+    #[test]
+    fn test_lifesupport_power_warning_quiet_when_powered() {
+        // Healthy powered unit: never warns, however long it runs.
+        let (mut app, ls, mut cursor) = power_warning_app(true);
+        let seg = drive_power(&mut app, ls, &mut cursor, 0..=500, |_| true);
+        assert_eq!(count_warnings(&seg), 0);
+        assert_eq!(count_escalations(&seg), 0);
+    }
+
+    #[test]
+    fn test_lifesupport_power_warning_sparse_bursts_decay_away() {
+        // Isolated dark bursts (10 dark ticks in every 50) are a
+        // marginal-but-recovering grid, not a chronic outage: the duty
+        // debt must decay away between bursts and never warn.
+        let (mut app, ls, mut cursor) = power_warning_app(false);
+        let seg = drive_power(&mut app, ls, &mut cursor, 0..=2000, |tick| tick % 50 >= 10);
+        assert_eq!(
+            count_warnings(&seg),
+            0,
+            "sparse bursts must never accumulate into a warning, got {seg:?}"
+        );
+        assert_eq!(count_escalations(&seg), 0);
+    }
+
+    #[test]
+    fn test_lifesupport_power_warning_hysteresis_and_genuine_rearm() {
+        // Item 126 hysteresis: a brief repower inside a chronic episode
+        // must NOT re-arm the warning (that single-lit-tick reset was
+        // the flicker blindness itself). Only a genuine recovery — the
+        // duty debt fully drained by sustained power — re-arms, and a
+        // fresh chronic episode after that warns again.
+        let (mut app, ls, mut cursor) = power_warning_app(false);
+        // Phase A: chronic flicker earns the warning.
+        let seg = drive_power(&mut app, ls, &mut cursor, 0..=300, |tick| tick % 2 == 1);
+        assert_eq!(count_warnings(&seg), 1, "flicker warns, got {seg:?}");
+        // Phase B: 100 lit ticks — a reprieve, not a recovery.
+        let seg_b = drive_power(&mut app, ls, &mut cursor, 301..=400, |_| true);
+        // Phase C: flicker resumes, then a continuous dark stretch.
+        // Still the same episode: no second warning may fire.
+        let seg_c1 = drive_power(&mut app, ls, &mut cursor, 401..=700, |tick| tick % 2 == 1);
+        let seg_c2 = drive_power(&mut app, ls, &mut cursor, 701..=900, |_| false);
+        assert_eq!(count_warnings(&seg_b), 0);
+        assert_eq!(
+            count_warnings(&seg_c1) + count_warnings(&seg_c2),
+            0,
+            "no re-warning inside one undrained episode"
+        );
+        // Phase D: sustained power drains the debt and re-arms.
+        let seg_d = drive_power(&mut app, ls, &mut cursor, 901..=2600, |_| true);
+        assert_eq!(count_warnings(&seg_d), 0);
+        // Phase E: a fresh continuous outage warns again.
+        let seg_e = drive_power(&mut app, ls, &mut cursor, 2601..=2705, |_| false);
+        assert_eq!(
+            count_warnings(&seg_e),
+            1,
+            "warning re-fires after a genuine recovery and a new outage, got {seg_e:?}"
+        );
     }
 
     #[test]
