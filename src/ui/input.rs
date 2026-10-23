@@ -330,6 +330,12 @@ pub fn map_game_key_to_bevy_key(key: GameKeyCode) -> KeyCode {
         GameKeyCode::Backspace => KeyCode::Back,
         GameKeyCode::Delete => KeyCode::Delete,
         GameKeyCode::BackTab => KeyCode::Tab,
+        // Item 124: the shared Input KeyCode set has no page/home/end
+        // members and no gameplay consumer presses them; these keys
+        // act in the shell layer (see `page_home_end_keys_map_to_…`).
+        GameKeyCode::PageUp | GameKeyCode::PageDown | GameKeyCode::Home | GameKeyCode::End => {
+            KeyCode::Unidentified
+        }
     }
 }
 
@@ -839,6 +845,29 @@ mod tests {
         assert!(shell_buffer_contains(&mut shell, "Command Palette"));
         assert!(shell_buffer_contains(&mut shell, "Open Chronicle"));
         assert_eq!(*world.borrow().resource::<GameState>(), GameState::Running);
+    }
+
+    #[test]
+    fn page_home_end_keys_map_to_unidentified_bevy_key() {
+        // Item 124: the shared `Input` KeyCode set (gameplay/WASD
+        // layer) has no page/home/end members and no consumer presses
+        // them, so the new GameKeyCode variants map to Unidentified
+        // there — the keys act in the shell (Field Guide scrolling),
+        // which `route_root_input` consults before gameplay routing.
+        // Existing mappings must be untouched.
+        for code in [
+            GameKeyCode::PageUp,
+            GameKeyCode::PageDown,
+            GameKeyCode::Home,
+            GameKeyCode::End,
+        ] {
+            assert_eq!(map_game_key_to_bevy_key(code), KeyCode::Unidentified);
+        }
+        assert_eq!(map_game_key_to_bevy_key(GameKeyCode::Up), KeyCode::Up);
+        assert_eq!(
+            map_game_key_to_bevy_key(GameKeyCode::Enter),
+            KeyCode::Return
+        );
     }
 
     #[test]

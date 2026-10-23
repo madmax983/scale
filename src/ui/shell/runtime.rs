@@ -185,6 +185,10 @@ impl UiShell {
             GameKeyCode::Down => KeyCode::Down,
             GameKeyCode::Left => KeyCode::Left,
             GameKeyCode::Right => KeyCode::Right,
+            GameKeyCode::PageUp => KeyCode::PageUp,
+            GameKeyCode::PageDown => KeyCode::PageDown,
+            GameKeyCode::Home => KeyCode::Home,
+            GameKeyCode::End => KeyCode::End,
         };
 
         let mut modifiers = Modifiers::NONE;
@@ -1282,5 +1286,126 @@ mod palette_field_guide_regression_tests {
             GameKeyEvent::new(GameKeyCode::Char('q')),
         );
         frames(&mut shell, 1);
+    }
+
+    /// Item 124: the Field Guide handles PageUp/PageDown/Home/End,
+    /// but `GameKeyCode` had no such variants, the platform adapters
+    /// dropped the keys, and the shell runtime's GameKeyCode ->
+    /// hypertile translation could never produce them — the handlers
+    /// were dead from real input and only unit tests constructing
+    /// hypertile chords directly exercised them. This test drives
+    /// `GameKeyEvent`s through the real routing (same palette/guide
+    /// sequence as the item-122 regression above, under the app
+    /// loops' immutable-borrow render pattern) and asserts the guide
+    /// scroll actually moves by the page/scroll semantics of items
+    /// 103/122, unchanged.
+    #[test]
+    fn page_keys_scroll_field_guide_via_game_key_events() {
+        use crate::ui::help::PAGE_SCROLL_LINES;
+
+        let world: SharedWorld = Rc::new(RefCell::new(setup_world()));
+        {
+            let mut w = world.borrow_mut();
+            *w.resource_mut::<GameState>() = GameState::Running;
+            w.resource_mut::<InputContextStack>()
+                .push(InputContext::Normal);
+        }
+        let config = world.borrow().resource::<ShellConfig>().clone();
+        let mut shell = build_default_shell(Rc::clone(&world), config);
+        let backend = TestBackend::new(100, 30);
+        let mut term = Terminal::new(backend).unwrap();
+
+        let mut frames = |shell: &mut UiShell, n: usize| {
+            for _ in 0..n {
+                {
+                    let mut w = world.borrow_mut();
+                    for _ in 0..3 {
+                        run_simulation_tick(&mut w);
+                    }
+                }
+                let w = world.borrow();
+                term.draw(|frame| render_with_shell(&w, shell, frame))
+                    .unwrap();
+            }
+        };
+
+        let scroll = |world: &SharedWorld| {
+            world
+                .borrow()
+                .get_resource::<crate::ui::help::FieldGuideUiState>()
+                .map_or(0, |state| state.scroll)
+        };
+        let max_scroll = |world: &SharedWorld| {
+            world
+                .borrow()
+                .get_resource::<crate::ui::help::FieldGuideUiState>()
+                .map_or(0, |state| state.max_scroll)
+        };
+
+        frames(&mut shell, 3);
+
+        // Ctrl+K -> type the filter -> Enter on "Open Field Guide".
+        route_root_input(
+            &world,
+            &mut shell,
+            GameKeyEvent::new(GameKeyCode::Char('k')).with_ctrl(),
+        );
+        assert!(shell.is_palette_open());
+        frames(&mut shell, 1);
+        for ch in "field guide".chars() {
+            route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::Char(ch)));
+        }
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::Enter));
+        assert!(!shell.is_palette_open());
+        assert!(shell.active_workspace_contains_plugin("field-guide"));
+
+        // Render so the guide plugin caches the renderer's bound.
+        frames(&mut shell, 5);
+        assert_eq!(scroll(&world), 0, "guide starts unscrolled");
+
+        // PageDown moves exactly one page (item 103 semantics).
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::PageDown));
+        frames(&mut shell, 1);
+        assert_eq!(
+            scroll(&world),
+            u16::try_from(PAGE_SCROLL_LINES).unwrap(),
+            "PageDown via GameKeyEvent must page the guide down"
+        );
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::PageDown));
+        frames(&mut shell, 1);
+        assert_eq!(
+            scroll(&world),
+            u16::try_from(PAGE_SCROLL_LINES * 2).unwrap()
+        );
+
+        // PageUp moves back exactly one page.
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::PageUp));
+        frames(&mut shell, 1);
+        assert_eq!(
+            scroll(&world),
+            u16::try_from(PAGE_SCROLL_LINES).unwrap(),
+            "PageUp via GameKeyEvent must page the guide up"
+        );
+
+        // End lands exactly on the renderer's bound; Home returns to 0.
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::End));
+        frames(&mut shell, 1);
+        let bound = max_scroll(&world);
+        assert!(
+            bound > u16::try_from(PAGE_SCROLL_LINES * 2).unwrap(),
+            "test geometry must give the guide a bound beyond two pages (got {bound})"
+        );
+        assert_eq!(
+            scroll(&world),
+            bound,
+            "End via GameKeyEvent must scroll to the renderer's bound"
+        );
+        route_root_input(&world, &mut shell, GameKeyEvent::new(GameKeyCode::Home));
+        frames(&mut shell, 1);
+        assert_eq!(
+            scroll(&world),
+            0,
+            "Home via GameKeyEvent must scroll the guide to the top"
+        );
     }
 }

@@ -29,6 +29,14 @@ pub enum GameKeyCode {
     Delete,
     /// Shift+Tab.
     BackTab,
+    /// Page up.
+    PageUp,
+    /// Page down.
+    PageDown,
+    /// Home.
+    Home,
+    /// End.
+    End,
 }
 
 /// Platform-agnostic key modifiers.
@@ -273,6 +281,10 @@ mod tests {
             GameKeyCode::Backspace,
             GameKeyCode::Delete,
             GameKeyCode::BackTab,
+            GameKeyCode::PageUp,
+            GameKeyCode::PageDown,
+            GameKeyCode::Home,
+            GameKeyCode::End,
         ];
         // Each variant should be distinct from the others
         for (i, a) in codes.iter().enumerate() {
@@ -282,6 +294,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_page_home_end_key_codes_exist_and_are_distinct() {
+        // Item 124: PageUp/PageDown/Home/End must be representable in
+        // the platform-agnostic key type, or no adapter can ever
+        // deliver them to the Field Guide's scroll handlers.
+        let codes = [
+            GameKeyCode::PageUp,
+            GameKeyCode::PageDown,
+            GameKeyCode::Home,
+            GameKeyCode::End,
+        ];
+        for (i, a) in codes.iter().enumerate() {
+            for (j, b) in codes.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "Variants at {i} and {j} should differ");
+                }
+            }
+        }
+        assert_ne!(GameKeyCode::PageUp, GameKeyCode::Up);
+        assert_ne!(GameKeyCode::PageDown, GameKeyCode::Down);
+        // Events carrying the new codes keep their modifiers.
+        let event = GameKeyEvent::new(GameKeyCode::PageDown);
+        assert_eq!(event.code, GameKeyCode::PageDown);
+        assert_eq!(event.modifiers, GameKeyModifiers::default());
     }
 
     #[test]

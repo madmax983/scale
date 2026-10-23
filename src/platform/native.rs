@@ -29,6 +29,10 @@ impl TryFrom<KeyEvent> for GameKeyEvent {
             KeyCode::Right => GameKeyCode::Right,
             KeyCode::Backspace => GameKeyCode::Backspace,
             KeyCode::Delete => GameKeyCode::Delete,
+            KeyCode::PageUp => GameKeyCode::PageUp,
+            KeyCode::PageDown => GameKeyCode::PageDown,
+            KeyCode::Home => GameKeyCode::Home,
+            KeyCode::End => GameKeyCode::End,
             _ => return Err(()),
         };
         let modifiers = GameKeyModifiers::new(
@@ -147,6 +151,37 @@ mod tests {
 
         let del = GameKeyEvent::try_from(crossterm_key(KeyCode::Delete)).unwrap();
         assert_eq!(del.code, GameKeyCode::Delete);
+    }
+
+    #[test]
+    fn test_translate_page_home_end_keys() {
+        // Item 124: crossterm delivers these keys on real terminals;
+        // the adapter must not drop them, or the Field Guide's
+        // PageUp/PageDown/Home/End scroll handlers stay dead.
+        assert_eq!(
+            GameKeyEvent::try_from(crossterm_key(KeyCode::PageUp))
+                .unwrap()
+                .code,
+            GameKeyCode::PageUp
+        );
+        assert_eq!(
+            GameKeyEvent::try_from(crossterm_key(KeyCode::PageDown))
+                .unwrap()
+                .code,
+            GameKeyCode::PageDown
+        );
+        assert_eq!(
+            GameKeyEvent::try_from(crossterm_key(KeyCode::Home))
+                .unwrap()
+                .code,
+            GameKeyCode::Home
+        );
+        assert_eq!(
+            GameKeyEvent::try_from(crossterm_key(KeyCode::End))
+                .unwrap()
+                .code,
+            GameKeyCode::End
+        );
     }
 
     #[test]

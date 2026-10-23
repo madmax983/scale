@@ -25,6 +25,11 @@ impl TryFrom<KeyEvent> for GameKeyEvent {
             KeyCode::Right => GameKeyCode::Right,
             KeyCode::Backspace => GameKeyCode::Backspace,
             KeyCode::Delete => GameKeyCode::Delete,
+            // ratzilla 0.3.1 has all four (verified in its event.rs).
+            KeyCode::PageUp => GameKeyCode::PageUp,
+            KeyCode::PageDown => GameKeyCode::PageDown,
+            KeyCode::Home => GameKeyCode::Home,
+            KeyCode::End => GameKeyCode::End,
             _ => return Err(()),
         };
         let modifiers = GameKeyModifiers::new(key.ctrl, key.alt, key.shift);
@@ -114,6 +119,29 @@ mod tests {
             20,
         ))
         .is_err());
+    }
+
+    #[test]
+    fn test_translate_page_home_end_keys() {
+        // Item 124: ratzilla 0.3.1's KeyCode has all four variants
+        // (Home, End, PageUp, PageDown — verified against the crate's
+        // event.rs, which also maps the matching web KeyboardEvent
+        // key strings); the adapter must not drop them.
+        for (code, expected) in [
+            (KeyCode::PageUp, GameKeyCode::PageUp),
+            (KeyCode::PageDown, GameKeyCode::PageDown),
+            (KeyCode::Home, GameKeyCode::Home),
+            (KeyCode::End, GameKeyCode::End),
+        ] {
+            let key = KeyEvent {
+                code,
+                ctrl: false,
+                alt: false,
+                shift: false,
+            };
+            let game_key = GameKeyEvent::try_from(key).unwrap();
+            assert_eq!(game_key.code, expected);
+        }
     }
 
     #[test]
