@@ -478,6 +478,7 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<RetrogradeEngineeringEvent>>();
     world.init_resource::<Events<crate::layer1::energy::GridOverloadEvent>>();
     world.init_resource::<crate::layer1::energy::grid_strain::GridStrainTracker>();
+    world.init_resource::<crate::layer1::energy::cable_heat::CableHeatTracker>();
     world.init_resource::<Events<crate::layer1::psychology::memory_forgery::TruthOutbreakEvent>>();
     world.init_resource::<Events<crate::layer1::geology::GeologicalEvent>>();
     world.init_resource::<Events<crate::layer1::geology::fracking::FrackEvent>>();

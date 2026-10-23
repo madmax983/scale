@@ -12,6 +12,7 @@ pub struct PowerCable {
     pub current_load: f32,
 }
 
+#[allow(clippy::too_many_arguments)] // Item 125 adds the cable-heat tracker param (8th).
 pub fn evaluate_grid_load_system(
     mut cables: Query<(&mut PowerCable, &GridPosition)>,
     consumers: Query<(&PowerConsumer, &GridPosition)>,
@@ -19,6 +20,9 @@ pub fn evaluate_grid_load_system(
     existing_fires: Query<&GridPosition, With<Fire>>,
     mut temperature_grid: ResMut<TemperatureGrid>,
     mut commands: Commands,
+    // Item 125: optional so minimal worlds that never inserted a
+    // CableHeatTracker keep working exactly as before (telegraph absent).
+    mut cable_heat: Option<ResMut<crate::layer1::energy::cable_heat::CableHeatTracker>>,
     mut chronicle: EventWriter<crate::layer1::chronicle::AddChronicleEvent>,
 ) {
     // Group consumers by tile to find local demand
@@ -50,6 +54,44 @@ pub fn evaluate_grid_load_system(
     for (mut cable, pos) in cables.iter_mut() {
         let demand = *buffered_demand.get(&(pos.x, pos.y)).unwrap_or(&0.0);
         cable.current_load = demand;
+
+        // Item 125: cable heat-buildup telegraph. Observe EVERY cable
+        // every tick (overloaded or not) so the per-tile sustained
+        // counters and the clear/re-arm hysteresis advance on the same
+        // clock as the heat below. This only reads demand/capacity and
+        // chronicles warnings — the overload branch below (heat rate,
+        // 2.0x fire threshold, fire spawn) is untouched.
+        let heat_warning = cable_heat
+            .as_deref_mut()
+            .and_then(|tracker| tracker.observe((pos.x, pos.y), demand, cable.capacity));
+        if let Some(kind) = heat_warning {
+            use crate::layer1::energy::cable_heat::CableHeatWarning;
+            let (text, importance) = match kind {
+                CableHeatWarning::First => (
+                    format!(
+                        "Warning: the power cable at ({}, {}) is overheating — load {:.0} against capacity {:.0} for {} ticks. Shed load or add capacity before it catches fire.",
+                        pos.x,
+                        pos.y,
+                        demand,
+                        cable.capacity,
+                        crate::layer1::energy::cable_heat::CABLE_HEAT_WARN_TICKS,
+                    ),
+                    crate::layer1::chronicle::EventImportance::Standard,
+                ),
+                CableHeatWarning::Escalated => (
+                    format!(
+                        "The power cable at ({}, {}) is about to ignite — load {:.0} against capacity {:.0} has held for {} ticks and heat is still building. Shed load at once.",
+                        pos.x,
+                        pos.y,
+                        demand,
+                        cable.capacity,
+                        crate::layer1::energy::cable_heat::CABLE_HEAT_ESCALATE_TICKS,
+                    ),
+                    crate::layer1::chronicle::EventImportance::Major,
+                ),
+            };
+            chronicle.send(crate::layer1::chronicle::AddChronicleEvent { text, importance });
+        }
 
         if demand > cable.capacity {
             // Overloaded

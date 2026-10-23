@@ -23,6 +23,9 @@ mod instability_tests;
 pub mod grid_strain;
 #[cfg(test)]
 mod grid_strain_tests;
+pub mod cable_heat;
+#[cfg(test)]
+mod cable_heat_tests;
 pub mod load_limits;
 pub mod phantom_grid;
 #[cfg(test)]
