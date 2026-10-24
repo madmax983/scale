@@ -524,6 +524,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "informant" => handle_informant_command(world, &parts),
         "transplant" => handle_transplant_command(world, &parts),
         "organs" => print_organ_ledger(world),
+        "caps" => print_resource_caps(world),
         "waste" | "byproducts" => print_waste_report(world),
         "dump_waste" => handle_dump_waste_command(world, &parts),
         "heritage" => print_heritage(world),
@@ -8369,6 +8370,63 @@ fn print_organ_ledger(world: &mut World) {
             "Organs banked: {organs:.1} (perishable)\nMarket price: {price:.0} credits/organ\nPops gripped by harvest horror: {horrified}"
         ),
         Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 360 Resource Capacities: the colony ledger's per-type
+/// amount/capacity, which types are FULL, and how much is lying on the
+/// ground as spilled ResourceItems waiting for room.
+fn print_resource_caps(world: &mut World) {
+    use scale::layer1::economy::resources::{ColonyResources, ResourceItem, ResourceType};
+    use scale::layer1::economy::stockpile::Stockpile;
+    const TYPES: [ResourceType; 20] = [
+        ResourceType::Food,
+        ResourceType::Wood,
+        ResourceType::Stone,
+        ResourceType::Ore,
+        ResourceType::Metal,
+        ResourceType::Planks,
+        ResourceType::Blocks,
+        ResourceType::Waste,
+        ResourceType::BiologicalWaste,
+        ResourceType::NutrientPaste,
+        ResourceType::Rations,
+        ResourceType::Fuel,
+        ResourceType::Alcohol,
+        ResourceType::Scrap,
+        ResourceType::Tools,
+        ResourceType::BuildingPermit,
+        ResourceType::MemoryCore,
+        ResourceType::VoidAle,
+        ResourceType::HyperValuable,
+        ResourceType::Organs,
+    ];
+    let Some(res) = world.get_resource::<ColonyResources>() else {
+        println!("caps: no ColonyResources in world");
+        return;
+    };
+    let mut lines = String::new();
+    for t in TYPES {
+        let amount = res.get_amount(t);
+        let max = res.get_max_amount(t);
+        let full = if amount >= max { " FULL" } else { "" };
+        lines.push_str(&format!("{t:?}: {amount:.1}/{max:.1}{full}\n"));
+    }
+    let stockpiles = world.query::<&Stockpile>().iter(world).count();
+    let mut ground: Vec<(ResourceType, f32)> = Vec::new();
+    for item in world.query::<&ResourceItem>().iter(world) {
+        ground.push((item.resource_type, item.amount));
+    }
+    let ground_total: f32 = ground.iter().map(|(_, a)| a).sum();
+    lines.push_str(&format!(
+        "Stockpiles: {stockpiles}\nOn the ground: {} pile(s), {ground_total:.1} total (spilled excess waits here until there is room)",
+        ground.len()
+    ));
+    print_dashboard_panel(
+        "RESOURCE CAPACITIES (Spec 360)",
+        &lines,
+        Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
 }

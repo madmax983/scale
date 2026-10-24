@@ -165,8 +165,24 @@ fn handle_drop_off(world: &mut World, pop_entity: Entity, carrying: Carrying, po
     };
 
     if is_stockpile {
-        let mut resources = world.resource_mut::<ColonyResources>();
-        resources.add_resource(&carrying.resource_type, carrying.amount);
+        // Spec 360: the ledger caps at capacity — whatever does not fit
+        // is dropped at the stockpile door as a ground ResourceItem
+        // instead of silently vanishing. Haulers will not re-target it
+        // while the ledger is full (`find_and_target_item` gates on
+        // `has_room_for`), and haul it in once room frees up.
+        let excess = {
+            let mut resources = world.resource_mut::<ColonyResources>();
+            resources.add_resource_returning_excess(&carrying.resource_type, carrying.amount)
+        };
+        if excess > 0.0 {
+            world.spawn((
+                ResourceItem {
+                    resource_type: carrying.resource_type,
+                    amount: excess,
+                },
+                pos,
+            ));
+        }
         remove_carrying(world, pop_entity);
     }
 

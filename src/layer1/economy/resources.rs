@@ -991,13 +991,45 @@ impl ColonyResources {
             ResourceType::BuildingPermit => self.add_building_permits(amount),
             ResourceType::MemoryCore => self.add_memory_cores(amount),
             ResourceType::VoidAle => self.add_void_ale(amount),
-            ResourceType::HyperValuable => {
-                self.hyper_valuable = (self.hyper_valuable - amount).max(0.0)
-            }
+            ResourceType::HyperValuable => self.add_hyper_valuable(amount),
             ResourceType::Organs => {
                 self.organs = (self.organs + amount).min(self.max_organs)
             }
         }
+    }
+
+    /// Remaining capacity for a resource type (Spec 360): how much more
+    /// of it the colony ledger can hold before it caps. Zero when full,
+    /// when the cap is zero, or when the stored amount already exceeds
+    /// the cap (possible via event payouts that bypass the ledger).
+    #[must_use]
+    pub fn room_for(&self, resource_type: &ResourceType) -> f32 {
+        let room = self.get_max_amount(*resource_type) - self.get_amount(*resource_type);
+        if room.is_finite() {
+            room.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Adds a resource like [`add_resource`](Self::add_resource)
+    /// (clamping to capacity) and returns the excess that did NOT fit —
+    /// the amount the caller is responsible for (Spec 360: excess must
+    /// spill as a ground item, never silently vanish). Returns 0.0 for
+    /// non-finite or negative amounts, which `add_resource` ignores.
+    pub fn add_resource_returning_excess(
+        &mut self,
+        resource_type: &ResourceType,
+        amount: f32,
+    ) -> f32 {
+        if !amount.is_finite() || amount <= 0.0 {
+            self.add_resource(resource_type, amount);
+            return 0.0;
+        }
+        let before = self.get_amount(*resource_type);
+        self.add_resource(resource_type, amount);
+        let stored = self.get_amount(*resource_type) - before;
+        (amount - stored).max(0.0)
     }
 }
 
@@ -1726,6 +1758,35 @@ mod tests {
         };
         resources.add_wood(20.0);
         assert!((resources.wood - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_spec360_room_for_and_excess_api() {
+        let mut resources = ColonyResources {
+            stone: 90.0,
+            max_stone: 100.0,
+            ..Default::default()
+        };
+        assert_eq!(resources.room_for(&ResourceType::Stone), 10.0);
+        // 20 in, 10 fits, 10 excess reported (not silently discarded).
+        let excess = resources.add_resource_returning_excess(&ResourceType::Stone, 20.0);
+        assert_eq!(excess, 10.0);
+        assert_eq!(resources.stone, 100.0);
+        assert_eq!(resources.room_for(&ResourceType::Stone), 0.0);
+        // Fully-fitting adds report no excess; junk amounts are ignored.
+        let mut res2 = ColonyResources::default();
+        assert_eq!(
+            res2.add_resource_returning_excess(&ResourceType::Wood, 5.0),
+            0.0
+        );
+        assert_eq!(
+            res2.add_resource_returning_excess(&ResourceType::Wood, f32::NAN),
+            0.0
+        );
+        assert_eq!(
+            res2.add_resource_returning_excess(&ResourceType::Wood, -5.0),
+            0.0
+        );
     }
 
     #[test]
