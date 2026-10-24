@@ -289,6 +289,9 @@ pub fn build_simulation_schedule() -> Schedule {
 /// Run one simulation tick: all game systems via schedule, then increment tick counter.
 #[allow(clippy::too_many_lines)]
 fn init_simulation_resources(world: &mut World) {
+    // Item 127: thermal chronicle episode tracker (first-tick pattern —
+    // the INT-1335 bridge reads/writes it from tick one).
+    world.init_resource::<crate::layer1::core::integration::ThermalChronicleTracker>();
     // Spec 1384 EVA suits: status snapshot + scenario issue floor
     // (init only — never clobber a scenario-granted value).
     world.init_resource::<crate::layer1::eva_suit::ColonySuitStatus>();

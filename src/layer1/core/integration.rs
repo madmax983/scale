@@ -49,21 +49,126 @@ pub fn kinetic_strike_chronicle_bridge(
     }
 }
 
+/// Consecutive ticks with no thermal damage of a cause before that
+/// cause's chronicle warning re-arms (Item 127). Mirrors the
+/// grid-strain / cable-heat episode hysteresis (Items 117/125,
+/// `STRAIN_CLEAR_TICKS` / `CABLE_HEAT_CLEAR_TICKS` = 5), scaled up for
+/// the thermal lane: LifeSupport power flicker (Item 126 forensic:
+/// dark runs mean ~2 ticks, max ~10) plus pops stepping in and out of
+/// the heated habitat radius can gap thermal damage for several ticks
+/// inside one continuous cold snap, so 5 ticks would re-arm mid-winter
+/// and spam. 25 ticks exceeds the observed flicker gap with margin,
+/// and at a tenth of a season (250 ticks) it is far short enough that
+/// a cold snap which genuinely ends — LifeSupport repaired, season
+/// turning — and later recurs re-warns in the same winter.
+pub const THERMAL_EPISODE_CLEAR_TICKS: u64 = 25;
+
+/// Per-cause episode state for [`ThermalChronicleTracker`].
+#[derive(Debug, Clone, Copy, Default)]
+struct ThermalCauseState {
+    /// Whether the warning already fired for the current episode.
+    warned: bool,
+    /// Last tick damage of this cause was observed.
+    last_seen_tick: Option<u64>,
+}
+
+impl ThermalCauseState {
+    /// Observe one tick. Returns true exactly once per episode: on the
+    /// first damage tick after the tracker has (re-)armed. An episode
+    /// re-arms only after [`THERMAL_EPISODE_CLEAR_TICKS`] consecutive
+    /// ticks with no damage of this cause — a shorter flicker gap
+    /// leaves the episode (and its already-fired warning) latched.
+    fn observe(&mut self, tick: u64, present: bool) -> bool {
+        if self.warned {
+            if let Some(last) = self.last_seen_tick {
+                if tick > last && tick - last >= THERMAL_EPISODE_CLEAR_TICKS {
+                    self.warned = false;
+                    self.last_seen_tick = None;
+                }
+            }
+        }
+        if present {
+            self.last_seen_tick = Some(tick);
+            if !self.warned {
+                self.warned = true;
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// Episode tracker for the thermal chronicle bridge (Item 127).
+///
+/// Replaces the bridge's old `Local<u64>` per-year cooldowns. That
+/// state now lives in a Resource — the Item 117/125 pattern — so the
+/// live schedule and tests share one state machine instead of `Local`s
+/// that reset under `run_system_once` (the old per-year window was, in
+/// the previous tests' own words, "asserted by design").
+#[derive(Resource, Debug, Clone, Default)]
+pub struct ThermalChronicleTracker {
+    cold: ThermalCauseState,
+    heat: ThermalCauseState,
+}
+
+impl ThermalChronicleTracker {
+    /// Observe one tick of thermal damage. Returns
+    /// `(fire_cold, fire_heat)` — at most one true per cause per
+    /// episode, tracked independently so a winter entry cannot
+    /// suppress the following summer's warning or vice versa.
+    pub fn observe(&mut self, tick: u64, saw_cold: bool, saw_heat: bool) -> (bool, bool) {
+        (
+            self.cold.observe(tick, saw_cold),
+            self.heat.observe(tick, saw_heat),
+        )
+    }
+
+    /// Whether a cold episode has fired and not yet re-armed.
+    #[must_use]
+    pub fn cold_episode_active(&self) -> bool {
+        self.cold.warned
+    }
+
+    /// Whether a heat episode has fired and not yet re-armed.
+    #[must_use]
+    pub fn heat_episode_active(&self) -> bool {
+        self.heat.warned
+    }
+}
+
 /// INT-1335: Bridges `ThermalDamageEvent` to `AddChronicleEvent`.
 ///
 /// Telegraphs the honest cause (item 96, 2026-10-17): cold damage reads
 /// as hypothermia ("The Deep Chill"), heat damage as heatstroke ("The
 /// Long Heat") — previously every thermal death was chronicle-labelled
-/// hypothermia, so summer heat deaths had no usable telegraph. The rate
-/// design is unchanged per cause: at most one entry per year at
-/// Standard importance, tracked independently for cold and heat so a
-/// winter entry cannot suppress the following summer's warning.
+/// hypothermia, so summer heat deaths had no usable telegraph.
+///
+/// Item 127 (first-winter Deep Chill): the original rate gate was
+/// `tick > last_tick + TICKS_PER_YEAR` with both `Local<u64>`s
+/// initialized to 0, so the earliest possible entry was tick 1001 —
+/// one tick AFTER the first winter ends (winter year 1 is ticks
+/// 750–999: `TICKS_PER_YEAR` = 1000, 250 ticks per season, Spring
+/// first). First-winter hypothermia therefore accumulated from tick
+/// ~750 with no thermal chronicle line at all; the line could only
+/// ever fire in later years (balance loop 2026-10-23, gap #3: Deep
+/// Chill fired 6 pre / 4 post across 60 colonies, all in later years).
+/// The gate was a rate limiter, not a narrative or season-index
+/// condition — nothing else reads it — so it is replaced, not
+/// preserved: warnings are now episode-based via
+/// [`ThermalChronicleTracker`] (one entry per cold/heat episode,
+/// re-arming after [`THERMAL_EPISODE_CLEAR_TICKS`] damage-free ticks,
+/// the Items 117/125/126 hysteresis discipline). The first damage
+/// tick of the first winter now chronicles immediately — at
+/// 0.5 damage/tick against 100 HP that is ~200 ticks before the
+/// damage could kill, so the telegraph lands before any hypothermia
+/// death tick. Telegraphing only: no balance constant changes (the
+/// 0.5/tick damage, the 10C/35C tolerances, thermoregulation, and
+/// season timing are all untouched).
 pub fn thermal_damage_chronicle_bridge(
     mut events: EventReader<ThermalDamageEvent>,
     mut chronicle: EventWriter<AddChronicleEvent>,
     time: Res<SimulationTime>,
-    mut last_cold_tick: Local<u64>,
-    mut last_heat_tick: Local<u64>,
+    mut tracker: Option<ResMut<ThermalChronicleTracker>>,
 ) {
     let mut saw_cold = false;
     let mut saw_heat = false;
@@ -75,16 +180,25 @@ pub fn thermal_damage_chronicle_bridge(
         }
     }
 
-    if saw_cold && time.tick > *last_cold_tick + TICKS_PER_YEAR {
-        *last_cold_tick = time.tick;
+    // The tracker is initialized on the first tick by
+    // `init_simulation_resources` (and at setup), so the live schedule
+    // always takes the tracked path. The fallback covers bare worlds
+    // that never initialized it: with no state to persist, an observed
+    // episode fires on observation rather than panicking on a missing
+    // resource.
+    let (fire_cold, fire_heat) = match tracker.as_deref_mut() {
+        Some(tracker) => tracker.observe(time.tick, saw_cold, saw_heat),
+        None => (saw_cold, saw_heat),
+    };
+
+    if fire_cold {
         chronicle.send(AddChronicleEvent {
             text: "The Deep Chill took its toll. Pops are suffering from hypothermia.".to_string(),
             importance: EventImportance::Standard,
         });
     }
 
-    if saw_heat && time.tick > *last_heat_tick + TICKS_PER_YEAR {
-        *last_heat_tick = time.tick;
+    if fire_heat {
         chronicle.send(AddChronicleEvent {
             text: "The Long Heat took its toll. Pops are suffering from heatstroke.".to_string(),
             importance: EventImportance::Standard,
@@ -3830,6 +3944,7 @@ mod recent_arrival_tests {
 #[cfg(test)]
 mod thermal_chronicle_tests {
     use super::*;
+    use bevy_ecs::schedule::Schedule;
     use bevy_ecs::system::RunSystemOnce;
 
     fn thermal_world(tick: u64) -> World {
@@ -3840,6 +3955,7 @@ mod thermal_chronicle_tests {
         });
         world.init_resource::<Events<ThermalDamageEvent>>();
         world.init_resource::<Events<AddChronicleEvent>>();
+        world.insert_resource(ThermalChronicleTracker::default());
         world
     }
 
@@ -3860,10 +3976,38 @@ mod thermal_chronicle_tests {
         reader.read(events).map(|e| e.text.clone()).collect()
     }
 
+    fn bridge_schedule() -> Schedule {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(thermal_damage_chronicle_bridge);
+        schedule
+    }
+
+    /// Run one tick of the live bridge in a real `Schedule` (system
+    /// state persists across runs, unlike `run_system_once`).
+    /// `damage` is `Some(is_heatstroke)` when thermal damage occurs
+    /// this tick, `None` for a damage-free tick. Returns the total
+    /// chronicle texts accumulated so far — the test harness never
+    /// calls `Events::update`, so the buffer is cumulative.
+    fn run_bridge_tick(
+        world: &mut World,
+        schedule: &mut Schedule,
+        tick: u64,
+        damage: Option<bool>,
+    ) -> Vec<String> {
+        world.resource_mut::<SimulationTime>().tick = tick;
+        if let Some(is_heatstroke) = damage {
+            send_thermal(world, is_heatstroke);
+        }
+        schedule.run(world);
+        chronicle_texts(world)
+    }
+
     #[test]
     fn heat_damage_chronicles_heatstroke_not_hypothermia() {
-        // Item 96: heat deaths must telegraph as heatstroke.
-        let mut world = thermal_world(TICKS_PER_YEAR + 1);
+        // Item 96: heat deaths must telegraph as heatstroke. Item 127:
+        // tick 300 is the FIRST summer (year 1) — under the old
+        // per-year gate this produced nothing until tick 1001.
+        let mut world = thermal_world(300);
         send_thermal(&mut world, true);
         world
             .run_system_once(thermal_damage_chronicle_bridge)
@@ -3884,7 +4028,8 @@ mod thermal_chronicle_tests {
 
     #[test]
     fn cold_damage_chronicles_hypothermia() {
-        let mut world = thermal_world(TICKS_PER_YEAR + 1);
+        // Item 127: tick 800 is inside the FIRST winter (750–999).
+        let mut world = thermal_world(800);
         send_thermal(&mut world, false);
         world
             .run_system_once(thermal_damage_chronicle_bridge)
@@ -3900,14 +4045,11 @@ mod thermal_chronicle_tests {
 
     #[test]
     fn thermal_chronicle_coalesces_per_cause() {
-        // Rate design kept: a burst of damage coalesces to at most one
-        // entry per cause, and the two causes telegraph independently —
-        // a cold entry must not suppress the heat entry or vice versa.
-        // (The per-year window itself lives in the bridge's Locals,
-        // which persist in the real schedule; `run_system_once`
-        // reinitializes them, so the window is asserted by design —
-        // same mechanism as the original single-timer bridge.)
-        let mut world = thermal_world(TICKS_PER_YEAR + 1);
+        // A burst of damage in one tick coalesces to at most one
+        // entry per cause, and the two causes telegraph independently
+        // — a cold entry must not suppress the heat entry or vice
+        // versa.
+        let mut world = thermal_world(800);
         send_thermal(&mut world, true);
         send_thermal(&mut world, true);
         send_thermal(&mut world, false);
@@ -3933,18 +4075,195 @@ mod thermal_chronicle_tests {
     }
 
     #[test]
-    fn thermal_chronicle_silent_before_first_year_elapses() {
-        // The original bridge only fires once tick > TICKS_PER_YEAR;
-        // that gate is part of the kept rate design.
-        let mut world = thermal_world(10);
-        send_thermal(&mut world, true);
-        world
-            .run_system_once(thermal_damage_chronicle_bridge)
-            .unwrap();
-        assert!(chronicle_texts(&mut world).is_empty());
+    fn first_winter_cold_episode_chronicles_on_first_damage_tick() {
+        // Item 127 RED→GREEN (balance loop gap #3): winter year 1 is
+        // ticks 750–999. The old gate (`tick > last + TICKS_PER_YEAR`,
+        // locals starting at 0) could not fire before tick 1001, so
+        // this exact scenario produced ZERO entries pre-fix (verified
+        // RED against the live bridge in a Schedule). The telegraph
+        // must land on the first damage tick of the episode.
+        let mut world = thermal_world(750);
+        let mut schedule = bridge_schedule();
+        let texts = run_bridge_tick(&mut world, &mut schedule, 750, Some(false));
+        assert_eq!(
+            texts.len(),
+            1,
+            "first-winter cold damage must chronicle immediately: {texts:?}"
+        );
+        assert!(
+            texts[0].contains("Deep Chill"),
+            "first-winter entry must be the Deep Chill line: {}",
+            texts[0]
+        );
+    }
+
+    #[test]
+    fn cold_episode_does_not_spam_within_one_episode() {
+        // 101 consecutive cold-damage ticks (a full deep-winter
+        // stretch, ticks 750–850) produce exactly one entry.
+        let mut world = thermal_world(750);
+        let mut schedule = bridge_schedule();
+        let mut texts = Vec::new();
+        for tick in 750..=850 {
+            texts = run_bridge_tick(&mut world, &mut schedule, tick, Some(false));
+        }
+        assert_eq!(texts.len(), 1, "one entry per cold episode, got: {texts:?}");
+    }
+
+    #[test]
+    fn later_winter_episode_fires_again_after_clear() {
+        // First winter fires; the episode clears over 40 damage-free
+        // ticks (>= THERMAL_EPISODE_CLEAR_TICKS); the second winter
+        // (ticks 1750–1999) fires again on its first damage tick.
+        let mut world = thermal_world(750);
+        let mut schedule = bridge_schedule();
+        let mut texts = Vec::new();
+        for tick in 750..760 {
+            texts = run_bridge_tick(&mut world, &mut schedule, tick, Some(false));
+        }
+        assert_eq!(texts.len(), 1, "first winter entry: {texts:?}");
+        for tick in 760..800 {
+            texts = run_bridge_tick(&mut world, &mut schedule, tick, None);
+        }
+        assert_eq!(texts.len(), 1, "silence must not add entries: {texts:?}");
+        assert!(
+            !world
+                .resource::<ThermalChronicleTracker>()
+                .cold_episode_active(),
+            "episode must re-arm after the clear window"
+        );
+        let texts = run_bridge_tick(&mut world, &mut schedule, 1750, Some(false));
+        assert_eq!(
+            texts.len(),
+            2,
+            "later-winter episode must fire again: {texts:?}"
+        );
+        assert!(texts[1].contains("Deep Chill"), "got: {texts:?}");
+    }
+
+    #[test]
+    fn flicker_gap_does_not_rearm_but_full_clear_does() {
+        // A 10-tick damage gap (< THERMAL_EPISODE_CLEAR_TICKS) inside
+        // one cold snap must NOT re-arm: damage resuming is the same
+        // episode and stays silent. A 40-tick gap ends the episode;
+        // the next cold snap warns again.
+        let mut world = thermal_world(750);
+        let mut schedule = bridge_schedule();
+        let mut texts = Vec::new();
+        for tick in 750..760 {
+            texts = run_bridge_tick(&mut world, &mut schedule, tick, Some(false));
+        }
+        for tick in 760..770 {
+            texts = run_bridge_tick(&mut world, &mut schedule, tick, None);
+        }
+        assert!(
+            world
+                .resource::<ThermalChronicleTracker>()
+                .cold_episode_active(),
+            "flicker gap must leave the episode latched"
+        );
+        for tick in 770..780 {
+            texts = run_bridge_tick(&mut world, &mut schedule, tick, Some(false));
+        }
+        assert_eq!(
+            texts.len(),
+            1,
+            "flicker resumption is the same episode — no spam: {texts:?}"
+        );
+        for tick in 780..820 {
+            texts = run_bridge_tick(&mut world, &mut schedule, tick, None);
+        }
+        assert_eq!(
+            texts.len(),
+            1,
+            "the clear window itself adds no entries: {texts:?}"
+        );
+        let texts = run_bridge_tick(&mut world, &mut schedule, 820, Some(false));
+        assert_eq!(
+            texts.len(),
+            2,
+            "a genuinely new episode after a full clear re-warns: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn warm_ticks_never_chronicle() {
+        // No thermal damage at all — spring, summer, and winter ticks
+        // alike — produces no thermal chronicle entries.
+        let mut world = thermal_world(0);
+        let mut schedule = bridge_schedule();
+        let mut texts = Vec::new();
+        for tick in [0, 100, 300, 749, 750, 900, 1001, 1750] {
+            texts = run_bridge_tick(&mut world, &mut schedule, tick, None);
+        }
+        assert!(
+            texts.is_empty(),
+            "no damage must mean no thermal entries: {texts:?}"
+        );
+    }
+
+    #[test]
+    fn first_winter_damage_chain_telegraphs_before_any_death() {
+        // Live chain: the real `thermal_damage_system` feeding the
+        // real bridge in one chained Schedule, first winter (tick
+        // 800), a pop standing on a -5C tile (winter ambient, below
+        // the 10C cold tolerance, no insulation). The Deep Chill
+        // entry must land on the FIRST damage tick, while the pop is
+        // at 99.5/100 HP — hypothermia at 0.5/tick needs 200 ticks
+        // to kill, so the warning precedes any possible death tick
+        // by ~199 ticks.
+        use crate::layer1::health::Health;
+        use crate::layer1::items::Equipment;
+        use crate::layer1::map::GridPosition;
+        use crate::layer1::pop::Pop;
+        use crate::layer1::temperature::{thermal_damage_system, TemperatureGrid};
+
+        let mut world = thermal_world(800);
+        world.insert_resource(TemperatureGrid::new(10, 10, -5.0));
+        let pop = world
+            .spawn((
+                Pop,
+                Health {
+                    current: 100.0,
+                    max: 100.0,
+                    has_rust_lung: false,
+                },
+                GridPosition { x: 5, y: 5 },
+                Equipment::default(),
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((thermal_damage_system, thermal_damage_chronicle_bridge).chain());
+
+        schedule.run(&mut world);
+        let texts = chronicle_texts(&mut world);
+        assert_eq!(
+            texts.len(),
+            1,
+            "Deep Chill must fire on the first damage tick: {texts:?}"
+        );
+        assert!(texts[0].contains("Deep Chill"), "got: {texts:?}");
+        let health = world.get::<Health>(pop).unwrap().current;
+        assert!(
+            (health - 99.5).abs() < f32::EPSILON,
+            "one damage tick taken, pop essentially unharmed: {health}"
+        );
+
+        // Nine more damage ticks: still exactly one entry (episode
+        // hysteresis) and the pop is at 95 HP — nowhere near death.
+        for _ in 0..9 {
+            schedule.run(&mut world);
+        }
+        let texts = chronicle_texts(&mut world);
+        assert_eq!(texts.len(), 1, "no spam within the episode: {texts:?}");
+        let health = world.get::<Health>(pop).unwrap().current;
+        assert!(
+            (health - 95.0).abs() < f32::EPSILON && health > 0.0,
+            "telegraph long precedes any death: health {health}"
+        );
     }
 }
-
 #[cfg(test)]
 mod grid_overload_fire_tests {
     use super::*;
