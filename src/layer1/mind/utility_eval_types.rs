@@ -108,6 +108,8 @@ pub struct PopEvaluationQuery {
     pub job: Option<&'static Job>,
     pub is_silent: Option<&'static crate::layer1::stress::TraitSilent>,
     pub nostalgia: Option<&'static crate::layer1::culture::nostalgia::Nostalgia>,
+    pub nostalgia_infection:
+        Option<&'static crate::layer1::social::nostalgia_plague::NostalgiaInfection>,
     pub existential_crisis:
         Option<&'static crate::layer1::economy::existential_audit::ExistentialCrisis>,
     pub temporal_fugue: Option<&'static crate::layer1::mind::temporal_fugue::TemporalFugue>,
@@ -146,7 +148,7 @@ impl PopEvalData {
             insulation: 0.0,
             carrying_item_type: None,
             is_silent: item.is_silent.is_some(),
-            is_nostalgic: item.nostalgia.is_some(),
+            is_nostalgic: item.nostalgia.is_some() || item.nostalgia_infection.is_some(),
             existential_crisis: item.existential_crisis.copied(),
             has_temporal_fugue: item.temporal_fugue.is_some(),
             is_fringe: item.cultural_drift.is_some_and(|d| d.is_fringe()),

@@ -491,6 +491,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "travelers" => print_travelers(world),
         "shipout" => handle_shipout_command(world),
         "martyr" => handle_martyr_command(world, &parts),
+        "nostalgia" => handle_nostalgia_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3284,6 +3285,9 @@ fn print_stats(world: &mut World) {
     // Spec 361: digital ghosts on their posthumous shift (full panel: `posthumous`).
     let ghosts = scale::layer1::tech::posthumous_work_shift::ghost_count(world);
 
+    // Spec 362: pops lost to the Nostalgia Plague (full panel: `nostalgia`).
+    let nostalgia_count = scale::layer1::social::nostalgia_plague::nostalgia_infected_count(world);
+
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
     let grid_strain = scale::layer1::energy::grid_strain::grid_strain_ticks(world);
@@ -3321,7 +3325,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={}",
         tick,
         scenario,
         pops,
@@ -3429,6 +3433,7 @@ fn print_stats(world: &mut World) {
         resources.biological_waste,
         resources.nutrient_paste,
         ghosts,
+        nostalgia_count,
     );
 }
 
@@ -7286,6 +7291,70 @@ fn print_leases(world: &mut World) {
         rows.join("\n")
     };
     print_dashboard_panel("CORPORATE LEASES", &body, None, None);
+}
+
+/// Spec 362: the Nostalgia Plague panel + debug controls.
+/// `nostalgia` — status panel. `nostalgia infect` — infect the first
+/// living pop (debug). `nostalgia anchor on|off` — reality-anchor
+/// broadcast (the cure seam).
+fn handle_nostalgia_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::nostalgia_plague::{
+        nostalgia_status_label, NostalgiaInfection, NostalgiaPlagueState,
+    };
+
+    world.init_resource::<NostalgiaPlagueState>();
+    match parts.get(1).map(|s| s.to_lowercase()).as_deref() {
+        Some("infect") => {
+            let target = {
+                let mut query =
+                    world.query_filtered::<bevy_ecs::prelude::Entity, bevy_ecs::prelude::With<scale::layer1::pop::Pop>>();
+                query.iter(world).next()
+            };
+            if let Some(pop) = target {
+                world.entity_mut(pop).insert(NostalgiaInfection::default());
+                let mut state = world.resource_mut::<NostalgiaPlagueState>();
+                state.total_infections += 1;
+                print_dashboard_panel(
+                    "NOSTALGIA PLAGUE",
+                    "A colonist has succumbed to the Nostalgia Plague (debug infection).\nWatch them shun the reactor and thrive at the hand-plough — and eye the advanced tech.",
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            } else {
+                print_dashboard_panel(
+                    "NOSTALGIA PLAGUE",
+                    "No living pop to infect.",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+        }
+        Some("anchor") => {
+            let on = parts.get(2).is_some_and(|v| *v == "on");
+            world.resource_mut::<NostalgiaPlagueState>().anchor_active = on;
+            print_dashboard_panel(
+                "REALITY ANCHOR",
+                if on {
+                    "The reality-anchor broadcast is running.\nInfected pops will slowly come back to the present."
+                } else {
+                    "The reality-anchor broadcast is off."
+                },
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        _ => {
+            let label = nostalgia_status_label(world);
+            print_dashboard_panel(
+                "NOSTALGIA PLAGUE",
+                &format!(
+                    "Plague status: {label}\nExposure builds near ruins, artifacts, ancient structures and carrier pops;\n30 points infects. Cure: `nostalgia anchor on`. Debug: `nostalgia infect`."
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
 }
 
 fn handle_fools_command(world: &mut World, parts: &[&str]) {

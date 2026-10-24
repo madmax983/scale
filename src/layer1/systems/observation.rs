@@ -172,6 +172,18 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Observation),
     );
 
+    // Spec 362 The Nostalgia Plague: separate add_systems — the tuple
+    // above is at Bevy's IntoSystemConfigs arity limit (flesh-famine
+    // lesson). Exposure accrues from relics/ruins/artifacts and carrier
+    // pops; the reality anchor cures.
+    schedule.add_systems(
+        (
+            crate::layer1::social::nostalgia_plague::nostalgia_exposure_system,
+            crate::layer1::social::nostalgia_plague::reality_anchor_system,
+        )
+            .in_set(Layer1SystemSet::Observation),
+    );
+
     // Spec 343: The Rumor Web — TTL decay, adjacency spread, panic reaction.
     // Separate block: the rumor block above is at the tuple-arity limit.
     schedule.add_systems(

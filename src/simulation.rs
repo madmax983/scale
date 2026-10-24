@@ -514,6 +514,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<BuildingMap>();
 
     world.init_resource::<crate::layer1::stress::TraumaTracker>();
+    // Spec 362 The Nostalgia Plague: ledger/anchor state + infection
+    // event (first-tick pattern — the exposure system writes both).
+    world.init_resource::<crate::layer1::social::nostalgia_plague::NostalgiaPlagueState>();
+    world.init_resource::<Events<crate::layer1::social::nostalgia_plague::NostalgiaInfectedEvent>>();
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();

@@ -775,3 +775,10 @@ pub mod ship_stowaway;
 /// on the first passenger-capable trade ship at/after that date.
 pub mod long_haulers;
 pub use long_haulers::*;
+
+/// The Nostalgia Plague (Spec 362): melancholia contagion from relics,
+/// ruins and carrier pops — high-tech work collapses, primitive work
+/// flourishes, and the infected dismantle advanced tech through the
+/// existing sabotage evaluator.
+pub mod nostalgia_plague;
+pub use nostalgia_plague::*;

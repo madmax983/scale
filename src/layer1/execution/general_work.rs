@@ -125,6 +125,7 @@ struct WorkerQuery {
     fog: Option<&'static MentalFog>,
     ostracized: Option<&'static crate::layer1::social::grievances::Ostracized>,
     on_strike: Has<crate::layer1::culture::memorial_revolt::OnStrike>,
+    nostalgia_infected: Has<crate::layer1::social::nostalgia_plague::NostalgiaInfection>,
 }
 
 /// ⚡ Bolt Optimization: Uses `bevy::utils::HashMap` (AHash) instead of `std::collections::HashMap`
@@ -180,6 +181,17 @@ fn collect_workers_by_target(
                 1.0
             };
             let buff_mod = item.buff.map_or(1.0, |b| b.multiplier);
+            // Spec 362: THE nostalgia efficiency pass — infected pops
+            // crawl on high-tech jobs and fly on primitive ones. Tier
+            // comes from the pop's assignment; jobless workers default
+            // to Modern.
+            let nostalgia_mod = crate::layer1::social::nostalgia_plague::nostalgia_efficiency_multiplier(
+                item.nostalgia_infected,
+                item.job.map_or(
+                    crate::layer1::social::nostalgia_plague::TechTier::Modern,
+                    |j| crate::layer1::social::nostalgia_plague::tech_tier_for_assignment(j.job_type),
+                ),
+            );
             let fog_mod = item.fog.map_or(1.0, |f| f.work_speed_penalty);
 
             (
@@ -189,7 +201,7 @@ fn collect_workers_by_target(
                     morale,
                     action: item.mt.for_action,
                     equipment: item.equipment.copied(),
-                    speed_modifier: trait_work_mod * job_eff_mod * buff_mod * fog_mod,
+                    speed_modifier: trait_work_mod * job_eff_mod * buff_mod * fog_mod * nostalgia_mod,
                     job: item.job.copied(),
                     dialect: item.dialect.copied().unwrap_or_default(),
                     linguistics: item.linguistics.cloned().unwrap_or_default(),
