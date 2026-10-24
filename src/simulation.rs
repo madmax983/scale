@@ -305,6 +305,9 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 359 Shift Work: night-worker census (first-tick pattern —
     // the effects system writes it on tick one).
     world.init_resource::<crate::layer1::social::shift_work::NightShiftStats>();
+    // Spec 361 The Posthumous Work Shift: ghost ledger (first-tick
+    // pattern — the spawn/work systems write it on tick one).
+    world.init_resource::<crate::layer1::tech::posthumous_work_shift::PosthumousStats>();
     world.init_resource::<crate::layer1::agriculture::compost::CompostSoil>();
     // Spec 345 Planetary Quirks: centralized global modifiers derived
     // from PlanetaryTraits (init only — never clobber a derived value).

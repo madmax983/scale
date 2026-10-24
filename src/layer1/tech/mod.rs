@@ -834,6 +834,9 @@ pub mod machine_awakening;
 pub use machine_awakening::*;
 pub mod martyrs_engine;
 
+/// The Posthumous Work Shift (Spec 361).
+pub mod posthumous_work_shift;
+
 pub mod rogue_automation_cults;
 
 pub mod living_archive;

@@ -685,6 +685,9 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
                 (
                     Without<crate::layer1::social::ship_stowaway::Stowaway>,
                     Without<crate::layer1::nature::symbiotic_pests::Vermin>,
+                    // A digital ghost serves only its inherited shift —
+                    // never a candidate for new tasks (Spec 361).
+                    Without<crate::layer1::tech::posthumous_work_shift::DigitalGhost>,
                 ),
             )>()
             .iter(world)

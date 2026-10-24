@@ -502,6 +502,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "crossfires" => print_crossfire(world),
         "graffiti" => print_graffiti(world),
         "shift" => handle_shift_command(world, &parts),
+        "posthumous" => print_posthumous(world),
+        "workshift" => handle_workshift_command(world, &parts),
         "tag" => handle_tag_command(world, &parts),
         "scrub" => handle_scrub_command(world, &parts),
         "drones" => print_drones(world),
@@ -3279,6 +3281,8 @@ fn print_stats(world: &mut World) {
 
     // Spec 359: pops night-working right now (full panel: `shift`).
     let nightworkers = scale::layer1::social::shift_work::night_worker_count(world);
+    // Spec 361: digital ghosts on their posthumous shift (full panel: `posthumous`).
+    let ghosts = scale::layer1::tech::posthumous_work_shift::ghost_count(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3317,7 +3321,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={}",
         tick,
         scenario,
         pops,
@@ -3424,6 +3428,7 @@ fn print_stats(world: &mut World) {
         ls_duty_episode,
         resources.biological_waste,
         resources.nutrient_paste,
+        ghosts,
     );
 }
 
@@ -6695,6 +6700,16 @@ fn print_help() {
                     "Debug: martyr a pop — enemy-slain leader test (Spec 272)",
                 ),
                 (
+                    "posthumous",
+                    "",
+                    "List digital ghosts on their posthumous shift (Spec 361)",
+                ),
+                (
+                    "workshift [pop_id|name]",
+                    "",
+                    "Debug: kill a pop mid-shift — a digital ghost finishes it (Spec 361)",
+                ),
+                (
                     "broadcast [duration] [intensity] [faction]",
                     "",
                     "Debug: fire an empathy broadcast — psychic distress wave (Spec 305)",
@@ -7840,6 +7855,69 @@ fn handle_martyr_command(world: &mut World, parts: &[&str]) {
         &format!(
             "{name} (id {id}), {leader_note}, has been struck down by faction {faction_id}.
 The death will be processed next tick — check STATS martyrdom= and the chronicle."
+        ),
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 361: list digital ghosts currently serving a posthumous shift.
+fn print_posthumous(world: &mut World) {
+    use scale::layer1::tech::posthumous_work_shift::posthumous_panel_lines;
+    let lines = posthumous_panel_lines(world);
+    print_dashboard_panel(
+        "POSTHUMOUS WORK SHIFT",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        None,
+    );
+}
+
+/// Debug: kill a pop mid-shift — their digital ghost rises next tick
+/// to finish the shift, then decays (Spec 361). Mirrors `martyr`:
+/// no arg kills the first pop; otherwise an entity id or a pop name.
+fn handle_workshift_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::biology::health::Dead;
+    use scale::layer1::utility_types::{ActionType, PopAction};
+    let found: Option<(Entity, String)> = match parts.get(1) {
+        None => world
+            .query::<(Entity, &Pop, &PopName)>()
+            .iter(world)
+            .next()
+            .map(|(e, _, n)| (e, n.0.clone())),
+        Some(id_str) => match id_str.parse::<u32>() {
+            Ok(id) => find_pop_by_id(world, id),
+            Err(_) => world
+                .query::<(Entity, &Pop, &PopName)>()
+                .iter(world)
+                .find(|(_, _, n)| n.0.eq_ignore_ascii_case(id_str))
+                .map(|(e, _, n)| (e, n.0.clone())),
+        },
+    };
+    let Some((entity, name)) = found else {
+        print_dashboard_panel(
+            "ERROR",
+            "No such pop. List candidates with `pops`.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let id = entity.index();
+    // Put them unambiguously on shift, then kill them: the ghost
+    // seam (Spec 361) is a work action at the moment of death.
+    let mut action = world
+        .get::<PopAction>(entity)
+        .copied()
+        .unwrap_or_default();
+    action.current = ActionType::Farm;
+    action.ticks_committed = 0;
+    world.entity_mut(entity).insert(action);
+    world.entity_mut(entity).insert(Dead);
+    print_dashboard_panel(
+        "POSTHUMOUS SHIFT TEST",
+        &format!(
+            "{name} (id {id}) has died mid-shift.\nRun `tick` — a digital ghost should clock in (STATS ghosts=1, `posthumous` lists it), finish the shift, and decay."
         ),
         Some(comfy_table::Color::Red),
         Some(comfy_table::Attribute::Bold),

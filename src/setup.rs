@@ -395,6 +395,7 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(crate::layer1::unrest::Unrest::default());
     // Spec 272 The Martyrdom Effect: fervor state, enemy-strike ledger, casus belli.
     world.insert_resource(crate::layer1::social::martyrdom::Martyrdom::default());
+    world.insert_resource(crate::layer1::tech::posthumous_work_shift::PosthumousStats::default());
     world.insert_resource(crate::layer1::social::martyrdom::LastEnemyStrike::default());
     world.insert_resource(crate::layer1::social::martyrdom::IdeologicalCasusBelli::default());
     world.insert_resource(crate::layer1::tech_envy::TechEnvyConfig::default());

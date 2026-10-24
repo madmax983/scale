@@ -231,6 +231,12 @@ pub fn register(schedule: &mut Schedule) {
                 .after(crate::layer1::entities::pop::handle_pop_death_system)
                 .before(crate::layer1::health::despawn_dead_entities_system),
             crate::layer1::social::martyrdom::tick_martyrdom_system,
+            // Spec 361 The Posthumous Work Shift: raise a digital ghost
+            // for pops who died mid-shift — after PopDied is emitted,
+            // before the corpse is despawned (its Job/action are read).
+            crate::layer1::tech::posthumous_work_shift::spawn_digital_ghost_system
+                .after(crate::layer1::entities::pop::handle_pop_death_system)
+                .before(crate::layer1::health::despawn_dead_entities_system),
             crate::layer1::health::despawn_dead_entities_system
                 .after(crate::layer1::entities::pop::handle_pop_death_system)
                 .after(crate::layer1::fauna::handle_fauna_death_system)

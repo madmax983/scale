@@ -450,6 +450,18 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Economy),
     );
 
+    // Spec 361 The Posthumous Work Shift: ghosts work their one
+    // inherited shift and haunt nearby living pops — BEFORE the
+    // morale cache, so the Haunted Workplace modifier counts the
+    // same tick it is applied (same pattern as the Grind/359 blocks).
+    schedule.add_systems(
+        (
+            crate::layer1::tech::posthumous_work_shift::ghost_work_system
+                .before(update_morale_cache_system),
+        )
+            .in_set(Layer1SystemSet::Economy),
+    );
+
     // Spec 359 Shift Work: tracker coverage + the night-shift
     // consequence layer, BEFORE the morale cache (same pattern and
     // reason as the Grind block above). Separate add_systems call:
