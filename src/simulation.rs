@@ -518,6 +518,9 @@ fn init_simulation_resources(world: &mut World) {
     // event (first-tick pattern — the exposure system writes both).
     world.init_resource::<crate::layer1::social::nostalgia_plague::NostalgiaPlagueState>();
     world.init_resource::<Events<crate::layer1::social::nostalgia_plague::NostalgiaInfectedEvent>>();
+    // Spec 363 Architectural Spite: ledger/pacing state (the spite
+    // driver reads and writes it every pass).
+    world.init_resource::<crate::layer1::social::architectural_spite::SpiteState>();
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();

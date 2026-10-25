@@ -782,3 +782,11 @@ pub use long_haulers::*;
 /// existing sabotage evaluator.
 pub mod nostalgia_plague;
 pub use nostalgia_plague::*;
+
+/// Architectural Spite (Spec 363): rivalrous pops raise junk spite
+/// walls by a rival's door and jam shared amenities against them —
+/// pathfinding obstacles with a valid-path guarantee, a builder-tracked
+/// demolition grudge, and targeted amenity sabotage.
+/// No glob re-export on purpose: generic names like `SpiteState` stay
+/// namespaced and callers use the full path.
+pub mod architectural_spite;

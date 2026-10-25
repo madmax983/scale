@@ -492,6 +492,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "shipout" => handle_shipout_command(world),
         "martyr" => handle_martyr_command(world, &parts),
         "nostalgia" => handle_nostalgia_command(world, &parts),
+        "spite" => handle_spite_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3287,6 +3288,10 @@ fn print_stats(world: &mut World) {
 
     // Spec 362: pops lost to the Nostalgia Plague (full panel: `nostalgia`).
     let nostalgia_count = scale::layer1::social::nostalgia_plague::nostalgia_infected_count(world);
+    // Spec 363: standing spite walls / active amenity sabotages.
+    let spite_count = scale::layer1::social::architectural_spite::spite_wall_count(world);
+    let spite_sab_count =
+        scale::layer1::social::architectural_spite::spite_sabotage_count(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3325,7 +3330,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={}",
         tick,
         scenario,
         pops,
@@ -3434,6 +3439,8 @@ fn print_stats(world: &mut World) {
         resources.nutrient_paste,
         ghosts,
         nostalgia_count,
+        spite_count,
+        spite_sab_count,
     );
 }
 
@@ -7349,6 +7356,181 @@ fn handle_nostalgia_command(world: &mut World, parts: &[&str]) {
                 "NOSTALGIA PLAGUE",
                 &format!(
                     "Plague status: {label}\nExposure builds near ruins, artifacts, ancient structures and carrier pops;\n30 points infects. Cure: `nostalgia anchor on`. Debug: `nostalgia infect`."
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+
+/// Spec 363: the Architectural Spite panel + debug controls.
+/// `spite` — status panel. `spite build` — force the first pop pair
+/// into a rivalry (debug affinity) and raise a spite wall.
+/// `spite sabotage` — jam the first Tavern against the rival.
+/// `spite demolish` — tear down the first standing spite wall.
+fn handle_spite_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::architectural_spite::{
+        demolish_spite_wall, sabotage_amenity, spite_status_label, try_build_spite_wall,
+        SpiteWall,
+    };
+
+    // First two living pops, in spawn order (debug pair).
+    let pair = {
+        let mut query = world.query_filtered::<
+            bevy_ecs::prelude::Entity,
+            bevy_ecs::prelude::With<scale::layer1::pop::Pop>,
+        >();
+        let pops: Vec<_> = query.iter(world).collect();
+        if pops.len() >= 2 {
+            Some((pops[0], pops[1]))
+        } else {
+            None
+        }
+    };
+
+    match parts.get(1).map(|s| s.to_lowercase()).as_deref() {
+        Some("build") => {
+            // Try every ordered pair until one can actually place a
+            // wall — the first pops in spawn order are dormant origin
+            // pops whose standing tiles are poor anchors.
+            let all_pops = {
+                let mut query = world.query_filtered::<
+                    bevy_ecs::prelude::Entity,
+                    bevy_ecs::prelude::With<scale::layer1::pop::Pop>,
+                >();
+                query.iter(world).collect::<Vec<_>>()
+            };
+            let pair = 'search: {
+                for &b in &all_pops {
+                    for &r in &all_pops {
+                        if b == r {
+                            continue;
+                        }
+                        if world
+                            .get::<scale::layer1::social::Relationships>(b)
+                            .is_none()
+                        {
+                            world
+                                .entity_mut(b)
+                                .insert(scale::layer1::social::Relationships::default());
+                        }
+                        world
+                            .get_mut::<scale::layer1::social::Relationships>(b)
+                            .unwrap()
+                            .set_affinity(r, -90.0);
+                        if try_build_spite_wall(world, b, r).is_some() {
+                            break 'search Some((b, r));
+                        }
+                    }
+                }
+                None
+            };
+            if pair.is_some() {
+                print_dashboard_panel(
+                    "ARCHITECTURAL SPITE",
+                    "A spite wall goes up — right by a rival's door. It costs the colony nothing but goodwill. (See STATS spite= count.)",
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            } else {
+                print_dashboard_panel(
+                    "ARCHITECTURAL SPITE",
+                    "Need at least two pops for a rivalry.",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+        }
+        Some("sabotage") => {
+            let tavern = {
+                let mut query =
+                    world.query::<(bevy_ecs::prelude::Entity, &scale::layer1::building::Building)>();
+                let mut found = None;
+                let mut fallback = None;
+                let mut any_building = None;
+                for (entity, building) in query.iter(world) {
+                    if any_building.is_none() {
+                        any_building = Some(entity);
+                    }
+                    if building.building_type
+                        == scale::layer1::building::BuildingType::Tavern
+                    {
+                        found = Some(entity);
+                        break;
+                    }
+                    if fallback.is_none()
+                        && matches!(
+                            building.building_type,
+                            scale::layer1::building::BuildingType::Library
+                                | scale::layer1::building::BuildingType::Well
+                                | scale::layer1::building::BuildingType::Hospital
+                        )
+                    {
+                        fallback = Some(entity);
+                    }
+                }
+                // Debug fallback chain: Tavern, then a named amenity,
+                // then any building (the classic start has no Tavern).
+                found.or(fallback).or(any_building)
+            };
+            match (pair, tavern) {
+                (Some((builder, rival)), Some(tavern)) => {
+                    let ok = sabotage_amenity(world, builder, rival, tavern);
+                    print_dashboard_panel(
+                        "ARCHITECTURAL SPITE",
+                        if ok {
+                            "The Tavern is jammed against one specific rival. Petty, targeted, effective."
+                        } else {
+                            "That amenity is already sabotaged."
+                        },
+                        Some(comfy_table::Color::Yellow),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                }
+                _ => {
+                    print_dashboard_panel(
+                        "ARCHITECTURAL SPITE",
+                        "Need two pops and an amenity building (Tavern/Library/Well/Hospital) to sabotage.",
+                        Some(comfy_table::Color::Red),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                }
+            }
+        }
+        Some("demolish") => {
+            let wall = {
+                let mut query =
+                    world.query_filtered::<bevy_ecs::prelude::Entity, bevy_ecs::prelude::With<SpiteWall>>();
+                query.iter(world).next()
+            };
+            match wall {
+                Some(wall) => {
+                    demolish_spite_wall(world, wall);
+                    print_dashboard_panel(
+                        "ARCHITECTURAL SPITE",
+                        "The spite wall is torn down. Its builder has noticed. Its builder is furious.",
+                        Some(comfy_table::Color::Cyan),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                }
+                None => {
+                    print_dashboard_panel(
+                        "ARCHITECTURAL SPITE",
+                        "No standing spite wall to demolish.",
+                        Some(comfy_table::Color::Red),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                }
+            }
+        }
+        _ => {
+            let label = spite_status_label(world);
+            print_dashboard_panel(
+                "ARCHITECTURAL SPITE",
+                &format!(
+                    "Spite status: {label}\nDeeply rivalrous pops (affinity <= -50) raise junk walls by a rival's door; walls block pathfinding but never seal a home or the Command Center. Debug: `spite build`, `spite sabotage`, `spite demolish`."
                 ),
                 Some(comfy_table::Color::Cyan),
                 Some(comfy_table::Attribute::Bold),

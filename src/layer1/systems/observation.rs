@@ -184,6 +184,19 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Observation),
     );
 
+    // Spec 363 Architectural Spite: separate add_systems calls (the
+    // tuple above is at the arity limit). The build driver is an
+    // exclusive system in the spontaneous-architecture pattern, so it
+    // gets its own call; sabotage decay is a regular system.
+    schedule.add_systems(
+        crate::layer1::social::architectural_spite::check_spite_build_system
+            .in_set(Layer1SystemSet::Observation),
+    );
+    schedule.add_systems(
+        crate::layer1::social::architectural_spite::spite_sabotage_decay_system
+            .in_set(Layer1SystemSet::Observation),
+    );
+
     // Spec 343: The Rumor Web — TTL decay, adjacency spread, panic reaction.
     // Separate block: the rumor block above is at the tuple-arity limit.
     schedule.add_systems(
