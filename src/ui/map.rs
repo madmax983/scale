@@ -842,6 +842,7 @@ pub const fn get_building_char(building: BuildingType) -> &'static str {
         BuildingType::BiomassExtractor => "X",
         BuildingType::TetherArray => "\u{2301}",
         BuildingType::HarpoonLauncher => "\u{2693}",
+        BuildingType::CultShrine => "♱",
     }
 }
 
@@ -927,6 +928,7 @@ pub const fn get_building_color(building: BuildingType, material: MaterialType) 
             BuildingType::BiomassExtractor => Color::Rgb(139, 0, 0),
             BuildingType::TetherArray => Color::Rgb(120, 180, 255),
             BuildingType::HarpoonLauncher => Color::Rgb(255, 180, 120),
+            BuildingType::CultShrine => Color::Rgb(255, 215, 0),
         }
     }
 }

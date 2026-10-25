@@ -364,6 +364,9 @@ pub enum BuildingType {
     TetherArray,
     /// Kinetic harpoon tether launcher: snags passing comets/asteroids (Spec 324).
     HarpoonLauncher,
+    /// Shrine demanded by a Mundane Cult, parameterized by its
+    /// `CultShrineFocus` component (Spec 365).
+    CultShrine,
 }
 
 impl BuildingType {
@@ -545,7 +548,8 @@ impl BuildingType {
             | Self::Heater
             | Self::AuroralCollector
             | Self::TetherArray
-            | Self::HarpoonLauncher => false,
+            | Self::HarpoonLauncher
+            | Self::CultShrine => false,
             Self::Recycler => true,
             Self::BulletinBoard => false,
             Self::HoloProjector => false,
@@ -720,6 +724,7 @@ impl BuildingType {
             Self::BiomassExtractor => "Biomass Extractor",
             Self::TetherArray => "Tether Array",
             Self::HarpoonLauncher => "Harpoon Launcher",
+            Self::CultShrine => "Cult Shrine",
         }
     }
 
@@ -787,6 +792,7 @@ impl BuildingType {
             Self::BiomassExtractor => 'X',
             Self::TetherArray => '⌁',
             Self::HarpoonLauncher => '⚓',
+            Self::CultShrine => '♱',
         }
     }
 
@@ -1158,6 +1164,11 @@ impl BuildingType {
                 stone: 20.0,
                 ..ColonyResources::zeroed()
             },
+            Self::CultShrine => ColonyResources {
+                stone: 10.0,
+                wood: 5.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1418,7 +1429,8 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
         | BuildingType::Airlock
         | BuildingType::Vent
         | BuildingType::TetherArray
-        | BuildingType::HarpoonLauncher => configure_infrastructure(entity, building_type),
+        | BuildingType::HarpoonLauncher
+        | BuildingType::CultShrine => configure_infrastructure(entity, building_type),
         BuildingType::Generator
         | BuildingType::SolarPanel
         | BuildingType::PowerPole
@@ -2761,7 +2773,11 @@ mod tests {
             BuildingType::TetherArray.next(),
             BuildingType::HarpoonLauncher
         );
-        assert_eq!(BuildingType::HarpoonLauncher.next(), BuildingType::Housing);
+        assert_eq!(
+            BuildingType::HarpoonLauncher.next(),
+            BuildingType::CultShrine
+        );
+        assert_eq!(BuildingType::CultShrine.next(), BuildingType::Housing);
     }
 
     #[test]
@@ -3015,6 +3031,8 @@ mod tests {
         assert_eq!(mode.selected, BuildingType::TetherArray);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::HarpoonLauncher);
+        mode.selected = mode.selected.next();
+        assert_eq!(mode.selected, BuildingType::CultShrine);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Housing);
     }

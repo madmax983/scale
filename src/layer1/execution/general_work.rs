@@ -126,6 +126,7 @@ struct WorkerQuery {
     ostracized: Option<&'static crate::layer1::social::grievances::Ostracized>,
     on_strike: Has<crate::layer1::culture::memorial_revolt::OnStrike>,
     nostalgia_infected: Has<crate::layer1::social::nostalgia_plague::NostalgiaInfection>,
+    mundane_member: Option<&'static crate::layer1::social::mundane_cult::MundaneCultMember>,
 }
 
 /// ⚡ Bolt Optimization: Uses `bevy::utils::HashMap` (AHash) instead of `std::collections::HashMap`
@@ -192,6 +193,14 @@ fn collect_workers_by_target(
                     |j| crate::layer1::social::nostalgia_plague::tech_tier_for_assignment(j.job_type),
                 ),
             );
+            // Spec 365: mundane cultists work their sacred job at
+            // +50% speed; the multiplier lives in mundane_cult.rs.
+            let cult_mod = item.job.map_or(1.0, |j| {
+                crate::layer1::social::mundane_cult::mundane_cult_efficiency_multiplier(
+                    item.mundane_member,
+                    j.job_type,
+                )
+            });
             let fog_mod = item.fog.map_or(1.0, |f| f.work_speed_penalty);
 
             (
@@ -201,7 +210,12 @@ fn collect_workers_by_target(
                     morale,
                     action: item.mt.for_action,
                     equipment: item.equipment.copied(),
-                    speed_modifier: trait_work_mod * job_eff_mod * buff_mod * fog_mod * nostalgia_mod,
+                    speed_modifier: trait_work_mod
+                        * job_eff_mod
+                        * buff_mod
+                        * fog_mod
+                        * nostalgia_mod
+                        * cult_mod,
                     job: item.job.copied(),
                     dialect: item.dialect.copied().unwrap_or_default(),
                     linguistics: item.linguistics.cloned().unwrap_or_default(),

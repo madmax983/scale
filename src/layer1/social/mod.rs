@@ -790,3 +790,10 @@ pub use nostalgia_plague::*;
 /// No glob re-export on purpose: generic names like `SpiteState` stay
 /// namespaced and callers use the full path.
 pub mod architectural_spite;
+
+/// The Mundane Cult (Spec 365): long tenure in a menial job founds a
+/// cult venerating that job — sacred-duty efficiency, refusal of all
+/// other work, shrine demands, and unrest when drones automate the
+/// sacred work. No glob re-export on purpose: callers use the full
+/// path.
+pub mod mundane_cult;

@@ -494,6 +494,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "nostalgia" => handle_nostalgia_command(world, &parts),
         "spite" => handle_spite_command(world, &parts),
         "insurance" => handle_insurance_command(world, &parts),
+        "cult" => handle_cult_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3313,6 +3314,14 @@ fn print_stats(world: &mut World) {
             None => (0.0, 0, 0, 0),
         };
 
+    // Spec 365: active mundane cults, living cultists, refusals.
+    let (cult_count, cult_refusals_val) =
+        match world.get_resource::<scale::layer1::social::mundane_cult::MundaneCultState>() {
+            Some(s) => (s.active_cults(), s.refusals),
+            None => (0, 0),
+        };
+    let cultist_total = scale::layer1::social::mundane_cult::cultist_count(world);
+
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
     let grid_strain = scale::layer1::energy::grid_strain::grid_strain_ticks(world);
@@ -3350,7 +3359,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={}",
         tick,
         scenario,
         pops,
@@ -3466,6 +3475,9 @@ fn print_stats(world: &mut World) {
         claims_val,
         investigator_val,
         blockade_val,
+        cult_count,
+        cultist_total,
+        cult_refusals_val,
     );
 }
 
@@ -7547,6 +7559,100 @@ fn handle_insurance_command(world: &mut World, parts: &[&str]) {
                 &format!(
                     "Status: {label}\nBuy cover on fleets and structures; hazards and pirates pay out, your own scuttle/deconstruct orders void the claim. Too many claims — or too much suspicion — and an investigator arrives; a failed audit means a fine and a trade blockade. Debug: `insurance insure [value]`, `insurance insure_fleet [value]`, `insurance destroy <hazard|pirate|scuttle|...> [predamage]`, `insurance fraud`, `insurance audit`."
                 ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// `cult` — status panel. `cult form <farm|mining|funeral>` — found
+/// a cult from pops currently holding that job (debug).
+/// `cult shrine <farm|mining|funeral>` — raise that cult's shrine
+/// (debug). `cult drone` — spawn a hauling drone (debug; watch the
+/// cultists protest on the next ticks).
+fn handle_cult_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::mundane_cult::{
+        cult_name_for, force_form_cult, mundane_cult_status_label, parse_menial_job,
+        shrine_name_for, spawn_cult_shrine, MundaneCultState,
+    };
+    match parts.get(1).copied() {
+        Some("form") => {
+            let job = parts.get(2).copied().and_then(parse_menial_job);
+            match job {
+                Some(job) => {
+                    let converted = force_form_cult(world, job);
+                    if converted > 0 {
+                        println!(
+                            "{} has formed ({} convert(s)): the sacred {} must have its shrine, {}.",
+                            cult_name_for(job),
+                            converted,
+                            scale::layer1::social::mundane_cult::job_label(job),
+                            shrine_name_for(job),
+                        );
+                    } else {
+                        println!(
+                            "No pops currently hold that menial job — no cult forms."
+                        );
+                    }
+                }
+                None => println!("Usage: cult form <farm|mining|funeral>"),
+            }
+        }
+        Some("shrine") => {
+            let job = parts.get(2).copied().and_then(parse_menial_job);
+            match job {
+                Some(job) => {
+                    if spawn_cult_shrine(world, job) {
+                        println!(
+                            "{} stands raised. Run `tick` — the cult's shrine demand clears.",
+                            shrine_name_for(job)
+                        );
+                    } else {
+                        println!("No active cult venerates that job yet.");
+                    }
+                }
+                None => println!("Usage: cult shrine <farm|mining|funeral>"),
+            }
+        }
+        Some("drone") => {
+            world.spawn(scale::layer1::entities::drone::Drone {
+                state: scale::layer1::entities::drone::DroneState::Hauling,
+            });
+            println!(
+                "A drone takes up hauling. Run `tick` and watch STATS cultists= / the cult panel — sacred work stolen by machines breeds unrest."
+            );
+        }
+        _ => {
+            let label = mundane_cult_status_label(world);
+            let mut lines = format!("Status: {label}");
+            if let Some(state) = world.get_resource::<MundaneCultState>() {
+                for record in state.cults.values() {
+                    lines.push_str(&format!(
+                        "\n{} — sacred: {}; shrine: {} ({}); members: {}",
+                        record.cult_name,
+                        scale::layer1::social::mundane_cult::job_label(record.sacred_job),
+                        record.shrine_name,
+                        if record.shrine_satisfied {
+                            "standing"
+                        } else if record.demand.is_some() {
+                            "demanded"
+                        } else {
+                            "not yet demanded"
+                        },
+                        record.members,
+                    ));
+                    if let Some(demand) = &record.demand {
+                        lines.push_str(&format!("\n  Demand: {}", demand.description));
+                    }
+                }
+            }
+            lines.push_str(
+                "\nLong menial tenure founds a cult around the job itself: +50% speed on the sacred job, refusal of every other (Forsaking the Sacred Duty), a shrine demanded, and unrest when drones haul. Debug: `cult form <farm|mining|funeral>`, `cult shrine <job>`, `cult drone`.",
+            );
+            print_dashboard_panel(
+                "THE MUNDANE CULT",
+                &lines,
                 Some(comfy_table::Color::Cyan),
                 Some(comfy_table::Attribute::Bold),
             );
