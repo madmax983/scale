@@ -272,6 +272,17 @@ pub fn execute_trade(world: &mut World, deal: &TradeDeal) -> bool {
         return false;
     }
 
+    // Spec 364: a failed insurance audit imposes a temporary trade
+    // blockade — the real trade entry point refuses while it is active.
+    if let (Some(blockade), Some(time)) = (
+        world.get_resource::<crate::layer1::economy::insurance::TradeBlockade>(),
+        world.get_resource::<SimulationTime>(),
+    ) {
+        if blockade.is_active(time.tick) {
+            return false;
+        }
+    }
+
     // Validate inputs (security hardening)
     if deal.cost_amount < 0.0 || !deal.cost_amount.is_finite() {
         return false;

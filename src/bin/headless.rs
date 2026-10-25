@@ -493,6 +493,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "martyr" => handle_martyr_command(world, &parts),
         "nostalgia" => handle_nostalgia_command(world, &parts),
         "spite" => handle_spite_command(world, &parts),
+        "insurance" => handle_insurance_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3293,6 +3294,25 @@ fn print_stats(world: &mut World) {
     let spite_sab_count =
         scale::layer1::social::architectural_spite::spite_sabotage_count(world);
 
+    // Spec 364: live policies, hidden suspicion, investigator + blockade.
+    let insurance_count = scale::layer1::economy::insurance::active_policy_count(world);
+    let (suspicion_val, claims_val, investigator_val, blockade_val) =
+        match world.get_resource::<scale::layer1::economy::insurance::InsuranceManager>() {
+            Some(m) => {
+                let blocked = world
+                    .get_resource::<scale::layer1::economy::insurance::TradeBlockade>()
+                    .zip(world.get_resource::<scale::shared::time::SimulationTime>())
+                    .is_some_and(|(b, t)| b.is_active(t.tick));
+                (
+                    m.suspicion_score,
+                    m.claims_paid + m.claims_voided,
+                    u64::from(m.investigator_pending()),
+                    u64::from(blocked),
+                )
+            }
+            None => (0.0, 0, 0, 0),
+        };
+
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
     let grid_strain = scale::layer1::energy::grid_strain::grid_strain_ticks(world);
@@ -3330,7 +3350,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={}",
         tick,
         scenario,
         pops,
@@ -3441,6 +3461,11 @@ fn print_stats(world: &mut World) {
         nostalgia_count,
         spite_count,
         spite_sab_count,
+        insurance_count,
+        suspicion_val,
+        claims_val,
+        investigator_val,
+        blockade_val,
     );
 }
 
@@ -5362,6 +5387,8 @@ fn handle_give_command(world: &mut World, parts: &[&str]) {
         // Spec 347: refined construction materials, so Great Work
         // stages can be funded in headless playtests.
         "blocks" => resources.blocks += amount,
+        // Spec 364: credits, so insurance premiums can be funded in playtests.
+        "credits" => resources.add_credits(amount),
         "planks" => resources.planks += amount,
         _ => {
             print_dashboard_panel(
@@ -7370,6 +7397,163 @@ fn handle_nostalgia_command(world: &mut World, parts: &[&str]) {
 /// into a rivalry (debug affinity) and raise a spite wall.
 /// `spite sabotage` — jam the first Tavern against the rival.
 /// `spite demolish` — tear down the first standing spite wall.
+//
+/// Spec 364 Galactic Insurance Fraud console.
+/// `insurance` — status panel. `insurance insure [value]` — buy a policy
+/// on the first building (premium charged to colony credits).
+/// `insurance insure_fleet [value]` — spawn a fleet and insure it.
+/// `insurance destroy <hazard|pirate|combat|accident|scuttle|deconstruct> [predamage]`
+/// — report the first insured asset destroyed (claim files next tick).
+/// `insurance fraud` — plant fraud evidence (debug). `insurance audit` —
+/// force the pending audit to fall due next tick.
+fn handle_insurance_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::economy::insurance::{
+        destroy_first_insured, insurance_status_label, insure_entity, DestructionCause,
+        InsuranceManager, DEFAULT_INSURED_VALUE,
+    };
+    match parts.get(1).copied() {
+        Some("insure") | Some("insure_fleet") => {
+            let value = parts
+                .get(2)
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(DEFAULT_INSURED_VALUE);
+            let asset = if parts.get(1).copied() == Some("insure_fleet") {
+                world
+                    .spawn((
+                        scale::layer2::fleet::Fleet,
+                        scale::layer2::fleet::FleetHealth {
+                            current: 100.0,
+                            max: 100.0,
+                        },
+                    ))
+                    .id()
+            } else {
+                let found = {
+                    let mut q = world.query::<(bevy_ecs::prelude::Entity, &scale::layer1::building::Building)>();
+                    q.iter(world).next().map(|(e, _)| e)
+                };
+                match found {
+                    Some(e) => e,
+                    None => {
+                        print_dashboard_panel(
+                            "INSURANCE",
+                            "No building or fleet to insure yet.",
+                            Some(comfy_table::Color::Red),
+                            Some(comfy_table::Attribute::Bold),
+                        );
+                        return;
+                    }
+                }
+            };
+            match insure_entity(world, asset, value) {
+                Ok(msg) => print_dashboard_panel(
+                    "INSURANCE — POLICY WRITTEN",
+                    &msg,
+                    Some(comfy_table::Color::Green),
+                    Some(comfy_table::Attribute::Bold),
+                ),
+                Err(e) => print_dashboard_panel(
+                    "INSURANCE — REFUSED",
+                    &e,
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                ),
+            }
+        }
+        Some("destroy") => {
+            let cause = parts
+                .get(2)
+                .and_then(|w| DestructionCause::parse(w))
+                .unwrap_or(DestructionCause::Hazard);
+            let pre = parts.get(3).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+            // The destruction pipeline also zeroes the asset's health.
+            match destroy_first_insured(world, cause, pre) {
+                Ok(msg) => print_dashboard_panel(
+                    "INSURANCE — CLAIM FILED",
+                    &format!("{msg} (processed on the next tick)"),
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                ),
+                Err(e) => print_dashboard_panel(
+                    "INSURANCE",
+                    &e,
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                ),
+            }
+        }
+        Some("fraud") => {
+            if let Some(mut m) = world.get_resource_mut::<InsuranceManager>() {
+                m.fraud_evidence += 1;
+                print_dashboard_panel(
+                    "INSURANCE — DEBUG",
+                    &format!("Fraud evidence planted (now {} on record). The next audit will fail.", m.fraud_evidence),
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+        }
+        Some("audit") => {
+            let now = world
+                .get_resource::<scale::shared::time::SimulationTime>()
+                .map_or(0, |t| t.tick);
+            if let Some(mut m) = world.get_resource_mut::<InsuranceManager>() {
+                if m.investigator.is_some() {
+                    m.audit_due_tick = Some(now);
+                    if let Some(inv) = m.investigator {
+                        if let Some(mut i) = world
+                            .get_mut::<scale::layer1::economy::insurance::InsuranceInvestigator>(inv)
+                        {
+                            i.audit_due_tick = now;
+                        }
+                    }
+                    print_dashboard_panel(
+                        "INSURANCE — AUDIT DUE",
+                        "The investigator's verdict lands on the next tick.",
+                        Some(comfy_table::Color::Yellow),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                } else if m.investigator_scheduled {
+                    m.investigator_arrival_tick = Some(now);
+                    print_dashboard_panel(
+                        "INSURANCE — INVESTIGATOR DISPATCHED",
+                        "The scheduled investigator arrives on the next tick (debug fast-forward).",
+                        Some(comfy_table::Color::Yellow),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                } else if !m.investigator_scheduled {
+                    m.investigator_scheduled = true;
+                    m.investigator_arrival_tick = Some(now);
+                    print_dashboard_panel(
+                        "INSURANCE — INVESTIGATOR DISPATCHED",
+                        "An investigator will arrive on the next tick.",
+                        Some(comfy_table::Color::Yellow),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                } else {
+                    print_dashboard_panel(
+                        "INSURANCE",
+                        "Investigator already en route.",
+                        Some(comfy_table::Color::Yellow),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                }
+            }
+        }
+        _ => {
+            let label = insurance_status_label(world);
+            print_dashboard_panel(
+                "GALACTIC INSURANCE",
+                &format!(
+                    "Status: {label}\nBuy cover on fleets and structures; hazards and pirates pay out, your own scuttle/deconstruct orders void the claim. Too many claims — or too much suspicion — and an investigator arrives; a failed audit means a fine and a trade blockade. Debug: `insurance insure [value]`, `insurance insure_fleet [value]`, `insurance destroy <hazard|pirate|scuttle|...> [predamage]`, `insurance fraud`, `insurance audit`."
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
 fn handle_spite_command(world: &mut World, parts: &[&str]) {
     use scale::layer1::social::architectural_spite::{
         demolish_spite_wall, sabotage_amenity, spite_status_label, try_build_spite_wall,

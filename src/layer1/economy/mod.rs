@@ -314,6 +314,8 @@ pub mod inflation;
 pub mod recall;
 pub mod artifact_market;
 pub mod organ_market;
+/// Galactic insurance & fraud (spec 364).
+pub mod insurance;
 pub use inflation::*;
 pub mod ideological_contraband;
 pub use ideological_contraband::*;

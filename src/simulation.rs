@@ -268,6 +268,22 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 364 Galactic Insurance Fraud: policy purchases, the
+    // destruction watch + claim bridge, central claim processing
+    // (accident/hostile pays, player scuttle/deconstruct voids),
+    // investigator arrival through the Inspector seams, and the audit
+    // (failed audit = fine + temporary TradeBlockade).
+    schedule.add_systems(
+        (
+            crate::layer1::economy::insurance::purchase_insurance_system,
+            crate::layer1::economy::insurance::insurance_destruction_watch_system,
+            crate::layer1::economy::insurance::insurance_claim_bridge_system,
+            crate::layer1::economy::insurance::insurance_processing_system,
+            crate::layer1::economy::insurance::insurance_investigator_arrival_system,
+            crate::layer1::economy::insurance::insurance_audit_system,
+        )
+            .chain(),
+    );
     // Spec 270 The Organ Market: Biomass Extractor harvests organs from
     // corpses; organs sell for credits or cure critical injuries; harvests
     // spread colony-wide horror through the morale system.
@@ -521,6 +537,14 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 363 Architectural Spite: ledger/pacing state (the spite
     // driver reads and writes it every pass).
     world.init_resource::<crate::layer1::social::architectural_spite::SpiteState>();
+    // Spec 364 Galactic Insurance Fraud: suspicion ledger + blockade
+    // state and the policy/claim event channels (first-tick pattern —
+    // the claim systems write all three from tick one).
+    world.init_resource::<crate::layer1::economy::insurance::InsuranceManager>();
+    world.init_resource::<crate::layer1::economy::insurance::TradeBlockade>();
+    world.init_resource::<Events<crate::layer1::economy::insurance::PurchaseInsuranceEvent>>();
+    world.init_resource::<Events<crate::layer1::economy::insurance::AssetDestroyedEvent>>();
+    world.init_resource::<Events<crate::layer1::economy::insurance::InsuranceClaimEvent>>();
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
