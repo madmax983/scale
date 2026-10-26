@@ -14,6 +14,16 @@
 //!
 //! Counterplay built in:
 //! - [`Panic`] carries a timer: pops calm down on their own.
+//! - Calming grants a [`PanicRefractory`] catharsis window (Item 133):
+//!   a just-calmed pop cannot be re-panicked — by a sighting or by
+//!   spread — until the window expires, so a cascade whose terrifying
+//!   source is gone drains instead of sustaining itself on adjacency
+//!   alone. A source that *persists* re-panics pops once their window
+//!   expires: legitimate source-driven cascades are untouched.
+//! - A colony crossing into majority-panic gets exactly one Major
+//!   chronicle summary per episode ([`majority_panic_chronicle_system`],
+//!   Item 133 Bug #2), hysteresis-capped like the Item 127 thermal
+//!   episode tracker.
 //! - The [`Trait::Courage`] trait (see [`crate::layer1::psychology::traits`])
 //!   resists cascades: courageous pops only panic at very close range and only
 //!   catch spreading panic when surrounded by two or more panickers.
@@ -64,6 +74,25 @@ pub const COURAGEOUS_SPREAD_OVERWHELM: usize = 2;
 /// Maximum panic chronicle entries emitted per system run (spam guard — a
 /// crowded colony discovering one corpse should not fill the chronicle).
 pub const PANIC_CHRONICLE_CAP_PER_RUN: usize = 2;
+/// Post-calm refractory (catharsis) window, in ticks (Item 133).
+///
+/// Chosen as mechanism, not tuning: no existing constant changes. The
+/// window is twice [`PANIC_DURATION_TICKS`] so it outlasts two full
+/// panic generations — any pop panicking at the moment another calms
+/// has at most `PANIC_DURATION_TICKS` left, and any pop *it* spreads to
+/// (itself not refractory) calms at most one duration after that. When
+/// the first pop's window expires, every source-less chain that was
+/// alive when it calmed has therefore ended; only a still-present
+/// terrifying sighting can start a new one.
+pub const PANIC_REFRACTORY_TICKS: u32 = 2 * PANIC_DURATION_TICKS;
+/// Minimum living census population for a majority-panic episode
+/// (Item 133 Bug #2): below this, "majority of the colony" is noise.
+pub const MAJORITY_PANIC_MIN_ALIVE: usize = 5;
+/// Consecutive non-majority ticks before a majority-panic episode
+/// re-arms (Item 133 Bug #2). Mirrors the Item 127 thermal episode
+/// hysteresis (`THERMAL_EPISODE_CLEAR_TICKS` = 25): a flicker dip below
+/// majority inside one continuous cascade must not re-fire the summary.
+pub const MAJORITY_PANIC_CLEAR_TICKS: u32 = 25;
 
 // ---------------------------------------------------------------------------
 // Components
@@ -126,6 +155,98 @@ impl Panic {
             timer: PANIC_DURATION_TICKS,
             fled_from,
         }
+    }
+}
+
+/// Post-calm refractory (catharsis) window (Item 133).
+///
+/// Inserted by [`panic_timer_system`] at the moment a pop calms, counted
+/// down by [`panic_refractory_timer_system`], and removed at zero. While
+/// present, [`try_panic_pop`] refuses every new panic for this pop —
+/// direct sightings and spread alike. This is the mechanism that breaks
+/// the source-less self-sustaining spread loop the 2026-10-25 balance
+/// probe measured (case l2r2k_3: corpse source gone ~tick 512, then 218
+/// spread-only panics and majority-panic for a further ~1,450 ticks):
+/// with no refractory, a just-calmed pop in a dense habitat was
+/// re-caught by still-panicking neighbours before the cluster could
+/// drain, making panic an absorbing state. Item 97 already established
+/// the precedent that retrigger-chaining is a bug — it blocks
+/// (re)panic in vacuum only; this window generalises the protection to
+/// pressurized habitats without touching the vacuum rule, the panic
+/// duration, the witness radius, Courage, Psychopath immunity, or flee
+/// behaviour. Shape (a) was picked over source-gated spread (b) and a
+/// universal overwhelm threshold (c): (b) needs a per-chain source
+/// provenance the spread system does not track (spread deliberately
+/// forgets everything except `fled_from`) and would kill legitimate
+/// second-generation spread while a source persists just outside one
+/// link's radius; (c) is a balance-constant change in disguise and
+/// distorts the specced single-neighbour spread for small cascades.
+/// A refractory leaves every legitimate cascade byte-identical while
+/// its source persists past the window.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PanicRefractory {
+    /// Ticks remaining in the catharsis window.
+    pub timer: u32,
+}
+
+impl PanicRefractory {
+    /// Create a fresh refractory window with the full duration.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            timer: PANIC_REFRACTORY_TICKS,
+        }
+    }
+}
+
+impl Default for PanicRefractory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Episode tracker for the colony-level majority-panic chronicle
+/// summary (Item 133 Bug #2), mirroring the Item 127
+/// `ThermalChronicleTracker` pattern: the summary fires exactly once
+/// per episode and re-arms only after the majority has cleared for a
+/// sustained window ([`MAJORITY_PANIC_CLEAR_TICKS`] consecutive
+/// non-majority observations), so a cascade flickering around the
+/// majority line cannot spam it.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct MajorityPanicTracker {
+    /// Whether the summary already fired for the current episode.
+    warned: bool,
+    /// Consecutive non-majority observations since the episode fired.
+    clear_streak: u32,
+}
+
+impl MajorityPanicTracker {
+    /// Observe one tick's majority state. Returns `true` exactly once
+    /// per episode: on the first majority observation after the
+    /// tracker has (re-)armed.
+    pub fn observe(&mut self, majority: bool) -> bool {
+        if majority {
+            self.clear_streak = 0;
+            if !self.warned {
+                self.warned = true;
+                return true;
+            }
+            return false;
+        }
+        if self.warned {
+            self.clear_streak += 1;
+            if self.clear_streak >= MAJORITY_PANIC_CLEAR_TICKS {
+                self.warned = false;
+                self.clear_streak = 0;
+            }
+        }
+        false
+    }
+
+    /// Whether a majority-panic episode has fired and not yet re-armed.
+    #[must_use]
+    pub fn episode_active(&self) -> bool {
+        self.warned
     }
 }
 
@@ -416,6 +537,8 @@ fn drop_carried_items(world: &mut World, pop: Entity, pos: GridPosition) {
 /// Try to push a pop into the [`Panic`] state.
 ///
 /// Returns `true` when the panic took hold. Resistance rules:
+/// - pops inside their post-calm [`PanicRefractory`] window (Item 133)
+///   cannot be re-panicked until it expires;
 /// - [`Trait::Psychopath`] pops are immune ("unaffected by horror");
 /// - [`Trait::Courage`] pops only panic from direct sightings within
 ///   [`COURAGEOUS_TERRIFY_RADIUS`], and only catch *spread* panic when
@@ -433,6 +556,14 @@ pub fn try_panic_pop(
     adjacent_panickers: usize,
 ) -> bool {
     if world.get::<Panic>(pop).is_some() {
+        return false;
+    }
+    // Item 133: catharsis — a pop inside its post-calm refractory window
+    // cannot be re-panicked by anything (sighting or spread). Without
+    // this gate the source-less spread loop is an absorbing state in
+    // dense habitats; with it, the loop drains while any persisting
+    // source simply re-panics the pop after the window expires.
+    if world.get::<PanicRefractory>(pop).is_some() {
         return false;
     }
     // Item 97: survival first — a pop already in vacuum never (re)panics.
@@ -610,10 +741,78 @@ pub fn panic_timer_system(world: &mut World) {
     }
     for (e, name) in calmed {
         world.entity_mut(e).remove::<Panic>();
+        // Item 133: calming starts the catharsis window. This is the
+        // ONLY production path that removes `Panic`, so every calmed
+        // pop is covered.
+        world.entity_mut(e).insert(PanicRefractory::new());
         send_panic_chronicle(
             world,
             &format!("{name} catches their breath and calms down."),
             EventImportance::Minor,
+        );
+    }
+}
+
+/// Refractory timer: pops leave their catharsis window after
+/// [`PANIC_REFRACTORY_TICKS`] (Item 133).
+pub fn panic_refractory_timer_system(world: &mut World) {
+    let mut expired: Vec<Entity> = Vec::new();
+    {
+        let mut q =
+            world.query_filtered::<(Entity, &mut PanicRefractory), With<Pop>>();
+        for (e, mut refractory) in q.iter_mut(world) {
+            refractory.timer = refractory.timer.saturating_sub(1);
+            if refractory.timer == 0 {
+                expired.push(e);
+            }
+        }
+    }
+    for e in expired {
+        world.entity_mut(e).remove::<PanicRefractory>();
+    }
+}
+
+/// Colony-level majority-panic summary (Item 133 Bug #2).
+///
+/// The panic chronicle otherwise speaks only per-pop (Minor, capped):
+/// the 2026-10-25 balance probe's worst colony held 228 panic lines and
+/// not one saying the colony had been majority-panicked for 1,000
+/// ticks. This system watches the census each tick — the same
+/// population [`panicking_count`] reports (Pop + Health + GridPosition,
+/// no stowaways, not dead) — and when panicking pops reach a majority
+/// of a living census of at least [`MAJORITY_PANIC_MIN_ALIVE`], it
+/// emits exactly one Major summary per episode via
+/// [`MajorityPanicTracker`] (re-arming only after the majority clears
+/// for [`MAJORITY_PANIC_CLEAR_TICKS`] consecutive ticks, the Item 127
+/// thermal-episode hysteresis pattern).
+pub fn majority_panic_chronicle_system(world: &mut World) {
+    world.init_resource::<MajorityPanicTracker>();
+    let alive = {
+        let mut q = world.query_filtered::<
+            Entity,
+            (
+                With<Pop>,
+                With<Health>,
+                With<GridPosition>,
+                Without<Stowaway>,
+                Without<Dead>,
+            ),
+        >();
+        q.iter(world).count()
+    };
+    let panicking = panicking_count(world);
+    let majority = alive >= MAJORITY_PANIC_MIN_ALIVE && panicking * 2 >= alive;
+    let fire = world
+        .get_resource_mut::<MajorityPanicTracker>()
+        .expect("tracker just initialized")
+        .observe(majority);
+    if fire {
+        send_panic_chronicle(
+            world,
+            &format!(
+                "The colony is gripped by panic — {panicking} of {alive} colonists are panicking."
+            ),
+            EventImportance::Major,
         );
     }
 }
@@ -2159,5 +2358,338 @@ mod tests {
         fire_brigade_system(&mut world);
 
         assert_eq!(fire_count(&mut world), 0, "calm brigadier douses too");
+    }
+
+    // --- Item 133: source-less spread loop (Bug #1) ----------------------
+    //
+    // RED on pre-fix trunk (verified): with only (trigger, spread,
+    // timer) in the schedule, the staggered cluster below was still at
+    // 9/9 panicking after 400 ticks — the absorbing state from balance
+    // case l2r2k_3, reproduced at loop level.
+
+    #[test]
+    fn test_source_less_spread_loop_drains_and_does_not_reform() {
+        // Dense 3x3 cluster in the state a transient source leaves behind:
+        // spread inserts one tile per tick, so neighbours' timers are
+        // staggered (here by 15 ticks, well inside one panic duration).
+        // NO terrifying source exists in this world. Run the live panic
+        // chain (flee excluded so the cluster stays at worst-case
+        // density, exactly the absorbing geometry).
+        let mut world = setup_open_field();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(
+            (
+                trigger_panic_system,
+                spread_panic_system,
+                panic_timer_system,
+                panic_refractory_timer_system,
+                majority_panic_chronicle_system,
+            )
+                .chain(),
+        );
+        let timers = [15_u32, 30, 45, 60, 15, 30, 45, 60, 30];
+        let mut idx = 0;
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                let pop = spawn_pop(&mut world, 30 + dx, 30 + dy);
+                world.entity_mut(pop).insert(Panic {
+                    timer: timers[idx],
+                    fled_from: GridPosition { x: 0, y: 0 },
+                });
+                idx += 1;
+            }
+        }
+        assert_eq!(panicking_count(&mut world), 9);
+        for _ in 0..400 {
+            schedule.run(&mut world);
+        }
+        assert_eq!(
+            panicking_count(&mut world),
+            0,
+            "source-less cascade must fully drain"
+        );
+        for _ in 0..200 {
+            schedule.run(&mut world);
+            assert_eq!(
+                panicking_count(&mut world),
+                0,
+                "drained cascade must not re-form without a source"
+            );
+        }
+    }
+
+    #[test]
+    fn test_refractory_blocks_trigger_and_spread_until_it_expires() {
+        let mut world = setup();
+        let pop = spawn_pop(&mut world, 5, 6);
+        world.entity_mut(pop).insert(PanicRefractory::new());
+        let sighting = TerrifyingSighting {
+            pos: GridPosition { x: 5, y: 5 },
+            kind: TerrifyingKind::Monster,
+        };
+        assert!(
+            !try_panic_pop(&mut world, pop, sighting, 1, false, 0),
+            "refractory blocks direct sightings"
+        );
+        assert!(
+            !try_panic_pop(&mut world, pop, sighting, 1, true, 5),
+            "refractory blocks spread even past the courage overwhelm count"
+        );
+        // Burn the window down; the same sighting then takes hold.
+        world.get_mut::<PanicRefractory>(pop).expect("refractory").timer = 1;
+        panic_refractory_timer_system(&mut world);
+        assert!(world.get::<PanicRefractory>(pop).is_none());
+        assert!(try_panic_pop(&mut world, pop, sighting, 1, false, 0));
+    }
+
+    #[test]
+    fn test_calming_grants_refractory() {
+        let mut world = setup();
+        let pop = spawn_pop(&mut world, 10, 10);
+        world.entity_mut(pop).insert(Panic {
+            timer: 1,
+            fled_from: GridPosition { x: 1, y: 1 },
+        });
+
+        panic_timer_system(&mut world);
+
+        assert!(world.get::<Panic>(pop).is_none());
+        let refractory = world
+            .get::<PanicRefractory>(pop)
+            .expect("calming must grant the catharsis window");
+        assert_eq!(refractory.timer, PANIC_REFRACTORY_TICKS);
+    }
+
+    #[test]
+    fn test_persisting_source_repanics_after_refractory_expires() {
+        // A REAL source that never goes away (a fire / rotting corpse /
+        // the headless `scare` marker): the pop panics, calms, is
+        // protected while its window runs, and legitimately re-panics
+        // once the window expires — the cascade the fix must preserve.
+        // Flee is excluded (its RNG movement would wander the pop out of
+        // witness radius nondeterministically); the re-trigger logic
+        // under test is trigger + timers.
+        let mut world = setup_open_field();
+        spawn_monster(&mut world, 30, 30);
+        let pop = spawn_pop(&mut world, 30, 31);
+        let mut schedule = Schedule::default();
+        schedule.add_systems(
+            (
+                trigger_panic_system,
+                spread_panic_system,
+                panic_timer_system,
+                panic_refractory_timer_system,
+            )
+                .chain(),
+        );
+
+        schedule.run(&mut world);
+        assert!(world.get::<Panic>(pop).is_some(), "source panics the pop");
+
+        // Run past the panic duration: the pop calms and gains refractory.
+        for _ in 0..PANIC_DURATION_TICKS + 5 {
+            schedule.run(&mut world);
+            if world.get::<Panic>(pop).is_none() {
+                break;
+            }
+        }
+        assert!(world.get::<Panic>(pop).is_none(), "pop calms on schedule");
+        assert!(world.get::<PanicRefractory>(pop).is_some());
+
+        // Half a window with the source still present: no re-panic.
+        for _ in 0..PANIC_REFRACTORY_TICKS / 2 {
+            schedule.run(&mut world);
+            assert!(
+                world.get::<Panic>(pop).is_none(),
+                "refractory must hold against a persisting source"
+            );
+        }
+
+        // Past the full window: the persisting source re-panics the pop.
+        let mut repanicked = false;
+        for _ in 0..PANIC_REFRACTORY_TICKS {
+            schedule.run(&mut world);
+            if world.get::<Panic>(pop).is_some() {
+                repanicked = true;
+                break;
+            }
+        }
+        assert!(
+            repanicked,
+            "a persisting source must re-panic after refractory expiry"
+        );
+    }
+
+    // --- Item 133 Bug #2: majority-panic summary --------------------------
+
+    fn gripped_lines(world: &mut World) -> Vec<String> {
+        drain_chronicle(world)
+            .into_iter()
+            .filter(|t| t.contains("gripped by panic"))
+            .collect()
+    }
+
+    #[test]
+    fn test_majority_panic_summary_fires_once_per_episode() {
+        let mut world = setup();
+        world.init_resource::<MajorityPanicTracker>();
+        let mut pops = Vec::new();
+        for i in 0..6 {
+            pops.push(spawn_pop(&mut world, 10 + i, 10));
+        }
+        // Below majority (2 of 6): silent.
+        for pop in &pops[..2] {
+            world.entity_mut(*pop).insert(Panic {
+                timer: 500,
+                fled_from: GridPosition { x: 0, y: 0 },
+            });
+        }
+        majority_panic_chronicle_system(&mut world);
+        assert!(gripped_lines(&mut world).is_empty());
+
+        // Cross into majority (4 of 6): exactly one Major summary, and
+        // repeated observations inside the episode stay silent.
+        for pop in &pops[2..4] {
+            world.entity_mut(*pop).insert(Panic {
+                timer: 500,
+                fled_from: GridPosition { x: 0, y: 0 },
+            });
+        }
+        for _ in 0..10 {
+            majority_panic_chronicle_system(&mut world);
+        }
+        let lines = gripped_lines(&mut world);
+        assert_eq!(lines.len(), 1, "one summary per episode, got: {lines:?}");
+        assert!(
+            lines[0].contains("4 of 6 colonists are panicking"),
+            "summary names the counts, got: {}",
+            lines[0]
+        );
+        assert!(
+            world
+                .get_resource::<MajorityPanicTracker>()
+                .expect("tracker")
+                .episode_active()
+        );
+
+        // A brief dip below majority (< clear window) is the SAME
+        // episode: re-crossing must not re-fire.
+        world.entity_mut(pops[3]).remove::<Panic>();
+        for _ in 0..5 {
+            majority_panic_chronicle_system(&mut world);
+        }
+        world.entity_mut(pops[3]).insert(Panic {
+            timer: 500,
+            fled_from: GridPosition { x: 0, y: 0 },
+        });
+        majority_panic_chronicle_system(&mut world);
+        assert!(
+            gripped_lines(&mut world).is_empty(),
+            "flicker inside the clear window must not re-fire"
+        );
+
+        // Majority clears for the full sustained window: re-arm, and a
+        // fresh episode fires again.
+        for pop in &pops {
+            world.entity_mut(*pop).remove::<Panic>();
+        }
+        for _ in 0..MAJORITY_PANIC_CLEAR_TICKS {
+            majority_panic_chronicle_system(&mut world);
+        }
+        assert!(
+            !world
+                .get_resource::<MajorityPanicTracker>()
+                .expect("tracker")
+                .episode_active(),
+            "episode must re-arm after the sustained clear window"
+        );
+        for pop in &pops[..4] {
+            world.entity_mut(*pop).insert(Panic {
+                timer: 500,
+                fled_from: GridPosition { x: 0, y: 0 },
+            });
+        }
+        majority_panic_chronicle_system(&mut world);
+        assert_eq!(
+            gripped_lines(&mut world).len(),
+            1,
+            "a genuinely new episode fires again"
+        );
+    }
+
+    #[test]
+    fn test_majority_panic_summary_needs_five_alive() {
+        // 4 of 4 panicking is total — but below the census floor the
+        // summary stays silent (a scouting party is not the colony).
+        let mut world = setup();
+        for i in 0..4 {
+            let pop = spawn_pop(&mut world, 10 + i, 10);
+            world.entity_mut(pop).insert(Panic {
+                timer: 500,
+                fled_from: GridPosition { x: 0, y: 0 },
+            });
+        }
+        majority_panic_chronicle_system(&mut world);
+        assert!(gripped_lines(&mut world).is_empty());
+    }
+
+    // --- Item 133 Bug #3: duplicate chronicle lines (verify) --------------
+    //
+    // Verdict (proven by the two tests below, which also pass on pre-fix
+    // trunk): the panic module cannot double-emit for one pop in one
+    // tick. Trigger and spread draw from disjoint Without<Panic>
+    // snapshots taken in chain order (a pop panicked by trigger is no
+    // longer calm when spread collects), trigger breaks after its first
+    // successful sighting, spread dedupes candidates through a HashMap
+    // (one try per pop), and the timer collects each calming entity
+    // once from a single query. The duplicates in the balance EVENT
+    // stream therefore originate downstream of this module (chronicle
+    // consumption / probe event reading — Bevy `Events` are readable
+    // across two updates), not in panic emission. No fix applied here;
+    // these tests pin the module-level guarantee.
+
+    #[test]
+    fn test_trigger_and_spread_do_not_double_chronicle_one_pop() {
+        // One victim simultaneously in a monster's witness radius AND
+        // adjacent to an existing panicker — the exact overlap the
+        // double-emit hypothesis needs.
+        let mut world = setup();
+        spawn_monster(&mut world, 10, 12);
+        let panicker = spawn_pop(&mut world, 10, 10);
+        world
+            .entity_mut(panicker)
+            .insert(Panic::new(GridPosition { x: 0, y: 0 }));
+        let victim = spawn_pop(&mut world, 10, 11);
+        let _ = victim;
+
+        trigger_panic_system(&mut world);
+        spread_panic_system(&mut world);
+
+        let log = drain_chronicle(&mut world);
+        let panic_lines: Vec<&String> =
+            log.iter().filter(|t| t.contains("panics at the sight of")).collect();
+        assert_eq!(
+            panic_lines.len(),
+            1,
+            "exactly one panic line for the one newly-panicked pop, got: {log:?}"
+        );
+    }
+
+    #[test]
+    fn test_mass_calm_chronicles_once_per_pop() {
+        let mut world = setup();
+        for i in 0..3 {
+            let pop = spawn_pop(&mut world, 10 + i, 10);
+            world.entity_mut(pop).insert(Panic {
+                timer: 1,
+                fled_from: GridPosition { x: 0, y: 0 },
+            });
+        }
+
+        panic_timer_system(&mut world);
+
+        let log = drain_chronicle(&mut world);
+        let calm_lines = log.iter().filter(|t| t.contains("calms down")).count();
+        assert_eq!(calm_lines, 3, "one calm line per pop, got: {log:?}");
     }
 }

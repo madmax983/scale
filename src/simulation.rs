@@ -123,6 +123,12 @@ pub fn build_simulation_schedule() -> Schedule {
             crate::layer1::psychology::panic_spirals::trigger_panic_system,
             crate::layer1::psychology::panic_spirals::spread_panic_system,
             crate::layer1::psychology::panic_spirals::panic_timer_system,
+            // Item 133: catharsis countdown — just-calmed pops are immune
+            // to re-panic until the window expires (breaks the source-less
+            // spread loop); and the colony-level majority-panic summary,
+            // one Major chronicle per episode.
+            crate::layer1::psychology::panic_spirals::panic_refractory_timer_system,
+            crate::layer1::psychology::panic_spirals::majority_panic_chronicle_system,
             crate::layer1::psychology::panic_spirals::panic_flee_system,
             // Item 97: survival return — suffocating / low-air pops in
             // vacuum head back to pressure after panic flight resolves.
@@ -323,6 +329,9 @@ fn init_simulation_resources(world: &mut World) {
     // Item 127: thermal chronicle episode tracker (first-tick pattern —
     // the INT-1335 bridge reads/writes it from tick one).
     world.init_resource::<crate::layer1::core::integration::ThermalChronicleTracker>();
+    // Item 133: majority-panic episode tracker (first-tick pattern —
+    // the panic chain's summary system reads/writes it from tick one).
+    world.init_resource::<crate::layer1::psychology::panic_spirals::MajorityPanicTracker>();
     // Spec 1384 EVA suits: status snapshot + scenario issue floor
     // (init only — never clobber a scenario-granted value).
     world.init_resource::<crate::layer1::eva_suit::ColonySuitStatus>();
