@@ -495,6 +495,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "spite" => handle_spite_command(world, &parts),
         "insurance" => handle_insurance_command(world, &parts),
         "cult" => handle_cult_command(world, &parts),
+        "choir" => handle_choir_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3321,6 +3322,8 @@ fn print_stats(world: &mut World) {
             None => (0, 0),
         };
     let cultist_total = scale::layer1::social::mundane_cult::cultist_count(world);
+    // Spec 366: choir census for STATS (full panel: `choir`).
+    let choir_label = scale::layer1::tech::bio_acoustic_choir::choir_stats_label(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3359,7 +3362,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={}",
         tick,
         scenario,
         pops,
@@ -3478,6 +3481,7 @@ fn print_stats(world: &mut World) {
         cult_count,
         cultist_total,
         cult_refusals_val,
+        choir_label,
     );
 }
 
@@ -7652,6 +7656,67 @@ fn handle_cult_command(world: &mut World, parts: &[&str]) {
             );
             print_dashboard_panel(
                 "THE MUNDANE CULT",
+                &lines,
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// `choir` — status panel. `choir plant [healing|discordant|<hz>]` —
+/// grow a choir plant at the first pop's tile (debug).
+/// `choir tune <healing|discordant|<hz>>` — retune the first choir
+/// plant; watch it glide there over the next ticks.
+fn handle_choir_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::bio_acoustic_choir::{
+        choir_counts, parse_frequency, spawn_choir_plant, tune_first_plant, BioAcousticPlant,
+        DiscordantFrequency, HealingFrequency,
+    };
+    match parts.get(1).copied() {
+        Some("plant") => {
+            let freq = parts
+                .get(2)
+                .and_then(|t| parse_frequency(t))
+                .unwrap_or(HealingFrequency::VALUE);
+            let plant = spawn_choir_plant(world, freq);
+            println!(
+                "A choir plant unfurls by the colony heart (id {}), singing at {freq:.0} Hz. Run `tick` and watch STATS choir= — or `choir` for the panel.",
+                plant.index()
+            );
+        }
+        Some("tune") => {
+            let freq = parts.get(2).and_then(|t| parse_frequency(t));
+            match freq {
+                Some(freq) if tune_first_plant(world, freq) => {
+                    println!(
+                        "The tenders bend the first choir plant toward {freq:.0} Hz. It glides — run `tick` and re-check `choir`."
+                    );
+                }
+                Some(_) => println!("No choir plant to tune yet — `choir plant` first."),
+                None => println!("Usage: choir tune <healing|discordant|<hz>>"),
+            }
+        }
+        _ => {
+            let (total, healing, discordant, tuning) = choir_counts(world);
+            let mut lines = format!(
+                "Plants: {total} (healing {healing}, discordant {discordant}, still gliding {tuning})"
+            );
+            let mut query = world.query::<&BioAcousticPlant>();
+            for plant in query.iter(world) {
+                lines.push_str(&format!(
+                    "\n  singing {:.0} Hz -> target {:.0} Hz ({:?})",
+                    plant.frequency, plant.target_frequency,
+                    plant.band()
+                ));
+            }
+            lines.push_str(&format!(
+                "\nHealing song ({} Hz) mends pops within 8 tiles; discord ({} Hz) brings migraines — stress up, leisure down — and startles fauna. Two of a band resonate; healing heard alongside discord cancels to interference. Debug: `choir plant [healing|discordant|<hz>]`, `choir tune <healing|discordant|<hz>>`.",
+                HealingFrequency::VALUE,
+                DiscordantFrequency::VALUE
+            ));
+            print_dashboard_panel(
+                "THE BIO-ACOUSTIC CHOIR",
                 &lines,
                 Some(comfy_table::Color::Cyan),
                 Some(comfy_table::Attribute::Bold),

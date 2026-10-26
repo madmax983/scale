@@ -863,3 +863,7 @@ pub use harpoon::{
     WandererKind, WinchSystem, harpoon_public_strings, CATCH_DAMAGE, CATCH_RADIUS, SNAP_DAMAGE, SNAP_DEBRIS_FEED,
     SNAP_RADIUS, WINCH_DEFAULT_STRENGTH, WINCH_POWER_DRAW, WINCH_PROGRESS_PER_TICK,
 };
+
+/// The Bio-Acoustic Choir (Spec 366): sonic plants pops tune for
+/// healing or discord.
+pub mod bio_acoustic_choir;

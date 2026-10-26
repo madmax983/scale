@@ -305,6 +305,18 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 366 The Bio-Acoustic Choir: pops tune sonic plants; the
+    // plants glide toward their target frequency, sing healing or
+    // discord to nearby pops, and startle fauna when discordant.
+    schedule.add_systems(
+        (
+            crate::layer1::tech::bio_acoustic_choir::tune_plant_system,
+            crate::layer1::tech::bio_acoustic_choir::gradual_tuning_system,
+            crate::layer1::tech::bio_acoustic_choir::apply_choir_effects_system,
+            crate::layer1::tech::bio_acoustic_choir::choir_fauna_startle_system,
+        )
+            .chain(),
+    );
     // Spec 270 The Organ Market: Biomass Extractor harvests organs from
     // corpses; organs sell for credits or cure critical injuries; harvests
     // spread colony-wide horror through the morale system.
@@ -572,6 +584,8 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 365 The Mundane Cult: cult ledger (the cult systems read
     // and write it from tick one — first-tick pattern).
     world.init_resource::<crate::layer1::social::mundane_cult::MundaneCultState>();
+    // Spec 366: tune events are raised from tick one (first-tick pattern).
+    world.init_resource::<Events<crate::layer1::tech::bio_acoustic_choir::TunePlantEvent>>();
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
