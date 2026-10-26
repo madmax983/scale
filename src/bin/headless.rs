@@ -505,6 +505,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "tethers" => print_tethers(world),
         "crossfire" => handle_crossfire_command(world, &parts),
         "crossfires" => print_crossfire(world),
+        "director" => handle_director_command(world, &parts),
         "graffiti" => print_graffiti(world),
         "shift" => handle_shift_command(world, &parts),
         "posthumous" => print_posthumous(world),
@@ -3276,6 +3277,9 @@ fn print_stats(world: &mut World) {
         impact_site_count(world)
     };
 
+    // Spec 1388: the Director ledger (full panel: `director`).
+    let director_label = scale::layer1::director::director_stats_label(world);
+
     // Spec 357: active graffiti markings (full panel: `graffiti`).
     let graffiti_total = scale::layer1::graffiti::graffiti_count(world);
 
@@ -3362,7 +3366,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={}",
         tick,
         scenario,
         pops,
@@ -3482,6 +3486,7 @@ fn print_stats(world: &mut World) {
         cultist_total,
         cult_refusals_val,
         choir_label,
+        director_label,
     );
 }
 
@@ -10141,6 +10146,134 @@ fn print_tethers(world: &mut World) {
         &format!(
             "{count} tether arrays standing, total strength {strength:.1}.\nDeorbit: {status}."
         ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// The Director (Spec 1388): `director` / `director show` prints the
+/// panel; bot levers `director force raid`, `director force outbreak`,
+/// and `director budget <n>` drive the balance loop's probes. Forced
+/// spends bypass gates and are ledger-marked forced.
+fn handle_director_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::director::{
+        force_director_spend, DirectorConfig, DirectorEventKind, DirectorState,
+    };
+    world.init_resource::<DirectorConfig>();
+    world.init_resource::<DirectorState>();
+    match (parts.get(1).copied(), parts.get(2).copied()) {
+        (Some("force"), Some("raid")) => {
+            force_director_spend(world, DirectorEventKind::PirateRaid);
+            print_dashboard_panel(
+                "DIRECTOR — FORCED RAID",
+                "The Director spends outside its pacing: a pirate raid has been sent now (ledger-marked forced).\nRun `tick` to resolve it through the raid bridge — watch STATS director= and the chronicle.",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        (Some("force"), Some("outbreak")) => {
+            force_director_spend(world, DirectorEventKind::SporeOutbreak);
+            print_dashboard_panel(
+                "DIRECTOR — FORCED OUTBREAK",
+                "The Director has seeded an outbreak token (ledger-marked forced).\nThe next qualifying trade-ship arrival will seed spores — watch for [SPORE_OUTBREAK] in the chronicle.",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        (Some("budget"), Some(n)) => match n.parse::<f32>() {
+            Ok(v) => {
+                let cap = world.resource::<DirectorState>().temperament.budget_max;
+                world.resource_mut::<DirectorState>().budget = v.clamp(0.0, cap);
+                print_dashboard_panel(
+                    "DIRECTOR — BUDGET SET",
+                    &format!("Threat budget set to {:.0} (cap {:.0}). Run `director` for the panel, `stats` for the ledger line.", v.clamp(0.0, cap), cap),
+                    Some(comfy_table::Color::Cyan),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            Err(_) => print_dashboard_panel(
+                "DIRECTOR",
+                "Usage: `director budget <n>` — set the threat budget directly.",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            ),
+        },
+        (Some("show"), _) | (None, _) => print_director(world),
+        _ => print_dashboard_panel(
+            "DIRECTOR",
+            "Usage: `director` (panel), `director force raid`, `director force outbreak`, `director budget <n>`.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        ),
+    }
+}
+
+/// Panel: the Director (Spec 1388). Resolved temperament, live state,
+/// last spend, and the next-window estimate.
+fn print_director(world: &mut World) {
+    use scale::layer1::director::{
+        earliest_spend_tick, DirectorConfig, DirectorState,
+    };
+    world.init_resource::<DirectorConfig>();
+    world.init_resource::<DirectorState>();
+    let tick = world.resource::<SimulationTime>().tick;
+    let (cfg, state) = {
+        let state = world.resource::<DirectorState>();
+        (state.temperament, state.clone())
+    };
+    let next = earliest_spend_tick(&cfg, &state, tick)
+        .map_or_else(|| "unknown (no accrual)".to_string(), |t| t.to_string());
+    let last = state
+        .last_spend_kind
+        .map_or_else(|| "none yet".to_string(), |k| {
+            format!(
+                "{} at tick {}{}",
+                k.label(),
+                state.last_spend_tick,
+                if state.last_spend_forced { " (forced)" } else { "" }
+            )
+        });
+    let lines = [
+        format!(
+            "Temperament: grace {}t, accrual {:.2}/t (base {:.2} x {:.2}), cap {:.0}, cost x{:.2}, rest {}t, year escalation +{:.0}%/yr, check every {}t.",
+            cfg.grace_ticks,
+            state.last_accrual_rate,
+            cfg.base_accrual,
+            cfg.accrual_mult,
+            cfg.budget_max,
+            cfg.cost_mult,
+            cfg.rest_ticks,
+            cfg.year_escalation * 100.0,
+            cfg.check_interval,
+        ),
+        format!(
+            "Seasons: spring x{:.1} summer x{:.1} autumn x{:.1} winter x{:.1}. Classes: raid w{} / outbreak w{}. Foreshadow at {:.0}% of cheapest class.",
+            cfg.season_weights[0],
+            cfg.season_weights[1],
+            cfg.season_weights[2],
+            cfg.season_weights[3],
+            cfg.raid_weight,
+            cfg.outbreak_weight,
+            cfg.foreshadow_threshold * 100.0,
+        ),
+        format!(
+            "State: budget {:.1}/{:.0}, tension {}, rest until {}, saving for a Major: {}, outbreak token: {}.",
+            state.budget,
+            cfg.budget_max,
+            state.tension_band.label(),
+            state.rest_until,
+            state.saving_for_major,
+            state.outbreak_token,
+        ),
+        format!(
+            "Ledger: {} spend(s), {} forced. Last spend: {}. Next spend possible at tick ~{}.",
+            state.spends_total, state.forced_spends_total, last, next,
+        ),
+        "Levers: `director force raid`, `director force outbreak`, `director budget <n>`.".to_string(),
+    ];
+    print_dashboard_panel(
+        "THE DIRECTOR",
+        &lines.join("\n"),
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );

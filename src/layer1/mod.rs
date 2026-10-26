@@ -60,6 +60,8 @@ pub mod administration;
 pub use administration::*;
 /// Game balance constants.
 pub mod balance;
+/// The Director (Spec 1388): threat-budget pacing authority.
+pub mod director;
 /// Beauty and decoration system.
 pub mod beauty;
 /// Pop biography system.

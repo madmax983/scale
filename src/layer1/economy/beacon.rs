@@ -1,12 +1,13 @@
 use crate::layer1::chronicle::{AddChronicleEvent, EventImportance};
 use crate::layer1::economy::remittances::MigrantArrivalEvent;
-use crate::layer1::void_weed::PirateRaidEvent;
 use crate::layer2::trade::blockade::TradeShipArrivalEvent;
 use crate::shared::time::SimulationTime;
 use bevy_ecs::prelude::*;
 use rand::Rng;
 
-/// Represents a colony distress beacon that attracts ships, migrants, and pirates.
+/// Represents a colony distress beacon that attracts ships and migrants.
+/// (Pirate raids are the Director's spend authority since Spec 1388 — the
+/// beacon itself no longer rolls raids.)
 #[derive(Resource, Default)]
 pub struct ColonyBeacon {
     /// Whether the beacon is currently active and broadcasting.
@@ -18,15 +19,15 @@ pub struct ColonyBeacon {
 /// Evaluates the probabilities of external events triggered by the `ColonyBeacon`.
 ///
 /// An active beacon serves as a lighthouse in the dark sector, significantly increasing the influx
-/// of independent trade ships and desperate migrants. However, this same visibility attracts pirate
-/// raids. This system uses randomized rolls each tick to determine if a specific event is dispatched.
+/// of independent trade ships and desperate migrants. This system uses randomized rolls each tick
+/// to determine if a specific event is dispatched. Pirate raids are NOT rolled here: since
+/// Spec 1388 they arrive only via a Director spend or the smuggling-heat lane.
 ///
 /// # Examples
 /// ```
 /// use scale::layer1::economy::beacon::{ColonyBeacon, process_colony_beacon_system};
 /// use scale::layer2::trade::blockade::TradeShipArrivalEvent;
 /// use scale::layer1::economy::remittances::MigrantArrivalEvent;
-/// use scale::layer1::void_weed::PirateRaidEvent;
 /// use scale::layer1::chronicle::AddChronicleEvent;
 /// use scale::shared::time::SimulationTime;
 /// use bevy_ecs::prelude::*;
@@ -36,7 +37,6 @@ pub struct ColonyBeacon {
 /// world.insert_resource(SimulationTime::default());
 /// world.insert_resource(Events::<TradeShipArrivalEvent>::default());
 /// world.insert_resource(Events::<MigrantArrivalEvent>::default());
-/// world.insert_resource(Events::<PirateRaidEvent>::default());
 /// world.insert_resource(Events::<AddChronicleEvent>::default());
 ///
 /// let mut schedule = Schedule::default();
@@ -63,7 +63,6 @@ pub fn process_colony_beacon_system(
     sim_time: Res<SimulationTime>,
     mut trade_writer: EventWriter<TradeShipArrivalEvent>,
     mut migrant_writer: EventWriter<MigrantArrivalEvent>,
-    mut pirate_writer: EventWriter<PirateRaidEvent>,
     mut chronicle_writer: EventWriter<AddChronicleEvent>,
 ) {
     if !beacon.is_active {
@@ -105,14 +104,10 @@ pub fn process_colony_beacon_system(
         });
     }
 
-    // Risk of pirate raids
-    // WINTER-ECONOMY PASS (2026-10-03): 2% -> 1%. Raids still happen, but
-    // no longer machine-gun the food stockpile (see also the proportional
-    // theft in beacon_pirate_raid_bridge).
-    if rng.gen::<f32>() < 0.01 {
-        // PirateRaidEvent is an empty struct
-        pirate_writer.send(PirateRaidEvent);
-    }
+    // SPEC 1388: the beacon's pirate roll is REMOVED. The Director is the
+    // sole deck raid authority (it sends PirateRaidEvent on a budget
+    // spend; beacon_pirate_raid_bridge resolves it unchanged). The
+    // smuggling-heat lane in void_weed.rs is untouched.
 }
 
 #[cfg(test)]
@@ -217,12 +212,17 @@ mod tests {
     }
 
     #[test]
-    fn test_beacon_spawns_criminals_and_pirates() {
+    fn test_beacon_spawns_criminals_and_no_pirates() {
+        // SPEC 1388: the deck lane sends ZERO raids. Raids arrive only via
+        // a Director spend or the smuggling-heat lane. Trade ships and
+        // (criminal-flavored) migrants still fire from the beacon.
         let mut app = setup_app();
 
         app.world_mut().resource_mut::<ColonyBeacon>().is_active = true;
 
         let mut has_pirates = false;
+        let mut has_migrants = false;
+        let mut has_trade = false;
 
         for _ in 0..1000 {
             app.update();
@@ -233,14 +233,27 @@ mod tests {
             if !pirate_events.is_empty() {
                 has_pirates = true;
             }
+            let migrant_events = app
+                .world()
+                .get_resource::<Events<MigrantArrivalEvent>>()
+                .unwrap();
+            if !migrant_events.is_empty() {
+                has_migrants = true;
+            }
+            let trade_events = app
+                .world()
+                .get_resource::<Events<TradeShipArrivalEvent>>()
+                .unwrap();
+            if !trade_events.is_empty() {
+                has_trade = true;
+            }
         }
 
-        // Ensure pirate raids are triggered
-        assert!(has_pirates, "Active beacon should attract pirates");
-
-        // The system that spawns migrants based on MigrantArrivalEvent should have a higher chance
-        // to spawn pops with criminal or low-skill traits when beacon is active.
-        // This test assumes `process_colony_beacon_system` modifies a global modifier or emits
-        // specific events that downstream systems use.
+        assert!(
+            !has_pirates,
+            "Spec 1388: the beacon deck lane must send zero pirate raids"
+        );
+        assert!(has_migrants, "Active beacon should still attract migrants");
+        assert!(has_trade, "Active beacon should still attract trade ships");
     }
 }

@@ -165,6 +165,13 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
         name: scenario.name,
         difficulty: scenario.difficulty,
     });
+    // Spec 1388 The Director: temperament resolved once from the era.
+    let director_config =
+        crate::layer1::director::DirectorConfig::temperament_for(scenario.id);
+    world.insert_resource(director_config);
+    world.insert_resource(crate::layer1::director::DirectorState::new(
+        director_config,
+    ));
     world.insert_resource(GameState::default());
     world.insert_resource(crate::layer1::living_score::ColonyRenown { score: 50.0 });
     world.init_resource::<Events<crate::layer1::administration::fractal_bureaucracy::LogicCascadeEvent>>();

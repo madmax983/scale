@@ -18,6 +18,7 @@ use rand::Rng;
 use crate::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
 use crate::layer1::core::map::GridPosition;
 use crate::layer1::nature::terrain::{TerrainGrid, TerrainType};
+use crate::layer1::director::DirectorState;
 use crate::layer2::trade::blockade::TradeShipArrivalEvent;
 
 /// Alien flora strain carried by a spore.
@@ -49,6 +50,8 @@ pub struct Spore {
     pub strain: SporeStrain,
     /// Ticks until the next spread attempt.
     pub spread_timer: u32,
+    /// Ticks since this spore took root (Spec 1388 senescence).
+    pub age: u32,
 }
 
 /// Player-placed quarantine burn designation. Consumed on execution.
@@ -83,6 +86,9 @@ pub struct InvasiveConfig {
     pub exotic_arrival_chance: f32,
     /// Hard cap on live spores (spread stops spawning past this).
     pub max_spores: usize,
+    /// Spec 1388 senescence: a spore older than this (ticks) despawns,
+    /// so the live count can fall below the cap and outbreaks recur.
+    pub spore_lifespan: u32,
 }
 
 impl Default for InvasiveConfig {
@@ -91,6 +97,7 @@ impl Default for InvasiveConfig {
             arrival_chance: 0.25,
             exotic_arrival_chance: 0.6,
             max_spores: 200,
+            spore_lifespan: 1500,
         }
     }
 }
@@ -125,6 +132,7 @@ const SPREAD_NEIGHBORS: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 
 /// Trade ships can carry alien spores in their holds. Exotic-looking
 /// factions are far more likely to be contaminated.
+#[allow(clippy::too_many_arguments)]
 pub fn spore_hitchhiker_system(
     mut commands: Commands,
     mut arrivals: EventReader<TradeShipArrivalEvent>,
@@ -133,9 +141,18 @@ pub fn spore_hitchhiker_system(
     spores: Query<&Spore>,
     mut bloom_events: EventWriter<SporeBloomEvent>,
     mut chronicle: EventWriter<AddChronicleEvent>,
+    director: Option<ResMut<DirectorState>>,
 ) {
+    // SPEC 1388 (§4.6): seeding is token-gated by the Director. No token
+    // (or no DirectorState at all) -> arrivals NEVER seed. The token is
+    // consumed by the first arrival that actually seeds a spore.
+    let mut token_live = director.as_ref().is_some_and(|d| d.outbreak_token);
+    let mut token_consumed = false;
     let mut rng = rand::thread_rng();
     for arrival in arrivals.read() {
+        if !token_live {
+            continue;
+        }
         if spores.iter().count() >= config.max_spores {
             continue;
         }
@@ -181,7 +198,10 @@ pub fn spore_hitchhiker_system(
                 position,
                 strain,
                 spread_timer: strain.spread_interval(),
+                age: 0,
             });
+            token_live = false;
+            token_consumed = true;
             bloom_events.send(SporeBloomEvent { position, strain });
             chronicle.send(AddChronicleEvent {
                 text: format!(
@@ -190,6 +210,11 @@ pub fn spore_hitchhiker_system(
                 ),
                 importance: EventImportance::Major,
             });
+        }
+    }
+    if token_consumed {
+        if let Some(mut state) = director {
+            state.outbreak_token = false;
         }
     }
 }
@@ -204,7 +229,7 @@ pub fn spore_spread_system(
     mut spores: Query<(Entity, &mut Spore)>,
 ) {
     let mut live = spores.iter().count();
-    for (_entity, mut spore) in spores.iter_mut() {
+    for (entity, mut spore) in spores.iter_mut() {
         // Take root: convert the home tile to SporeBloom.
         let (hx, hy) = (spore.position.x, spore.position.y);
         if hx >= 0 && hy >= 0 {
@@ -212,6 +237,15 @@ pub fn spore_spread_system(
             if matches!(terrain.get(x, y), Some(t) if is_infectable(t)) {
                 terrain.set(x, y, TerrainType::SporeBloom);
             }
+        }
+        // SPEC 1388 senescence (§4.6): an aged spore despawns. Terrain
+        // stays SporeBloom (the scar remains); the live count falls
+        // below the cap so the outbreak class can fire again.
+        spore.age = spore.age.saturating_add(1);
+        if config.spore_lifespan > 0 && spore.age >= config.spore_lifespan {
+            commands.entity(entity).despawn();
+            live = live.saturating_sub(1);
+            continue;
         }
         if spore.spread_timer > 0 {
             spore.spread_timer -= 1;
@@ -232,6 +266,7 @@ pub fn spore_spread_system(
                     position: GridPosition { x: nx, y: ny },
                     strain: spore.strain,
                     spread_timer: spore.strain.spread_interval(),
+                    age: 0,
                 });
                 live += 1;
                 break;
@@ -299,6 +334,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.insert_resource(test_grid());
         app.insert_resource(InvasiveConfig::default());
+        // Spec 1388: seeding requires a Director outbreak token. The
+        // legacy seeding tests run with a token granted; the dedicated
+        // no-token test below revokes it.
+        app.insert_resource(DirectorState {
+            outbreak_token: true,
+            ..DirectorState::default()
+        });
         app.init_resource::<Events<TradeShipArrivalEvent>>();
         app.init_resource::<Events<SporeBloomEvent>>();
         app.init_resource::<Events<QuarantineBurnEvent>>();
@@ -387,6 +429,7 @@ mod tests {
             position: GridPosition { x: 5, y: 5 },
             strain: SporeStrain::Xenofungus,
             spread_timer: 0,
+            age: 0,
         });
         app.update(); // Trigger spread: daughter spore spawns east.
         let mut daughter_at_east = false;
@@ -417,6 +460,7 @@ mod tests {
             position: GridPosition { x: 5, y: 5 },
             strain: SporeStrain::TerranKudzu,
             spread_timer: 999,
+            age: 0,
         });
         app.update();
         let terrain = app.world().resource::<TerrainGrid>();
@@ -445,6 +489,7 @@ mod tests {
             position: tile,
             strain: SporeStrain::Xenofungus,
             spread_timer: 999,
+            age: 0,
         });
         app.world_mut().spawn(BurnOrder { position: tile });
         app.update();
@@ -465,6 +510,58 @@ mod tests {
         assert!(
             event_count::<QuarantineBurnEvent>(&app) > 0,
             "Burn must fire a QuarantineBurnEvent."
+        );
+    }
+
+    #[test]
+    fn test_no_outbreak_without_director_token() {
+        // Spec 1388 §4.6: without a token, arrivals never seed — even
+        // exotic arrivals at guaranteed chance.
+        let mut app = setup_test_app();
+        app.insert_resource(InvasiveConfig {
+            arrival_chance: 1.0,
+            exotic_arrival_chance: 1.0,
+            ..Default::default()
+        });
+        app.world_mut().resource_mut::<DirectorState>().outbreak_token = false;
+        for _ in 0..10 {
+            app.world_mut()
+                .resource_mut::<Events<TradeShipArrivalEvent>>()
+                .send(TradeShipArrivalEvent {
+                    cargo_value: 100.0,
+                    faction: "Xeno Traders".to_string(),
+                });
+        }
+        app.update();
+        let spore_count = app.world_mut().query::<&Spore>().iter(app.world()).count();
+        assert_eq!(spore_count, 0, "No token -> arrivals never seed.");
+    }
+
+    #[test]
+    fn test_spore_senescence_despawns_aged_spore() {
+        // Spec 1388 §4.6: at spore_lifespan the entity despawns; the
+        // terrain scar (SporeBloom) remains.
+        let mut app = setup_test_app();
+        app.insert_resource(InvasiveConfig {
+            spore_lifespan: 3,
+            ..Default::default()
+        });
+        app.world_mut().spawn(Spore {
+            position: GridPosition { x: 5, y: 5 },
+            strain: SporeStrain::Xenofungus,
+            spread_timer: 999,
+            age: 0,
+        });
+        for _ in 0..4 {
+            app.update();
+        }
+        let spore_count = app.world_mut().query::<&Spore>().iter(app.world()).count();
+        assert_eq!(spore_count, 0, "Aged spore must senesce and despawn.");
+        let terrain = app.world().resource::<TerrainGrid>();
+        assert_eq!(
+            terrain.get(5, 5),
+            Some(TerrainType::SporeBloom),
+            "Terrain stays SporeBloom after senescence."
         );
     }
 

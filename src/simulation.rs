@@ -444,6 +444,11 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 356 Orbital Crossfire: organic strike director + strike ledger.
     world.init_resource::<crate::layer1::environment::orbital_crossfire::CrossfireDirector>();
     world.init_resource::<crate::layer1::environment::orbital_crossfire::CrossfireStats>();
+    // Spec 1388 The Director: threat-budget config + state/ledger.
+    // (init_resource only: setup_world_with_config inserts the era-resolved
+    // temperament first, and that insertion wins.)
+    world.init_resource::<crate::layer1::director::DirectorConfig>();
+    world.init_resource::<crate::layer1::director::DirectorState>();
     // Spec 347 Great Works: contribution events (first-tick Events pattern).
     world.init_resource::<Events<crate::layer1::construction::ContributeToGreatWorkEvent>>();
     // Spec 342 The Void Between: incident event + ledger.

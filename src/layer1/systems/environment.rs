@@ -92,6 +92,11 @@ pub fn register(schedule: &mut Schedule) {
         (crate::layer1::environment::orbital_crossfire::crossfire_director_system,)
             .in_set(Layer1SystemSet::Environment),
     );
+    // Spec 1388 The Director: per-tick accrual + interval spend checks
+    // (exclusive World, same style as the crossfire director above).
+    schedule.add_systems(
+        (crate::layer1::director::director_system,).in_set(Layer1SystemSet::Environment),
+    );
     schedule.add_systems(
         (
             crate::layer1::environment::impact::process_impact_countdown_system,
