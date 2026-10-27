@@ -498,6 +498,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "choir" => handle_choir_command(world, &parts),
         "gravity" => handle_gravity_command(world, &parts),
         "stareater" => handle_stareater_command(world, &parts),
+        "neural" => handle_neural_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3334,6 +3335,8 @@ fn print_stats(world: &mut World) {
     let gravity_label = scale::layer1::tech::gravity_inversion::gravity_stats_label(world);
     // Spec 368: Star-Eater census for STATS (full panel: `stareater`).
     let stareater_label = scale::layer1::tech::star_eater::stareater_stats_label(world);
+    // Spec 369: neural-gel census for STATS (full panel: `neural`).
+    let neural_label = scale::layer1::tech::neural_architecture::neural_stats_label(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3372,7 +3375,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={}",
         tick,
         scenario,
         pops,
@@ -3495,6 +3498,7 @@ fn print_stats(world: &mut World) {
         director_label,
         gravity_label,
         stareater_label,
+        neural_label,
     );
 }
 
@@ -7801,6 +7805,83 @@ fn handle_gravity_command(world: &mut World, parts: &[&str]) {
 /// `stareater depart` — it leaves: the Dark ends and Dark Motes
 /// drift down. `stareater burn [n]` — burn n stockpiled motes for
 /// heat. `stareater give [n]` — debug: add n motes to the stockpile.
+/// `neural` - status panel for the gel-lined buildings.
+/// `neural haunt` - debug: set a building imprint to -60.
+/// `neural bless` - debug: set a building imprint to +60.
+/// `neural scrub` - order a paid scrub of the worst-imprinted
+/// building (25 credits, next tick). `neural use` - debug: the
+/// first pop uses the first gel-lined building once, next tick.
+fn handle_neural_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::neural_architecture::{
+        debug_set_imprint, neural_counts, trigger_scrub, trigger_use, NeuralArchitecture,
+        NeuralArchitectureState, SCRUB_COST_CREDITS,
+    };
+    match parts.get(1).copied() {
+        Some("haunt") => match debug_set_imprint(world, -60.0) {
+            Some(_) => println!(
+                "The gel in one advanced building curdles with remembered misery (imprint -60). Run `tick`, then check `neural`."
+            ),
+            None => println!("No buildings exist to haunt yet."),
+        },
+        Some("bless") => match debug_set_imprint(world, 60.0) {
+            Some(_) => println!(
+                "The gel in one advanced building hums with remembered mastery (imprint +60). Run `tick`, then check `neural`."
+            ),
+            None => println!("No buildings exist to bless yet."),
+        },
+        Some("scrub") => {
+            let mut query = world.query::<(bevy_ecs::entity::Entity, &NeuralArchitecture)>();
+            let worst = query
+                .iter(world)
+                .filter(|(_, a)| a.imprint != 0.0)
+                .min_by(|(_, a), (_, b)| a.imprint.partial_cmp(&b.imprint).unwrap())
+                .map(|(e, a)| (e, a.imprint));
+            match worst {
+                Some((building, imprint)) => {
+                    trigger_scrub(world, building);
+                    println!(
+                        "Scrub order lodged for the building with imprint {imprint:+.0} - {SCRUB_COST_CREDITS:.0} credits, next tick (funds permitting)."
+                    );
+                }
+                None => println!("No imprinted building to scrub."),
+            }
+        }
+        Some("use") => {
+            let building = {
+                let mut query = world.query::<(bevy_ecs::entity::Entity, &NeuralArchitecture)>();
+                query.iter(world).next().map(|(e, _)| e)
+            };
+            let pop = {
+                let mut query =
+                    world.query_filtered::<bevy_ecs::entity::Entity, bevy_ecs::query::With<scale::layer1::pop::Pop>>();
+                query.iter(world).next()
+            };
+            match (building, pop) {
+                (Some(b), Some(p)) => {
+                    trigger_use(world, b, p);
+                    println!("A pop uses a gel-lined building. Run `tick` - the gel remembers.");
+                }
+                _ => println!("Need at least one gel-lined building and one pop."),
+            }
+        }
+        _ => {
+            let (tracked, optimized, haunted, worst, best, uses, scrubs) = neural_counts(world);
+            let (cross_n, cross_b) = world
+                .get_resource::<NeuralArchitectureState>()
+                .map_or((0, 0), |s| (s.notorious_crossings, s.beloved_crossings));
+            let lines = format!(
+                "Gel-lined buildings: {tracked} ({optimized} optimized, {haunted} haunted)\nImprint range: worst {worst:+.0}, best {best:+.0} (rails -100..+100)\nLifetime uses: {uses}; scrubs completed: {scrubs}\nChronicle crossings: {cross_n} notorious, {cross_b} beloved\n\nAdvanced buildings are lined with semi-organic neural gel. Skilled, long-tenured workers leave a positive imprint and the gel speeds later users; stressed workers leave a negative imprint and a haunted building (below -10) stresses everyone who uses it. Idle gel fades back to neutral. A scrub crew can flush a building gel clean for {SCRUB_COST_CREDITS:.0} credits. Debug: `neural haunt`, `neural bless`, `neural use`, `neural scrub`."
+            );
+            print_dashboard_panel(
+                "NEURAL ARCHITECTURE",
+                &lines,
+                Some(comfy_table::Color::Magenta),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
 fn handle_stareater_command(world: &mut World, parts: &[&str]) {
     use scale::layer1::resources::ResourceType;
     use scale::layer1::tech::star_eater::{

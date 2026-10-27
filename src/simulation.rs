@@ -343,6 +343,20 @@ pub fn build_simulation_schedule() -> Schedule {
             .chain()
             .after(crate::layer1::temperature::update_temperature_system),
     );
+    // Spec 369 Neural Architecture: crafting cycles bridge to
+    // building uses, uses imprint the gel, the gel then speeds or
+    // stresses its users, idle gel decays, and paid scrubs reset it.
+    schedule.add_systems(
+        (
+            crate::layer1::tech::neural_architecture::ensure_neural_architecture_system,
+            crate::layer1::tech::neural_architecture::craft_building_use_bridge_system,
+            crate::layer1::tech::neural_architecture::imprint_building_system,
+            crate::layer1::tech::neural_architecture::apply_building_imprint_system,
+            crate::layer1::tech::neural_architecture::imprint_decay_system,
+            crate::layer1::tech::neural_architecture::scrub_imprint_system,
+        )
+            .chain(),
+    );
     // Spec 270 The Organ Market: Biomass Extractor harvests organs from
     // corpses; organs sell for credits or cure critical injuries; harvests
     // spread colony-wide horror through the morale system.
@@ -624,6 +638,11 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::tech::star_eater::StarEaterState>();
     world.init_resource::<Events<crate::layer1::tech::star_eater::StarEaterEvent>>();
     world.init_resource::<Events<crate::layer1::tech::star_eater::BurnMoteEvent>>();
+    // Spec 369: gel ledger + use/scrub event channels (the neural
+    // systems write all three from tick one — first-tick pattern).
+    world.init_resource::<crate::layer1::tech::neural_architecture::NeuralArchitectureState>();
+    world.init_resource::<Events<crate::layer1::tech::neural_architecture::BuildingUseEvent>>();
+    world.init_resource::<Events<crate::layer1::tech::neural_architecture::ScrubImprintEvent>>();
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
@@ -1293,6 +1312,8 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         update_event_buffer::<crate::layer1::nature::long_night::StartLongNightEvent>,
         update_event_buffer::<crate::layer1::tech::star_eater::StarEaterEvent>,
         update_event_buffer::<crate::layer1::tech::star_eater::BurnMoteEvent>,
+        update_event_buffer::<crate::layer1::tech::neural_architecture::BuildingUseEvent>,
+        update_event_buffer::<crate::layer1::tech::neural_architecture::ScrubImprintEvent>,
     ));
     schedule.add_systems((
         // Cleanup Layer 2 events

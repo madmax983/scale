@@ -876,3 +876,8 @@ pub mod gravity_inversion;
 /// siphons the sun — the Long Dark freeze — and sheds Dark Motes
 /// the colony can burn for heat.
 pub mod star_eater;
+
+/// Neural Architecture (Spec 369): advanced buildings are lined
+/// with neural gel that imprints on their users — skilled hands
+/// optimize, stressed hands haunt.
+pub mod neural_architecture;
