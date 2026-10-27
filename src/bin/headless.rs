@@ -497,6 +497,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "cult" => handle_cult_command(world, &parts),
         "choir" => handle_choir_command(world, &parts),
         "gravity" => handle_gravity_command(world, &parts),
+        "stareater" => handle_stareater_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3331,6 +3332,8 @@ fn print_stats(world: &mut World) {
     let choir_label = scale::layer1::tech::bio_acoustic_choir::choir_stats_label(world);
     // Spec 367: inversion census for STATS (full panel: `gravity`).
     let gravity_label = scale::layer1::tech::gravity_inversion::gravity_stats_label(world);
+    // Spec 368: Star-Eater census for STATS (full panel: `stareater`).
+    let stareater_label = scale::layer1::tech::star_eater::stareater_stats_label(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3369,7 +3372,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={}",
         tick,
         scenario,
         pops,
@@ -3491,6 +3494,7 @@ fn print_stats(world: &mut World) {
         choir_label,
         director_label,
         gravity_label,
+        stareater_label,
     );
 }
 
@@ -7786,6 +7790,77 @@ fn handle_gravity_command(world: &mut World, parts: &[&str]) {
                 "GRAVITY INVERSION MINING",
                 &lines,
                 Some(comfy_table::Color::Magenta),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// `stareater` — status panel. `stareater arrive` — the Star-Eater
+/// enters the system: the Long Dark begins next tick.
+/// `stareater depart` — it leaves: the Dark ends and Dark Motes
+/// drift down. `stareater burn [n]` — burn n stockpiled motes for
+/// heat. `stareater give [n]` — debug: add n motes to the stockpile.
+fn handle_stareater_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::resources::ResourceType;
+    use scale::layer1::tech::star_eater::{
+        stareater_counts, trigger_arrival, trigger_burn, trigger_departure, StarEaterState,
+        HEAT_PER_MOTE, LONG_DARK_TICKS, MOTES_PER_DEPARTURE,
+    };
+    match parts.get(1).copied() {
+        Some("arrive") => {
+            trigger_arrival(world);
+            println!(
+                "Something vast is crossing the sun. Run `tick` — the light is already thinning. The Long Dark lasts up to {LONG_DARK_TICKS} ticks unless it departs."
+            );
+        }
+        Some("depart") => {
+            trigger_departure(world);
+            println!(
+                "The Star-Eater is leaving. Run `tick` — its wake will shed {MOTES_PER_DEPARTURE} dark motes across the map. Haul them, then `stareater burn`."
+            );
+        }
+        Some("burn") => {
+            let amount: u32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1);
+            trigger_burn(world, amount);
+            println!(
+                "Burn order lodged for {amount} dark mote(s) — {:.0} degrees of heat each, colony-wide, next tick (stock permitting).",
+                HEAT_PER_MOTE
+            );
+        }
+        Some("give") => {
+            let amount: f32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5.0);
+            world.init_resource::<scale::layer1::resources::ColonyResources>();
+            world
+                .resource_mut::<scale::layer1::resources::ColonyResources>()
+                .add_resource(&ResourceType::DarkMote, amount);
+            println!("Lodged {amount:.0} dark mote(s) in the colony stockpile (debug).");
+        }
+        _ => {
+            let (active, remaining, ground, stockpiled, burned) = stareater_counts(world);
+            let (arrivals, departures, shed, heat) = world
+                .get_resource::<StarEaterState>()
+                .map_or((0, 0, 0, 0.0), |s| {
+                    (s.arrivals, s.departures, s.motes_shed, s.heat_released)
+                });
+            let avg = world
+                .get_resource::<scale::layer1::temperature::TemperatureGrid>()
+                .map_or(0.0, scale::layer1::tech::star_eater::average_temp);
+            let lines = format!(
+                "Long Dark: {} ({} ticks remaining)\nAverage temperature: {avg:.1}C\nPassages: {arrivals} arrival(s), {departures} departure(s)\nDark motes: {ground} on the ground, {stockpiled:.0} stockpiled, {shed} shed in total\nBurned so far: {burned} ({heat:.0} total heat released)\n\nWhen the Star-Eater arrives, its wake siphons the sun: every tile plunges and the ambient pins deep below freezing until it departs or the passage timer runs out. Its departure sheds dark motes — volatile, energy-dense specks that haul like any other resource. Burn them from the stockpile for colony-wide heat. Debug: `stareater arrive`, `stareater depart`, `stareater burn [n]`, `stareater give [n]`.",
+                if active { "ACTIVE" } else { "clear skies" },
+                remaining,
+            );
+            print_dashboard_panel(
+                "THE STAR-EATER'S WAKE",
+                &lines,
+                Some(comfy_table::Color::DarkGrey),
                 Some(comfy_table::Attribute::Bold),
             );
         }

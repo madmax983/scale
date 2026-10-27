@@ -117,7 +117,8 @@ pub fn fulfill_market_trade_system(
                     ResourceType::VoidAle
                     | ResourceType::HyperValuable
                     | ResourceType::BiologicalWaste
-                    | ResourceType::NutrientPaste => false,
+                    | ResourceType::NutrientPaste
+                    | ResourceType::DarkMote => false,
                 };
 
                 if has_enough {
@@ -142,6 +143,7 @@ pub fn fulfill_market_trade_system(
                         | ResourceType::HyperValuable
                         | ResourceType::BiologicalWaste
                         | ResourceType::NutrientPaste
+                        | ResourceType::DarkMote
                         | ResourceType::Organs => {}
                     }
 
@@ -166,7 +168,8 @@ pub fn fulfill_market_trade_system(
                         ResourceType::VoidAle
                         | ResourceType::HyperValuable
                         | ResourceType::BiologicalWaste
-                        | ResourceType::NutrientPaste => {}
+                        | ResourceType::NutrientPaste
+                        | ResourceType::DarkMote => {}
                     }
                 } else {
                     failed_events.send(MarketTradeFailedEvent {

@@ -871,3 +871,8 @@ pub mod bio_acoustic_choir;
 /// Gravity Inversion Mining (Spec 367): powered fields flip pops
 /// to cavern ceilings; power loss is a lethal drop.
 pub mod gravity_inversion;
+
+/// The Star-Eater's Wake (Spec 368): a dark-matter entity's passage
+/// siphons the sun — the Long Dark freeze — and sheds Dark Motes
+/// the colony can burn for heat.
+pub mod star_eater;

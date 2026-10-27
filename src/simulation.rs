@@ -329,6 +329,20 @@ pub fn build_simulation_schedule() -> Schedule {
             .chain()
             .after(crate::layer1::energy::power_grid_system),
     );
+    // Spec 368 The Star-Eater's Wake: arrival starts the Long Dark,
+    // the Dark pins the grid ambient every tick, departure sheds
+    // Dark Motes, and stockpiled motes burn for heat. Runs after the
+    // real temperature update so the ambient pin wins the tick (the
+    // temperature system recomputes ambient from the season).
+    schedule.add_systems(
+        (
+            crate::layer1::tech::star_eater::handle_star_eater_events,
+            crate::layer1::tech::star_eater::long_dark_system,
+            crate::layer1::tech::star_eater::burn_mote_system,
+        )
+            .chain()
+            .after(crate::layer1::temperature::update_temperature_system),
+    );
     // Spec 270 The Organ Market: Biomass Extractor harvests organs from
     // corpses; organs sell for credits or cure critical injuries; harvests
     // spread colony-wide horror through the morale system.
@@ -605,6 +619,11 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::tech::bio_acoustic_choir::TunePlantEvent>>();
     // Spec 367: fall ledger (the inversion systems write it from tick one).
     world.init_resource::<crate::layer1::tech::gravity_inversion::GravityInversionLedger>();
+    // Spec 368: passage state + arrival/burn event channels (the
+    // star-eater systems write all three from tick one).
+    world.init_resource::<crate::layer1::tech::star_eater::StarEaterState>();
+    world.init_resource::<Events<crate::layer1::tech::star_eater::StarEaterEvent>>();
+    world.init_resource::<Events<crate::layer1::tech::star_eater::BurnMoteEvent>>();
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
@@ -1272,6 +1291,8 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         update_event_buffer::<crate::layer1::administration::edicts::RevokePolicyEvent>,
         update_event_buffer::<crate::layer1::nature::solar_flare_lottery::SolarFlareEvent>,
         update_event_buffer::<crate::layer1::nature::long_night::StartLongNightEvent>,
+        update_event_buffer::<crate::layer1::tech::star_eater::StarEaterEvent>,
+        update_event_buffer::<crate::layer1::tech::star_eater::BurnMoteEvent>,
     ));
     schedule.add_systems((
         // Cleanup Layer 2 events

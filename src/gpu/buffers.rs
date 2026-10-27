@@ -357,6 +357,7 @@ fn extract_resource_items(
             ResourceType::HyperValuable => true,
             ResourceType::BiologicalWaste | ResourceType::NutrientPaste => false,
             ResourceType::Organs => resources.organs < resources.max_organs,
+            ResourceType::DarkMote => resources.dark_motes < resources.max_dark_motes,
         };
 
         entities.push(entity);

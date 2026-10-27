@@ -74,6 +74,9 @@ pub enum ResourceType {
     HyperValuable,
     /// Perishable harvested organs (Spec 270: The Organ Market).
     Organs,
+    /// Volatile, energy-dense motes left by the Star-Eater's wake
+    /// (Spec 368); burned for heat during the Long Dark.
+    DarkMote,
 }
 
 /// Event emitted when a resource is mined.
@@ -250,6 +253,10 @@ pub struct ColonyResources {
     pub organs: f32,
     /// Maximum organ storage capacity.
     pub max_organs: f32,
+    /// Dark motes stockpiled for burning (Spec 368).
+    pub dark_motes: f32,
+    /// Maximum dark mote storage capacity.
+    pub max_dark_motes: f32,
     /// EVA suits in the abstract colony pool (Spec 1384). Colony-issued
     /// suits materialize into `EvaSuit` entities on fetch, mirroring
     /// `clothing`; loose physical suits are never pooled.
@@ -322,6 +329,8 @@ impl Default for ColonyResources {
             max_hyper_valuable: 50.0,
             organs: 0.0,
             max_organs: 50.0,
+            dark_motes: 0.0,
+            max_dark_motes: 50.0,
             eva_suits: 0.0,
             max_eva_suits: 50.0,
         }
@@ -391,6 +400,8 @@ impl Mul<f32> for ColonyResources {
             organs: (self.organs * rhs).ceil(),
             max_hyper_valuable: self.max_hyper_valuable,
             max_organs: self.max_organs,
+            dark_motes: (self.dark_motes * rhs).ceil(),
+            max_dark_motes: self.max_dark_motes,
             eva_suits: (self.eva_suits * rhs).ceil(),
             max_eva_suits: self.max_eva_suits,
         }
@@ -462,6 +473,8 @@ impl ColonyResources {
             max_hyper_valuable: 0.0,
             organs: 0.0,
             max_organs: 0.0,
+            dark_motes: 0.0,
+            max_dark_motes: 0.0,
             eva_suits: 0.0,
             max_eva_suits: 0.0,
         }
@@ -860,6 +873,9 @@ impl ColonyResources {
             ResourceType::Organs => {
                 self.organs = (self.organs - amount).max(0.0);
             }
+            ResourceType::DarkMote => {
+                self.dark_motes = (self.dark_motes - amount).max(0.0);
+            }
         }
     }
 
@@ -888,6 +904,7 @@ impl ColonyResources {
             ResourceType::VoidAle => self.max_void_ale,
             ResourceType::HyperValuable => self.max_hyper_valuable,
             ResourceType::Organs => self.max_organs,
+            ResourceType::DarkMote => self.max_dark_motes,
         }
     }
 
@@ -914,6 +931,7 @@ impl ColonyResources {
             ResourceType::VoidAle => self.void_ale,
             ResourceType::HyperValuable => self.hyper_valuable,
             ResourceType::Organs => self.organs,
+            ResourceType::DarkMote => self.dark_motes,
         }
     }
 
@@ -962,6 +980,7 @@ impl ColonyResources {
             ResourceType::VoidAle => self.void_ale < self.max_void_ale,
             ResourceType::HyperValuable => self.hyper_valuable < self.max_hyper_valuable,
             ResourceType::Organs => self.organs < self.max_organs,
+            ResourceType::DarkMote => self.dark_motes < self.max_dark_motes,
         }
     }
 
@@ -994,6 +1013,9 @@ impl ColonyResources {
             ResourceType::HyperValuable => self.add_hyper_valuable(amount),
             ResourceType::Organs => {
                 self.organs = (self.organs + amount).min(self.max_organs)
+            }
+            ResourceType::DarkMote => {
+                self.dark_motes = (self.dark_motes + amount).min(self.max_dark_motes)
             }
         }
     }

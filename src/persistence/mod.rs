@@ -503,6 +503,8 @@ pub struct ColonyResourcesSave {
     pub max_hyper_valuable: f32,
     pub organs: f32,
     pub max_organs: f32,
+    pub dark_motes: f32,
+    pub max_dark_motes: f32,
     /// Spec 1384: colony EVA suit pool.
     pub eva_suits: f32,
     /// Spec 1384: colony EVA suit pool cap.
@@ -569,6 +571,8 @@ impl From<&ColonyResources> for ColonyResourcesSave {
             max_hyper_valuable: r.max_hyper_valuable,
             organs: r.organs,
             max_organs: r.max_organs,
+            dark_motes: r.dark_motes,
+            max_dark_motes: r.max_dark_motes,
             eva_suits: r.eva_suits,
             max_eva_suits: r.max_eva_suits,
         }
@@ -635,6 +639,8 @@ impl From<&ColonyResourcesSave> for ColonyResources {
             max_hyper_valuable: s.max_hyper_valuable,
             organs: s.organs,
             max_organs: s.max_organs,
+            dark_motes: s.dark_motes,
+            max_dark_motes: s.max_dark_motes,
             eva_suits: s.eva_suits,
             max_eva_suits: s.max_eva_suits,
         }

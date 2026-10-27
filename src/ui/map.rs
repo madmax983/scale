@@ -996,6 +996,7 @@ pub const fn get_resource_char(resource: ResourceType) -> &'static str {
         ResourceType::BiologicalWaste => "B",
         ResourceType::NutrientPaste => "P",
         ResourceType::Organs => "Q",
+        ResourceType::DarkMote => "*",
     }
 }
 
@@ -1031,6 +1032,7 @@ pub const fn get_resource_color(resource: ResourceType) -> Color {
         ResourceType::BiologicalWaste => Color::Rgb(100, 100, 0),
         ResourceType::NutrientPaste => Color::Rgb(200, 200, 200), // Gold
         ResourceType::Organs => Color::Rgb(220, 20, 60),          // Crimson
+        ResourceType::DarkMote => Color::Rgb(75, 0, 130),         // Indigo
     }
 }
 
