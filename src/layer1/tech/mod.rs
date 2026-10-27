@@ -867,3 +867,7 @@ pub use harpoon::{
 /// The Bio-Acoustic Choir (Spec 366): sonic plants pops tune for
 /// healing or discord.
 pub mod bio_acoustic_choir;
+
+/// Gravity Inversion Mining (Spec 367): powered fields flip pops
+/// to cavern ceilings; power loss is a lethal drop.
+pub mod gravity_inversion;

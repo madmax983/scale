@@ -317,6 +317,18 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 367 Gravity Inversion Mining: pops gain an orientation,
+    // powered generator fields flip them to the ceiling, and a lost
+    // field drops them for Z-scaled fall damage. Runs after the real
+    // power grid so PowerConsumer.active is this tick's truth.
+    schedule.add_systems(
+        (
+            crate::layer1::tech::gravity_inversion::ensure_gravity_orientation_system,
+            crate::layer1::tech::gravity_inversion::gravity_inversion_system,
+        )
+            .chain()
+            .after(crate::layer1::energy::power_grid_system),
+    );
     // Spec 270 The Organ Market: Biomass Extractor harvests organs from
     // corpses; organs sell for credits or cure critical injuries; harvests
     // spread colony-wide horror through the morale system.
@@ -591,6 +603,8 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::social::mundane_cult::MundaneCultState>();
     // Spec 366: tune events are raised from tick one (first-tick pattern).
     world.init_resource::<Events<crate::layer1::tech::bio_acoustic_choir::TunePlantEvent>>();
+    // Spec 367: fall ledger (the inversion systems write it from tick one).
+    world.init_resource::<crate::layer1::tech::gravity_inversion::GravityInversionLedger>();
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();

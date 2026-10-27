@@ -496,6 +496,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "insurance" => handle_insurance_command(world, &parts),
         "cult" => handle_cult_command(world, &parts),
         "choir" => handle_choir_command(world, &parts),
+        "gravity" => handle_gravity_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3328,6 +3329,8 @@ fn print_stats(world: &mut World) {
     let cultist_total = scale::layer1::social::mundane_cult::cultist_count(world);
     // Spec 366: choir census for STATS (full panel: `choir`).
     let choir_label = scale::layer1::tech::bio_acoustic_choir::choir_stats_label(world);
+    // Spec 367: inversion census for STATS (full panel: `gravity`).
+    let gravity_label = scale::layer1::tech::gravity_inversion::gravity_stats_label(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3366,7 +3369,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={}",
         tick,
         scenario,
         pops,
@@ -3487,6 +3490,7 @@ fn print_stats(world: &mut World) {
         cult_refusals_val,
         choir_label,
         director_label,
+        gravity_label,
     );
 }
 
@@ -7724,6 +7728,64 @@ fn handle_choir_command(world: &mut World, parts: &[&str]) {
                 "THE BIO-ACOUSTIC CHOIR",
                 &lines,
                 Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// `gravity` — status panel. `gravity plant` — place an inversion
+/// generator (with a paired power source) at the first pop's tile.
+/// `gravity cut` — switch every generator off: inverted pops fall.
+/// `gravity restore` — switch them back on.
+fn handle_gravity_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::gravity_inversion::{
+        cut_gravity_generators, gravity_counts, restore_gravity_generators, spawn_gravity_generator,
+        GravityInversionGenerator, GravityInversionLedger, DEFAULT_CEILING_Z,
+        FALL_DAMAGE_PER_LEVEL, GENERATOR_POWER_DRAW,
+    };
+    match parts.get(1).copied() {
+        Some("plant") => {
+            let gen = spawn_gravity_generator(world);
+            println!(
+                "An inversion generator hums to life by the colony heart (id {}), drawing {GENERATOR_POWER_DRAW:.0} power. Run `tick` and watch STATS gravity= — or `gravity` for the panel.",
+                gen.index()
+            );
+        }
+        Some("cut") => {
+            let n = cut_gravity_generators(world);
+            println!(
+                "Cut {n} inversion generator(s). Any pop on a ceiling falls next tick — {FALL_DAMAGE_PER_LEVEL:.0} damage per level dropped."
+            );
+        }
+        Some("restore") => {
+            let n = restore_gravity_generators(world);
+            println!("Restored {n} inversion generator(s) (grid power permitting).");
+        }
+        _ => {
+            let (gens, live, inverted, falling, falls) = gravity_counts(world);
+            let damage = world
+                .get_resource::<GravityInversionLedger>()
+                .map_or(0.0, |l| l.total_fall_damage);
+            let mut lines = format!(
+                "Generators: {gens} (fields live {live})\nPops inverted: {inverted}, falling: {falling}\nFalls so far: {falls} ({damage:.0} total fall damage)"
+            );
+            let mut query = world.query::<&GravityInversionGenerator>();
+            for gen in query.iter(world) {
+                lines.push_str(&format!(
+                    "\n  radius {} tiles, enabled {}, field {}",
+                    gen.radius,
+                    gen.enabled,
+                    if gen.field_active { "live" } else { "dark" }
+                ));
+            }
+            lines.push_str(&format!(
+                "\nA powered generator flips pops within its radius to the cavern ceiling {DEFAULT_CEILING_Z} levels up, where they can work ceiling seams. Lose the field — power cut, grid failure, walking out — and they drop: {FALL_DAMAGE_PER_LEVEL:.0} damage per level. Debug: `gravity plant`, `gravity cut`, `gravity restore`."
+            ));
+            print_dashboard_panel(
+                "GRAVITY INVERSION MINING",
+                &lines,
+                Some(comfy_table::Color::Magenta),
                 Some(comfy_table::Attribute::Bold),
             );
         }
