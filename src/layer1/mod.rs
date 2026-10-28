@@ -524,6 +524,8 @@ pub mod artists_muse;
 pub mod crafting;
 pub mod fungal_network;
 pub mod hive_mind_integration;
+#[path = "contagion/mod.rs"]
+pub mod hive_contagion;
 pub use fungal_network::{process_spore_taps_system, PopCollectivism, SporeNetwork, SporeTap};
 pub mod the_lottery;
 

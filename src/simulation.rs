@@ -371,6 +371,20 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 371 The Hive Mind Resurgence: staged spore progression in
+    // Observation (per spec), proximity spread, Critical sabotage of
+    // defenses, and the critical-mass rebellion transformation.
+    schedule.add_systems(
+        (
+            crate::layer1::hive_contagion::hive_mind::process_hive_infection_system,
+            crate::layer1::hive_contagion::hive_mind::spread_hive_infection_system,
+            crate::layer1::hive_contagion::hive_mind::hive_sabotage_system,
+            crate::layer1::hive_contagion::hive_mind::trigger_hive_rebellion_system,
+            crate::layer1::hive_contagion::hive_mind::handle_hive_rebellion_system,
+        )
+            .chain()
+            .in_set(Layer1SystemSet::Observation),
+    );
     // Spec 270 The Organ Market: Biomass Extractor harvests organs from
     // corpses; organs sell for credits or cure critical injuries; harvests
     // spread colony-wide horror through the morale system.
@@ -659,6 +673,8 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::tech::neural_architecture::ScrubImprintEvent>>();
     // Spec 370: fossil-fleet ledger + wake/drop/completion channels
     // (the fossil systems write all three from tick one).
+    world.init_resource::<crate::layer1::hive_contagion::hive_mind::HiveMindState>();
+    world.init_resource::<Events<crate::layer1::hive_contagion::hive_mind::HiveMindRebellionEvent>>();
     world.init_resource::<crate::layer2::fossilized_fleet::FossilizedFleetState>();
     world.init_resource::<Events<crate::layer2::fossilized_fleet::GhostDroneSpawnEvent>>();
     world.init_resource::<Events<crate::layer2::fossilized_fleet::EnemyDropEvent>>();
@@ -1334,6 +1350,7 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         update_event_buffer::<crate::layer1::tech::star_eater::BurnMoteEvent>,
         update_event_buffer::<crate::layer1::tech::neural_architecture::BuildingUseEvent>,
         update_event_buffer::<crate::layer1::tech::neural_architecture::ScrubImprintEvent>,
+        update_event_buffer::<crate::layer1::hive_contagion::hive_mind::HiveMindRebellionEvent>,
         update_event_buffer::<crate::layer2::fossilized_fleet::GhostDroneSpawnEvent>,
         update_event_buffer::<crate::layer2::fossilized_fleet::EnemyDropEvent>,
         update_event_buffer::<crate::layer2::fossilized_fleet::MiningCompleteEvent>,

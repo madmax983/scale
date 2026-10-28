@@ -487,6 +487,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "lease" => handle_lease_command(world, &parts),
         "leases" => print_leases(world),
         "scion" => handle_scion_command(world, &parts),
+        "hive" => handle_hive_command(world, &parts),
         "traveler" => handle_traveler_command(world, &parts),
         "travelers" => print_travelers(world),
         "shipout" => handle_shipout_command(world),
@@ -3340,6 +3341,8 @@ fn print_stats(world: &mut World) {
     let neural_label = scale::layer1::tech::neural_architecture::neural_stats_label(world);
     // Spec 370: fossil-fleet census for STATS (full panel: `fossil`).
     let fossil_label = scale::layer2::fossilized_fleet::fossil_stats_label(world);
+    // Spec 371: hive census for STATS (full panel: `hive`).
+    let hive_label = scale::layer1::hive_contagion::hive_mind::hive_stats_label(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3378,7 +3381,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={}",
         tick,
         scenario,
         pops,
@@ -3503,6 +3506,7 @@ fn print_stats(world: &mut World) {
         stareater_label,
         neural_label,
         fossil_label,
+        hive_label,
     );
 }
 
@@ -8216,6 +8220,31 @@ fn handle_scion_command(world: &mut World, parts: &[&str]) {
             "A courier from the Homeworld is inbound with {count} noble scions.\nUseless, exquisite, enormously well-funded — keep them alive."
         ),
         Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 371: `hive` panel, or `hive infect [n]` to seed latent spores.
+fn handle_hive_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::hive_contagion::hive_mind::{hive_counts, hive_stats_label, infect_pops, HiveMindState};
+    if parts.get(1) == Some(&"infect") {
+        let n: usize = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(3);
+        let done = infect_pops(world, n);
+        print_dashboard_panel(
+            "THE HIVE MIND RESURGENCE",
+            &format!("A dormant spore wakes in {done} colonist(s).\nLatent infections ripen over time, coordinated pops work faster — until critical mass.\nRun `tick` and watch STATS hive={} — or `hive` for the census.", hive_stats_label(world)),
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let (latent, active, critical) = hive_counts(world);
+    let (fired, rebellions, sabotage) = world.get_resource::<HiveMindState>()
+        .map_or((false, 0, 0), |s| (s.rebellion_fired, s.rebellions, s.sabotage_ticks));
+    print_dashboard_panel(
+        "THE HIVE MIND RESURGENCE",
+        &format!("Latent: {latent}\nActive: {active}\nCritical: {critical}\nCritical mass: 10\nRebellion fired: {fired} (total {rebellions})\nSabotage ticks: {sabotage}\n\nActive and Critical pops carry Hive Coordination (+25% work speed).\nCritical pops quietly sabotage nearby turrets. At 10 Critical, they rise as one."),
+        Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
     );
 }

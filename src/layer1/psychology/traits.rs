@@ -150,6 +150,8 @@ pub enum Trait {
     Gossip,
     /// Picks apart tall tales: refuses to believe false rumors (Spec 343).
     Skeptic,
+    /// Hive-coordinated: works 25% faster as part of the collective (Spec 371).
+    HiveCoordination,
 }
 
 impl Trait {
@@ -233,6 +235,7 @@ impl Trait {
             Self::Entitled => "Entitled",
             Self::Gossip => "Gossip",
             Self::Skeptic => "Skeptic",
+            Self::HiveCoordination => "Hive Coordination",
         }
     }
 }
@@ -433,6 +436,9 @@ pub fn get_trait_work_speed_modifier(traits: &Traits) -> f32 {
     }
     if traits.has(Trait::MindSporeInfected) {
         modifier += 0.5;
+    }
+    if traits.has(Trait::HiveCoordination) {
+        modifier += 0.25;
     }
     if traits.has(Trait::HardWorker) {
         modifier += 0.2;
