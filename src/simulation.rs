@@ -371,6 +371,19 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 373 The Void Nomad Fleet: random arrivals spawn the
+    // fleet, it steers toward asteroid belts, strip-mines what it
+    // overlaps (spec nodes and real MiningTargets alike).
+    schedule.add_systems(
+        (
+            crate::layer2::entities::nomad_fleet::trigger_nomad_arrival_system,
+            crate::layer2::entities::nomad_fleet::handle_nomad_arrival_system,
+            crate::layer2::entities::nomad_fleet::nomad_movement_system,
+            crate::layer2::entities::nomad_fleet::process_nomad_mining_system,
+            crate::layer2::entities::nomad_fleet::process_nomad_orbit_mining_system,
+        )
+            .chain(),
+    );
     // Spec 371 The Hive Mind Resurgence: staged spore progression in
     // Observation (per spec), proximity spread, Critical sabotage of
     // defenses, and the critical-mass rebellion transformation.
@@ -700,6 +713,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::hive_contagion::hive_mind::HiveMindState>();
     world.init_resource::<Events<crate::layer1::hive_contagion::hive_mind::HiveMindRebellionEvent>>();
     world.init_resource::<crate::layer2::fossilized_fleet::FossilizedFleetState>();
+    // Spec 373: nomad arrival ledger + arrival channel (the nomad
+    // systems write both from tick one — first-tick pattern).
+    world.init_resource::<crate::layer2::entities::nomad_fleet::NomadArrivalState>();
+    world.init_resource::<Events<crate::layer2::entities::nomad_fleet::NomadArrivalEvent>>();
     world.init_resource::<Events<crate::layer2::fossilized_fleet::GhostDroneSpawnEvent>>();
     world.init_resource::<Events<crate::layer2::fossilized_fleet::EnemyDropEvent>>();
     world.init_resource::<Events<crate::layer2::fossilized_fleet::MiningCompleteEvent>>();

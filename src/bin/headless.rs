@@ -501,6 +501,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "stareater" => handle_stareater_command(world, &parts),
         "neural" => handle_neural_command(world, &parts),
         "fossil" => handle_fossil_command(world, &parts),
+        "nomad" => handle_nomad_command(world, &parts),
         "decay" => handle_decay_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
@@ -3348,6 +3349,8 @@ fn print_stats(world: &mut World) {
     let megadecay_label = scale::layer2::megastructure_decay::decay_stats_label(world);
     // Spec 372 (spec file): ruins-hazard label for STATS (panel: `decay`).
     let ruins_label = scale::layer1::hazards::megastructure_decay::ruins_stats_label(world);
+    // Spec 373: nomad-fleet census for STATS (full panel: `nomad`).
+    let nomad_label = scale::layer2::entities::nomad_fleet::nomad_stats_label(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3386,7 +3389,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={}",
         tick,
         scenario,
         pops,
@@ -3514,6 +3517,7 @@ fn print_stats(world: &mut World) {
         hive_label,
         megadecay_label,
         ruins_label,
+        nomad_label,
     );
 }
 
@@ -7997,6 +8001,44 @@ fn handle_decay_command(world: &mut World, parts: &[&str]) {
                 scale::layer1::hazards::megastructure_decay::ruins_counts(world);
             println!(
                 "Ruins overhead (spec 372): stability {rstab:.2}, {rfired} decay event(s) fired, {rrubbled} tile(s) rubbled. Debug: `decay stability [0-1]`, `decay collapse [x] [y] [damage]`."
+            );
+        }
+    }
+}
+
+
+fn handle_nomad_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::entities::nomad_fleet::{
+        nomad_counts, spawn_nomad_fleet, trigger_nomad_arrival, NomadArrivalState, SystemPosition,
+    };
+    match parts.get(1).copied() {
+        Some("arrive") => {
+            trigger_nomad_arrival(world);
+            println!(
+                "A city that never stops moving is entering the system. Run `tick` — the Void Nomad Fleet will spawn, open its market, and steer for the asteroid belt."
+            );
+        }
+        Some("spawn") => {
+            let x: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let y: i32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let entity = spawn_nomad_fleet(world, SystemPosition { x, y });
+            println!(
+                "Nomad fleet {entity:?} is in the system at ({x}, {y}), market open, ancient guns warm. Run `tick` and watch STATS nomad= — or `nomad` for the panel."
+            );
+        }
+        _ => {
+            let (fleets, arrivals, metal, volatiles, markets) = nomad_counts(world);
+            let chance = world
+                .get_resource::<NomadArrivalState>()
+                .map_or(0.0, |s| s.chance_per_tick);
+            let lines = format!(
+                "Nomad fleets in system: {fleets}\nArrivals: {arrivals} (per-tick chance {chance:.2})\nStrip-mined: {metal:.0} metal, {volatiles:.0} volatiles\nTemporary markets opened: {markets}\n\nThe Void Nomad Fleet wanders the system map steering for asteroid belts, strip-mining every node it overlaps. Its market is open while it passes — but shoot at it and its ancient escort answers overwhelmingly. Debug: `nomad arrive`, `nomad spawn [x] [y]`."
+            );
+            print_dashboard_panel(
+                "THE VOID NOMAD FLEET",
+                &lines,
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
             );
         }
     }
