@@ -118,7 +118,8 @@ pub fn fulfill_market_trade_system(
                     | ResourceType::HyperValuable
                     | ResourceType::BiologicalWaste
                     | ResourceType::NutrientPaste
-                    | ResourceType::DarkMote => false,
+                    | ResourceType::DarkMote
+                    | ResourceType::AncientTech => false,
                 };
 
                 if has_enough {
@@ -144,6 +145,7 @@ pub fn fulfill_market_trade_system(
                         | ResourceType::BiologicalWaste
                         | ResourceType::NutrientPaste
                         | ResourceType::DarkMote
+                        | ResourceType::AncientTech
                         | ResourceType::Organs => {}
                     }
 
@@ -169,7 +171,8 @@ pub fn fulfill_market_trade_system(
                         | ResourceType::HyperValuable
                         | ResourceType::BiologicalWaste
                         | ResourceType::NutrientPaste
-                        | ResourceType::DarkMote => {}
+                        | ResourceType::DarkMote
+                        | ResourceType::AncientTech => {}
                     }
                 } else {
                     failed_events.send(MarketTradeFailedEvent {

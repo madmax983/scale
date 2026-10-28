@@ -357,6 +357,20 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 370 The Fossilized Fleet: strip-mining fossil nodes
+    // accumulates deterministic disturbance; at the threshold a
+    // Ghost Drone wakes, bridges to a Layer 1 drop in the same
+    // tick, and lands as a real fauna hostile. Completions certify
+    // AncientTech into the colony ledger.
+    schedule.add_systems(
+        (
+            crate::layer2::fossilized_fleet::process_fossilized_mining,
+            crate::layer2::fossilized_fleet::handle_ghost_drone_drops,
+            crate::layer2::fossilized_fleet::handle_enemy_drops_system,
+            crate::layer2::fossilized_fleet::handle_mining_complete_system,
+        )
+            .chain(),
+    );
     // Spec 270 The Organ Market: Biomass Extractor harvests organs from
     // corpses; organs sell for credits or cure critical injuries; harvests
     // spread colony-wide horror through the morale system.
@@ -643,6 +657,12 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::tech::neural_architecture::NeuralArchitectureState>();
     world.init_resource::<Events<crate::layer1::tech::neural_architecture::BuildingUseEvent>>();
     world.init_resource::<Events<crate::layer1::tech::neural_architecture::ScrubImprintEvent>>();
+    // Spec 370: fossil-fleet ledger + wake/drop/completion channels
+    // (the fossil systems write all three from tick one).
+    world.init_resource::<crate::layer2::fossilized_fleet::FossilizedFleetState>();
+    world.init_resource::<Events<crate::layer2::fossilized_fleet::GhostDroneSpawnEvent>>();
+    world.init_resource::<Events<crate::layer2::fossilized_fleet::EnemyDropEvent>>();
+    world.init_resource::<Events<crate::layer2::fossilized_fleet::MiningCompleteEvent>>();
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
@@ -1314,6 +1334,9 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         update_event_buffer::<crate::layer1::tech::star_eater::BurnMoteEvent>,
         update_event_buffer::<crate::layer1::tech::neural_architecture::BuildingUseEvent>,
         update_event_buffer::<crate::layer1::tech::neural_architecture::ScrubImprintEvent>,
+        update_event_buffer::<crate::layer2::fossilized_fleet::GhostDroneSpawnEvent>,
+        update_event_buffer::<crate::layer2::fossilized_fleet::EnemyDropEvent>,
+        update_event_buffer::<crate::layer2::fossilized_fleet::MiningCompleteEvent>,
     ));
     schedule.add_systems((
         // Cleanup Layer 2 events

@@ -442,6 +442,11 @@ pub struct SaveSnapshot {
     pub designations: Vec<DesignationSave>,
 }
 
+/// Default ancient-tech cap for saves written before Spec 370.
+fn default_max_ancient_tech() -> f32 {
+    50.0
+}
+
 /// Every `ColonyResources` field, mirrored 1:1.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[allow(missing_docs)]
@@ -505,6 +510,12 @@ pub struct ColonyResourcesSave {
     pub max_organs: f32,
     pub dark_motes: f32,
     pub max_dark_motes: f32,
+    /// Spec 370: pristine ancient tech from the fossilized fleet.
+    #[serde(default)]
+    pub ancient_tech: f32,
+    /// Spec 370: ancient tech storage cap.
+    #[serde(default = "default_max_ancient_tech")]
+    pub max_ancient_tech: f32,
     /// Spec 1384: colony EVA suit pool.
     pub eva_suits: f32,
     /// Spec 1384: colony EVA suit pool cap.
@@ -573,6 +584,8 @@ impl From<&ColonyResources> for ColonyResourcesSave {
             max_organs: r.max_organs,
             dark_motes: r.dark_motes,
             max_dark_motes: r.max_dark_motes,
+            ancient_tech: r.ancient_tech,
+            max_ancient_tech: r.max_ancient_tech,
             eva_suits: r.eva_suits,
             max_eva_suits: r.max_eva_suits,
         }
@@ -641,6 +654,8 @@ impl From<&ColonyResourcesSave> for ColonyResources {
             max_organs: s.max_organs,
             dark_motes: s.dark_motes,
             max_dark_motes: s.max_dark_motes,
+            ancient_tech: s.ancient_tech,
+            max_ancient_tech: s.max_ancient_tech,
             eva_suits: s.eva_suits,
             max_eva_suits: s.max_eva_suits,
         }

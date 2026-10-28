@@ -77,6 +77,10 @@ pub enum ResourceType {
     /// Volatile, energy-dense motes left by the Star-Eater's wake
     /// (Spec 368); burned for heat during the Long Dark.
     DarkMote,
+    /// Pristine ancient technology strip-mined from the fossilized
+    /// fleet (Spec 370); highly valuable, deliberately untradeable
+    /// and unusable as a building cost (the Organs/DarkMote pattern).
+    AncientTech,
 }
 
 /// Event emitted when a resource is mined.
@@ -255,8 +259,12 @@ pub struct ColonyResources {
     pub max_organs: f32,
     /// Dark motes stockpiled for burning (Spec 368).
     pub dark_motes: f32,
+    /// Pristine ancient tech recovered from the fossilized fleet (Spec 370).
+    pub ancient_tech: f32,
     /// Maximum dark mote storage capacity.
     pub max_dark_motes: f32,
+    /// Maximum ancient tech storage capacity.
+    pub max_ancient_tech: f32,
     /// EVA suits in the abstract colony pool (Spec 1384). Colony-issued
     /// suits materialize into `EvaSuit` entities on fetch, mirroring
     /// `clothing`; loose physical suits are never pooled.
@@ -331,6 +339,8 @@ impl Default for ColonyResources {
             max_organs: 50.0,
             dark_motes: 0.0,
             max_dark_motes: 50.0,
+            ancient_tech: 0.0,
+            max_ancient_tech: 50.0,
             eva_suits: 0.0,
             max_eva_suits: 50.0,
         }
@@ -402,6 +412,8 @@ impl Mul<f32> for ColonyResources {
             max_organs: self.max_organs,
             dark_motes: (self.dark_motes * rhs).ceil(),
             max_dark_motes: self.max_dark_motes,
+            ancient_tech: (self.ancient_tech * rhs).ceil(),
+            max_ancient_tech: self.max_ancient_tech,
             eva_suits: (self.eva_suits * rhs).ceil(),
             max_eva_suits: self.max_eva_suits,
         }
@@ -475,6 +487,8 @@ impl ColonyResources {
             max_organs: 0.0,
             dark_motes: 0.0,
             max_dark_motes: 0.0,
+            ancient_tech: 0.0,
+            max_ancient_tech: 0.0,
             eva_suits: 0.0,
             max_eva_suits: 0.0,
         }
@@ -637,6 +651,13 @@ impl ColonyResources {
     pub fn add_eva_suits(&mut self, amount: f32) {
         if amount.is_finite() {
             self.eva_suits = (self.eva_suits + amount).clamp(0.0, self.max_eva_suits);
+        }
+    }
+
+    /// Adds ancient tech, clamping to the maximum capacity (Spec 370).
+    pub fn add_ancient_tech(&mut self, amount: f32) {
+        if amount.is_finite() {
+            self.ancient_tech = (self.ancient_tech + amount).clamp(0.0, self.max_ancient_tech);
         }
     }
 
@@ -876,6 +897,9 @@ impl ColonyResources {
             ResourceType::DarkMote => {
                 self.dark_motes = (self.dark_motes - amount).max(0.0);
             }
+            ResourceType::AncientTech => {
+                self.ancient_tech = (self.ancient_tech - amount).max(0.0);
+            }
         }
     }
 
@@ -905,6 +929,7 @@ impl ColonyResources {
             ResourceType::HyperValuable => self.max_hyper_valuable,
             ResourceType::Organs => self.max_organs,
             ResourceType::DarkMote => self.max_dark_motes,
+            ResourceType::AncientTech => self.max_ancient_tech,
         }
     }
 
@@ -932,6 +957,7 @@ impl ColonyResources {
             ResourceType::HyperValuable => self.hyper_valuable,
             ResourceType::Organs => self.organs,
             ResourceType::DarkMote => self.dark_motes,
+            ResourceType::AncientTech => self.ancient_tech,
         }
     }
 
@@ -981,6 +1007,7 @@ impl ColonyResources {
             ResourceType::HyperValuable => self.hyper_valuable < self.max_hyper_valuable,
             ResourceType::Organs => self.organs < self.max_organs,
             ResourceType::DarkMote => self.dark_motes < self.max_dark_motes,
+            ResourceType::AncientTech => self.ancient_tech < self.max_ancient_tech,
         }
     }
 
@@ -1017,6 +1044,7 @@ impl ColonyResources {
             ResourceType::DarkMote => {
                 self.dark_motes = (self.dark_motes + amount).min(self.max_dark_motes)
             }
+            ResourceType::AncientTech => self.add_ancient_tech(amount),
         }
     }
 

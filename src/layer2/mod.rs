@@ -54,6 +54,7 @@ pub mod governance;
 pub mod integration;
 pub mod leadership;
 pub use leadership::*;
+pub mod fossilized_fleet;
 pub mod mining;
 #[cfg(test)]
 mod mining_tests;

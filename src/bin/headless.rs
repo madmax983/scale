@@ -499,6 +499,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "gravity" => handle_gravity_command(world, &parts),
         "stareater" => handle_stareater_command(world, &parts),
         "neural" => handle_neural_command(world, &parts),
+        "fossil" => handle_fossil_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3337,6 +3338,8 @@ fn print_stats(world: &mut World) {
     let stareater_label = scale::layer1::tech::star_eater::stareater_stats_label(world);
     // Spec 369: neural-gel census for STATS (full panel: `neural`).
     let neural_label = scale::layer1::tech::neural_architecture::neural_stats_label(world);
+    // Spec 370: fossil-fleet census for STATS (full panel: `fossil`).
+    let fossil_label = scale::layer2::fossilized_fleet::fossil_stats_label(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3375,7 +3378,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={}",
         tick,
         scenario,
         pops,
@@ -3499,6 +3502,7 @@ fn print_stats(world: &mut World) {
         gravity_label,
         stareater_label,
         neural_label,
+        fossil_label,
     );
 }
 
@@ -7876,6 +7880,60 @@ fn handle_neural_command(world: &mut World, parts: &[&str]) {
                 "NEURAL ARCHITECTURE",
                 &lines,
                 Some(comfy_table::Color::Magenta),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+fn handle_fossil_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::fossilized_fleet::{
+        fossil_counts, spawn_fossil_node, trigger_ghost_drones, trigger_mining_complete,
+        FossilizedFleetState, WAKE_THRESHOLD,
+    };
+    match parts.get(1).copied() {
+        Some("node") => {
+            let amount: f32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100.0);
+            let entity = spawn_fossil_node(world, amount);
+            println!(
+                "Fossil node {entity:?} charted in the belt with {amount:.0} units of pristine ancient tech. Strip-mine it with a fleet — every {WAKE_THRESHOLD} ticks of digging wakes a ghost drone."
+            );
+        }
+        Some("wake") => {
+            let count: u32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1);
+            trigger_ghost_drones(world, count);
+            println!(
+                "Something stirs in the wreckage. Run `tick` — {count} ghost drone(s) will drop on the colony."
+            );
+        }
+        Some("complete") => {
+            let amount: f32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5.0);
+            trigger_mining_complete(world, amount);
+            println!(
+                "Mining completion lodged: {amount:.0} ancient tech will be certified into the stockpile next tick."
+            );
+        }
+        _ => {
+            let (nodes, drones, woken, dropped, stockpiled, granted) = fossil_counts(world);
+            let ticks = world
+                .get_resource::<FossilizedFleetState>()
+                .map_or(0, |s| s.disturbance_ticks);
+            let lines = format!(
+                "Fossil nodes charted: {nodes}\nGhost drones: {drones} live on the surface, {woken} woken, {dropped} dropped\nDisturbance: {ticks} ticks of fossil digging observed (one drone wakes per {WAKE_THRESHOLD} ticks on a node)\nAncient tech: {stockpiled:.0} stockpiled, {granted:.0} certified by completions\n\nThe belt is a fossilized battlefield. Fleets strip-mining its nodes recover pristine ancient tech, but the digging disturbs dormant ghost drones, which drop to the surface as live hostiles. Debug: `fossil node [amount]`, `fossil wake [n]`, `fossil complete [amount]`."
+            );
+            print_dashboard_panel(
+                "THE FOSSILIZED FLEET",
+                &lines,
+                Some(comfy_table::Color::Yellow),
                 Some(comfy_table::Attribute::Bold),
             );
         }
