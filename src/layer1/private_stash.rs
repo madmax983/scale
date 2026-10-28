@@ -25,8 +25,13 @@ use std::collections::HashMap;
 /// Colony food below this is a shortage: anxious pops start hiding food.
 pub const SHORTAGE_FOOD_THRESHOLD: f32 = 10.0;
 
+/// Per-tick stash chance for an Anxious/Hoarder pop while colony food
+/// is in the shortage window (balance-tuned; see stash_creation_system).
+pub const STASH_SHORTAGE_CHANCE: f64 = 0.002;
+
 /// Spec 1387 §4.5.5: per-tick stash chance for a Bitter pop — hoarding
-/// as an assertion of control. Half the shortage-path rate.
+/// as an assertion of control. (Was half the shortage-path rate when
+/// written; the shortage rate has since been retuned below it.)
 pub const STASH_MISERY_CHANCE: f64 = 0.005;
 
 /// Mood label applied colony-wide when rooms are searched (Spec 350).
@@ -112,11 +117,19 @@ pub fn stash_creation_system(
         for (entity, traits, _) in query.iter() {
             if (traits.has(Trait::Anxious) || traits.has(Trait::Hoarder)) && resources.food >= 1.0 {
                 // Throttle stash creation with a probability.
-                // Balance (2026-10-14 baseline): 0.001 produced 3 stashes
-                // across 48 bot colonies (up to 2000 ticks each) — organic
-                // hoarding was effectively invisible. 0.01 targets a few
-                // visible stashes per shortage without noise.
-                if rng.gen_bool(0.01) {
+                // Balance history: 0.001 produced 3 stashes across 48 bot
+                // colonies (invisible); 0.01 (2026-10-14) targeted a few
+                // per shortage on a trunk where colonies died young.
+                // Balance (2026-10-27): on current trunk colonies survive
+                // to 2000t, so an eligible pop now gets ~2,250 window
+                // ticks — 0.01 yielded 22-24 stashes in the only two
+                // Classic colonies with an Anxious pop (hidden food
+                // 4-5x the visible stockpile: noise, not texture), while
+                // colonies without an eligible pop saw none at any rate
+                // (prevalence-bound, filed for design). 0.002 targets
+                // ~4-5 creations per fully-exposed eligible colony.
+                // Evidence: balance-report-2026-10-27.md.
+                if rng.gen_bool(STASH_SHORTAGE_CHANCE) {
                     resources.food -= 1.0;
                     let mut stash = PrivateStash {
                         owner: Some(entity),
