@@ -87,6 +87,7 @@ pub mod sensor_ambiguity;
 pub mod skyhooks;
 
 pub mod megastructure;
+pub mod megastructure_decay;
 pub mod rogue_planets;
 pub mod weather;
 pub use weather::*;

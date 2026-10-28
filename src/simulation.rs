@@ -385,6 +385,30 @@ pub fn build_simulation_schedule() -> Schedule {
             .chain()
             .in_set(Layer1SystemSet::Observation),
     );
+    // Spec 372 Stellar Megastructure Decay: scaffolding rots every
+    // tick, stages degrade output, degraded frames shed debris, and
+    // critical failure bridges into the Spec 277 deorbit pipeline.
+    // Maintenance events walk decay back down (the counterplay).
+    schedule.add_systems(
+        (
+            crate::layer2::megastructure_decay::ensure_megastructure_decay_system,
+            crate::layer2::megastructure_decay::megastructure_decay_system,
+            crate::layer2::megastructure_decay::megastructure_maintenance_system,
+            crate::layer2::megastructure_decay::handle_megastructure_failure_system,
+        )
+            .chain(),
+    );
+    // Spec 372 (spec file) Ruins Hazard: stability-driven decay
+    // events drop debris on the colony — damage + rubble — in the
+    // Execution set, per the spec's Technical Guidance.
+    schedule.add_systems(
+        (
+            crate::layer1::hazards::megastructure_decay::trigger_decay_event_system,
+            crate::layer1::hazards::megastructure_decay::process_debris_fall_system,
+        )
+            .chain()
+            .in_set(Layer1SystemSet::Execution),
+    );
     // Spec 270 The Organ Market: Biomass Extractor harvests organs from
     // corpses; organs sell for credits or cure critical injuries; harvests
     // spread colony-wide horror through the morale system.
@@ -679,6 +703,17 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer2::fossilized_fleet::GhostDroneSpawnEvent>>();
     world.init_resource::<Events<crate::layer2::fossilized_fleet::EnemyDropEvent>>();
     world.init_resource::<Events<crate::layer2::fossilized_fleet::MiningCompleteEvent>>();
+    // Spec 372: decay ledger + maintenance/failure channels (the
+    // decay systems write both from tick one — first-tick pattern).
+    world.init_resource::<crate::layer2::megastructure_decay::MegastructureDecayState>();
+    world.init_resource::<Events<crate::layer2::megastructure_decay::MaintainMegastructureEvent>>();
+    world.init_resource::<Events<crate::layer2::megastructure_decay::MegastructureFailedEvent>>();
+    // Spec 372 (spec file): ruins stability (inert at 1.0 until a
+    // scenario/headless lowers it), ledger, and the decay-event
+    // channel (systems write it from tick one — first-tick pattern).
+    world.init_resource::<crate::layer1::hazards::megastructure_decay::MegastructureRuins>();
+    world.init_resource::<crate::layer1::hazards::megastructure_decay::RuinsDecayLedger>();
+    world.init_resource::<Events<crate::layer1::hazards::megastructure_decay::DecayEvent>>();
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
@@ -1354,6 +1389,9 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         update_event_buffer::<crate::layer2::fossilized_fleet::GhostDroneSpawnEvent>,
         update_event_buffer::<crate::layer2::fossilized_fleet::EnemyDropEvent>,
         update_event_buffer::<crate::layer2::fossilized_fleet::MiningCompleteEvent>,
+        update_event_buffer::<crate::layer2::megastructure_decay::MaintainMegastructureEvent>,
+        update_event_buffer::<crate::layer2::megastructure_decay::MegastructureFailedEvent>,
+        update_event_buffer::<crate::layer1::hazards::megastructure_decay::DecayEvent>,
     ));
     schedule.add_systems((
         // Cleanup Layer 2 events

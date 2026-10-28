@@ -501,6 +501,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "stareater" => handle_stareater_command(world, &parts),
         "neural" => handle_neural_command(world, &parts),
         "fossil" => handle_fossil_command(world, &parts),
+        "decay" => handle_decay_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
@@ -3343,6 +3344,10 @@ fn print_stats(world: &mut World) {
     let fossil_label = scale::layer2::fossilized_fleet::fossil_stats_label(world);
     // Spec 371: hive census for STATS (full panel: `hive`).
     let hive_label = scale::layer1::hive_contagion::hive_mind::hive_stats_label(world);
+    // Spec 372: megastructure-decay census for STATS (full panel: `decay`).
+    let megadecay_label = scale::layer2::megastructure_decay::decay_stats_label(world);
+    // Spec 372 (spec file): ruins-hazard label for STATS (panel: `decay`).
+    let ruins_label = scale::layer1::hazards::megastructure_decay::ruins_stats_label(world);
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3381,7 +3386,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={}",
         tick,
         scenario,
         pops,
@@ -3507,6 +3512,8 @@ fn print_stats(world: &mut World) {
         neural_label,
         fossil_label,
         hive_label,
+        megadecay_label,
+        ruins_label,
     );
 }
 
@@ -7885,6 +7892,111 @@ fn handle_neural_command(world: &mut World, parts: &[&str]) {
                 &lines,
                 Some(comfy_table::Color::Magenta),
                 Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+fn handle_decay_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::megastructure_decay::{
+        decay_counts, force_worst_decay, spawn_megastructure, trigger_maintenance,
+        MegastructureDecay, DEFAULT_MAINTENANCE_AMOUNT,
+    };
+    match parts.get(1).copied() {
+        Some("spawn") => {
+            let completion: f32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100.0);
+            let entity = spawn_megastructure(world, completion);
+            println!(
+                "Megastructure {entity:?} raised at {completion:.0}% completion with a fresh frame. It will rot {0:.1} decay per tick at full completion — run `tick` and watch STATS megadecay=, or `decay` for the panel.",
+                scale::layer2::megastructure_decay::DECAY_PER_TICK
+            );
+        }
+        Some("force") => {
+            let value: f32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(90.0);
+            let entity = force_worst_decay(world, value);
+            println!(
+                "Megastructure {entity:?} forced to {value:.0}% decay. Run `tick` — degraded frames shed debris, and at 100% the structure fails into the deorbit pipeline."
+            );
+        }
+        Some("maintain") => {
+            let amount: f32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(DEFAULT_MAINTENANCE_AMOUNT);
+            // Service the most-decayed living structure.
+            let target = {
+                let mut query = world.query::<(bevy_ecs::entity::Entity, &MegastructureDecay)>();
+                query
+                    .iter(world)
+                    .filter(|(_, d)| !d.failed)
+                    .max_by(|a, b| {
+                        a.1.decay
+                            .partial_cmp(&b.1.decay)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|(e, _)| e)
+            };
+            match target {
+                Some(entity) => {
+                    trigger_maintenance(world, entity, amount);
+                    println!(
+                        "Maintenance crews dispatched to megastructure {entity:?}: {amount:.0} decay will be repaired next tick."
+                    );
+                }
+                None => println!("No living megastructure to maintain. Spawn one with `decay spawn`."),
+            }
+        }
+        Some("stability") => {
+            let value: f32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.1);
+            scale::layer1::hazards::megastructure_decay::set_ruins_stability(world, value);
+            println!(
+                "The ancient ruins overhead are now at stability {value:.2}. Decay events roll every tick at chance {:.3} — run `tick` and watch STATS ruins= / the chronicle.",
+                scale::layer1::hazards::megastructure_decay::event_chance(value)
+            );
+        }
+        Some("collapse") => {
+            let x: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(40);
+            let y: i32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(25);
+            let damage: f32 = parts
+                .get(4)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100.0);
+            scale::layer1::hazards::megastructure_decay::trigger_decay_collapse(
+                world,
+                scale::layer1::map::GridPosition { x, y },
+                damage,
+            );
+            println!(
+                "A section of the ruins gives way over ({x}, {y}) — {damage:.0} damage inbound. Run `tick` to resolve the fall (damage >= 100 buries the tile in rubble)."
+            );
+        }
+        _ => {
+            let (count, failed, worst, mean_factor, shed, failures, repairs) = decay_counts(world);
+            let debris = world
+                .get_resource::<scale::layer2::debris::OrbitalDebris>()
+                .map_or(0.0, |d| d.0);
+            let lines = format!(
+                "Megastructures tracked: {count} ({failed} failed)\nWorst decay: {worst:.0}%  Mean output factor: {mean_factor:.2}\nDebris shed: {shed:.3} (orbital debris now {debris:.3})\nFailures: {failures}  Maintenance repairs: {repairs}\n\nCompleted megastructures rot every tick: output steps down at 25/50/75% decay, degraded frames shed orbital debris, and at 100% a structure fails into the Spec 277 deorbit pipeline (tether arrays can catch its mass). Maintenance is the counterplay. Debug: `decay spawn [completion]`, `decay force [0-100]`, `decay maintain [amount]`."
+            );
+            print_dashboard_panel(
+                "STELLAR MEGASTRUCTURE DECAY",
+                &lines,
+                Some(comfy_table::Color::Magenta),
+                Some(comfy_table::Attribute::Bold),
+            );
+            let (rstab, rfired, _rdmg, rrubbled) =
+                scale::layer1::hazards::megastructure_decay::ruins_counts(world);
+            println!(
+                "Ruins overhead (spec 372): stability {rstab:.2}, {rfired} decay event(s) fired, {rrubbled} tile(s) rubbled. Debug: `decay stability [0-1]`, `decay collapse [x] [y] [damage]`."
             );
         }
     }
