@@ -502,6 +502,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "neural" => handle_neural_command(world, &parts),
         "fossil" => handle_fossil_command(world, &parts),
         "nomad" => handle_nomad_command(world, &parts),
+        "psionics" | "psions" => print_psionics(world),
+        "awaken" => handle_awaken_command(world, &parts),
+        "breakdown" => handle_breakdown_command(world),
         "decay" => handle_decay_command(world, &parts),
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
@@ -3351,6 +3354,11 @@ fn print_stats(world: &mut World) {
     let ruins_label = scale::layer1::hazards::megastructure_decay::ruins_stats_label(world);
     // Spec 373: nomad-fleet census for STATS (full panel: `nomad`).
     let nomad_label = scale::layer2::entities::nomad_fleet::nomad_stats_label(world);
+    // Spec 374: psion census for STATS (full panel: `psionics`).
+    let (psion_count, psion_sanity) = {
+        let (count, avg_sanity, _broken) = scale::layer1::psionics::psion_census(world);
+        (count, avg_sanity)
+    };
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3389,7 +3397,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2}",
         tick,
         scenario,
         pops,
@@ -3518,6 +3526,8 @@ fn print_stats(world: &mut World) {
         megadecay_label,
         ruins_label,
         nomad_label,
+        psion_count,
+        psion_sanity,
     );
 }
 
@@ -4846,6 +4856,7 @@ fn format_action_type_headless(action: scale::layer1::ActionType) -> String {
         ActionType::SadWander => "😢 Wandering Sadly".to_string(),
         ActionType::FetchClothing => "👕 Fetching Clothes".to_string(),
         ActionType::FetchSuit => "🧑‍🚀 Fetching EVA Suit".to_string(),
+        ActionType::TelekineticWork => "🔮 Telekinetic Work".to_string(),
         ActionType::Surgery => "🏥 Undergoing Surgery".to_string(),
         ActionType::Charge => "⚡ Charging".to_string(),
         ActionType::Hobby => "🎨 Hobby".to_string(),
@@ -8401,6 +8412,89 @@ fn handle_hive_command(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Spec 374: `psionics` panel — every awakened psion, their gift
+/// level, and the sanity that fuels (and endangers) it.
+fn print_psionics(world: &mut World) {
+    use scale::layer1::map::GridPosition;
+    use scale::layer1::psionics::{PsionicPotential, Sanity};
+    use scale::layer1::PopName;
+
+    let mut rows: Vec<String> = world
+        .query::<(
+            Entity,
+            &PsionicPotential,
+            Option<&Sanity>,
+            Option<&PopName>,
+            Option<&GridPosition>,
+        )>()
+        .iter(world)
+        .map(|(entity, potential, sanity, name, pos)| {
+            let name = name.map_or_else(|| "Unnamed".to_string(), |n| n.0.clone());
+            let sanity_text = sanity.map_or_else(
+                || "no sanity pool".to_string(),
+                |s| format!("sanity {:.0}/{:.0}", s.current, s.max),
+            );
+            let pos_text = pos.map_or_else(|| "nowhere".to_string(), |p| format!("({}, {})", p.x, p.y));
+            format!(
+                "{name} (id {}) - level {}, {sanity_text}, at {pos_text}",
+                entity.index(),
+                potential.level
+            )
+        })
+        .collect();
+    rows.sort();
+    let (count, avg_sanity, broken) = scale::layer1::psionics::psion_census(world);
+    let body = if rows.is_empty() {
+        "No psions have awakened yet.\n\nMinds open at random - stress makes it likelier - or force one with `awaken [n]`.\nTelekinetic work and soothing burn Sanity; at zero, the gift erupts. Watch STATS psions= / psionic=.".to_string()
+    } else {
+        format!(
+            "{}\n\nPsions: {count} (avg sanity {:.0}%, broken: {broken})\n\nSanity is its own resource - not morale, not a need. Work and soothing burn it, rest restores it, zero means fire.",
+            rows.join("\n"),
+            avg_sanity * 100.0
+        )
+    };
+    print_dashboard_panel(
+        "PSIONIC AWAKENING",
+        &body,
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug (Spec 374): `awaken [n]` — force-awaken n pops (default 1).
+fn handle_awaken_command(world: &mut World, parts: &[&str]) {
+    let n: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+    let done = scale::layer1::psionics::awaken_pops(world, n);
+    print_dashboard_panel(
+        "PSIONIC AWAKENING",
+        &format!(
+            "{done} mind(s) open to the psionic field.\nA new psion can work telekinetically and soothe neighbours - at the price of Sanity.\nRun `tick` and watch STATS psions= / psionic= - or `psionics` for the roster."
+        ),
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug (Spec 374): `breakdown` — drive a psion's sanity to zero; the
+/// next tick's breakdown system erupts a real fire at their position.
+fn handle_breakdown_command(world: &mut World) {
+    if scale::layer1::psionics::force_psionic_breakdown(world) {
+        print_dashboard_panel(
+            "PSYCHIC ANOMALY",
+            "A psion's sanity is gone.\nRun `tick` - the breakdown fires a real FireEvent at their position (cooldown-bounded, never per-tick spam).\nWatch the chronicle and STATS psions=.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        print_dashboard_panel(
+            "PSYCHIC ANOMALY",
+            "No psions to break. Run `awaken` first.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
 }
 
 /// Debug: Long-Haulers sign on for a fixed tour (Spec 351).

@@ -196,6 +196,12 @@ pub enum ActionType {
     ///
     /// See [`crate::layer1::actions::clothing::evaluate_fetch_suit`].
     FetchSuit,
+    /// Perform work telekinetically, from a distance, at a sanity cost (Spec 374).
+    ///
+    /// Assigned only to psions; `process_psionic_actions_system` burns
+    /// Sanity while a pop holds this action. See
+    /// [`crate::layer1::psychology::psionics`].
+    TelekineticWork,
 }
 
 /// Types of hobbies.
@@ -215,8 +221,9 @@ pub enum HobbyType {
 
 impl ActionType {
     /// Total number of action types. Used for array sizing.
-    /// 52 since Spec 1384 added `FetchSuit`.
-    pub const COUNT: usize = 52;
+    /// 53 since Spec 374 added `TelekineticWork` (52 when Spec 1384
+    /// added `FetchSuit`).
+    pub const COUNT: usize = 53;
 
     /// Converts action type to a unique array index (0..COUNT-1).
     #[must_use]
@@ -274,6 +281,7 @@ impl ActionType {
             Self::Pollinate => 48,
             Self::PhantomWork => 49,
             Self::FetchSuit => 50,
+            Self::TelekineticWork => 51,
         }
     }
 

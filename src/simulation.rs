@@ -1255,6 +1255,28 @@ fn register_simulation_core_systems(schedule: &mut Schedule) {
         crate::layer2::integration::phantom_limb_chronicle_bridge,
         crate::layer2::integration::phantom_trade_routes_chronicle_bridge,
     ));
+
+    // Spec 374 Psionic Awakening: pops awaken at random (stress helps),
+    // telekinetic work and soothing burn Sanity, rest restores it, and a
+    // zero-sanity mind erupts as a real FireEvent (cooldown-bounded).
+    // Execution set per the spec's Technical Guidance. FireEvent's Events
+    // resource is already initialized in setup.rs alongside the older
+    // psionics events, so no new first-tick init is needed.
+    schedule.add_systems(
+        (
+            crate::layer1::psionics::ensure_psionic_components_system,
+            crate::layer1::psionics::psionic_awakening_system,
+            crate::layer1::psionics::process_psionic_actions_system,
+            crate::layer1::psionics::process_psionic_soothing_system,
+            // Breakdown BEFORE recovery: recovery would otherwise lift a
+            // zeroed psion to 0.1 in the same tick and the gift would
+            // never erupt in live play.
+            crate::layer1::psionics::trigger_psionic_breakdown_system,
+            crate::layer1::psionics::sanity_recovery_system,
+        )
+            .chain()
+            .in_set(Layer1SystemSet::Execution),
+    );
 }
 
 #[allow(clippy::too_many_lines)]

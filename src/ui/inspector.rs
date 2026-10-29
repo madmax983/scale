@@ -113,6 +113,7 @@ const fn format_action_type(action: ActionType) -> (&'static str, &'static str, 
         ActionType::Pollinate => ("🌸", "Pollinating", Color::LightGreen),
         ActionType::PhantomWork => ("🌙", "Phantom Shift", Color::Rgb(100, 100, 180)),
         ActionType::FetchSuit => ("🧑‍🚀", "Fetching EVA Suit", Color::Cyan),
+        ActionType::TelekineticWork => ("🔮", "Telekinetic Work", Color::Magenta),
     }
 }
 
