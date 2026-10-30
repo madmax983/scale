@@ -341,6 +341,11 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     // tick — headless dispatches commands (stowaway spawn, muster) before
     // any tick runs, and those helpers read this config unconditionally.
     world.init_resource::<crate::layer1::social::ship_stowaway::StowawayConfig>();
+    // Spec 378 Comms Relay: noise map + reveal ledger must exist from
+    // setup — headless `comms`/`relay`/`contact` read them pre-tick.
+    world.init_resource::<crate::layer2::comms::SignalNoiseMap>();
+    world.init_resource::<crate::layer2::comms::CommsRevealState>();
+    world.init_resource::<Events<crate::layer2::comms::EntityRevealedEvent>>();
     world.init_resource::<crate::layer1::social::emotional_contagion::ContagionLedger>();
     // Spec 341 Pop Memory: witness events, episode state, colony identity.
     world.init_resource::<Events<crate::layer1::memory::WitnessEvent>>();

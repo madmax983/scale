@@ -60,6 +60,16 @@ pub fn build_simulation_schedule() -> Schedule {
     );
     schedule.add_systems(crate::layer2::void_leviathan::update_leviathan_eclipse_system);
     schedule.add_systems(crate::layer2::propaganda_engine::update_propaganda_system);
+    // Spec 378 Comms Relay: signal-noise coverage -> reveal -> chronicle.
+    schedule.add_systems(
+        (
+            crate::layer2::comms::process_comms_coverage_system,
+            crate::layer2::comms::process_building_comms_coverage_system,
+            crate::layer2::comms::reveal_signal_contacts_system,
+            crate::layer2::comms::comms_reveal_chronicle_bridge_system,
+        )
+            .chain(),
+    );
     schedule.add_systems((
         crate::layer1::social::bureau_of_regrets::check_penitent_faction_formation_system,
         crate::layer1::core::integration::starvation_atrocity_bridge,
@@ -750,6 +760,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::agriculture::heirloom::PlantCropEvent>>();
     world.init_resource::<Events<crate::layer1::agriculture::heirloom::HarvestCropEvent>>();
     world.init_resource::<Events<crate::layer1::agriculture::heirloom::SeedDisasterEvent>>();
+    // Spec 378 Comms Relay.
+    world.init_resource::<crate::layer2::comms::SignalNoiseMap>();
+    world.init_resource::<crate::layer2::comms::CommsRevealState>();
+    world.init_resource::<Events<crate::layer2::comms::EntityRevealedEvent>>();
     world.init_resource::<crate::layer1::economy::deep_sleep_syndicates::ProductionModifier>();
     world
         .init_resource::<Events<crate::layer1::economy::deep_sleep_syndicates::ThawSyndicateEvent>>(
@@ -2341,6 +2355,10 @@ mod tests {
         world.init_resource::<Events<crate::layer1::agriculture::heirloom::PlantCropEvent>>();
         world.init_resource::<Events<crate::layer1::agriculture::heirloom::HarvestCropEvent>>();
         world.init_resource::<Events<crate::layer1::agriculture::heirloom::SeedDisasterEvent>>();
+    // Spec 378 Comms Relay.
+    world.init_resource::<crate::layer2::comms::SignalNoiseMap>();
+    world.init_resource::<crate::layer2::comms::CommsRevealState>();
+    world.init_resource::<Events<crate::layer2::comms::EntityRevealedEvent>>();
         world.init_resource::<crate::layer1::economy::deep_sleep_syndicates::ProductionModifier>();
         world.init_resource::<Events<crate::layer1::economy::deep_sleep_syndicates::ThawSyndicateEvent>>();
         world.init_resource::<Events<crate::layer2::skyhooks::LaunchIntent>>();

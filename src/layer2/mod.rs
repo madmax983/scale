@@ -112,6 +112,9 @@ pub mod phantom_signal;
 pub use gravitational_doldrums::*;
 pub mod celestial_library;
 pub mod communications;
+pub mod comms;
+#[cfg(test)]
+mod comms_relay_tests;
 pub mod signature;
 
 use bevy::prelude::*;

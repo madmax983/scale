@@ -1468,7 +1468,18 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
         BuildingType::School | BuildingType::MediaStation | BuildingType::Spaceport => {
             configure_civic(entity, building_type);
         }
-        BuildingType::Mainframe | BuildingType::CommsRelay => {}
+        BuildingType::Mainframe => {}
+        // Spec 378: a Comms Relay building is a power consumer — the
+        // energy grid flips `active` when it can supply the demand,
+        // and Layer 2 signal coverage keys off that flag.
+        BuildingType::CommsRelay => {
+            entity.insert(PowerConsumer {
+                // Mirrors `layer2::comms::BUILDING_RELAY_DEMAND` (kept
+                // literal so Layer 1 does not depend on Layer 2).
+                demand: 5.0,
+                active: false,
+            });
+        }
         BuildingType::PersonalShed
         | BuildingType::PersonalGarden
         | BuildingType::PersonalShrine => {

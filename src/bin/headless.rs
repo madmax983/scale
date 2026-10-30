@@ -518,6 +518,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "stability" => handle_stability_command(world, &parts),
         "schism" => handle_schism_command(world, &parts),
         "seeds" => print_seeds(world),
+        "comms" => print_comms(world),
+        "relay" => handle_relay_command(world, &parts),
+        "contact" => handle_contact_command(world, &parts),
         "plant" | "sow" => handle_plant_command(world, &parts),
         "reap" => handle_reap_command(world),
         "seed_disaster" => handle_seed_disaster_command(world, &parts),
@@ -3206,6 +3209,8 @@ fn print_stats(world: &mut World) {
     let seeds_native = world
         .get_resource::<scale::layer1::agriculture::heirloom::HeirloomSeedState>()
         .is_some_and(|s| s.native_adopted);
+    // Spec 378: signal-noise census for STATS (full panel: `comms`).
+    let signal_label = scale::layer2::comms::comms_stats_label(world);
     let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
@@ -3435,7 +3440,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={}",
         tick,
         scenario,
         pops,
@@ -3574,6 +3579,7 @@ fn print_stats(world: &mut World) {
         seceded_count,
         seeds_total,
         seeds_native,
+        signal_label,
     );
 }
 
@@ -8515,6 +8521,51 @@ fn handle_seed_disaster_command(world: &mut World, parts: &[&str]) {
     world.init_resource::<bevy_ecs::event::Events<SeedDisasterEvent>>();
     world.resource_mut::<bevy_ecs::event::Events<SeedDisasterEvent>>().send(SeedDisasterEvent { kind, target, severity });
     print_dashboard_panel("HEIRLOOM SEEDS", &format!("A {kind:?} strikes {target:?} (severity {severity}) on the next tick."), Some(comfy_table::Color::Red), Some(comfy_table::Attribute::Bold));
+}
+
+/// Spec 378: `comms` panel — signal-noise coverage and reveal ledger.
+fn print_comms(world: &mut World) {
+    use scale::layer2::comms::{comms_census, SignalNoiseMap};
+    let (clear, total, relays, revealed) = comms_census(world);
+    let pct = if total > 0 { clear as f32 * 100.0 / total as f32 } else { 0.0 };
+    let side = world.get_resource::<SignalNoiseMap>().map_or(0, |m| m.radius);
+    print_dashboard_panel(
+        "COMMS RELAY",
+        &format!(
+            "Signal noise map: {side}x{side} ({total} cells)\nClear: {clear} cells ({pct:.1}%)  Noisy: {}\nActive relays: {relays}  Contacts revealed (total): {revealed}\n\nPower a Comms Relay to burn the static away (range: standalone 10, building 15).\nUnpowered relays clear nothing. Use `relay [x] [y] [range]` to raise one, `contact [x] [y]` to drop a contact.",
+            total.saturating_sub(clear)
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 378 debug: raise a powered standalone comms relay on the system map.
+fn handle_relay_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::energy::PowerConsumer;
+    use scale::layer2::comms::{CommsRelay, SystemCoordinate};
+    let x: f32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(50.0);
+    let y: f32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(50.0);
+    let range: f32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(10.0);
+    world.init_resource::<scale::layer2::comms::SignalNoiseMap>();
+    world.init_resource::<scale::layer2::comms::CommsRevealState>();
+    world.init_resource::<bevy_ecs::event::Events<scale::layer2::comms::EntityRevealedEvent>>();
+    let id = world.spawn((
+        CommsRelay { range, active: true },
+        SystemCoordinate { x, y },
+        PowerConsumer { active: true, demand: 5.0 },
+    )).id();
+    print_dashboard_panel("COMMS RELAY", &format!("A powered comms relay (id {id:?}) hums at ({x:.0}, {y:.0}), clearing static out to {range:.0}. Run `tick` and watch STATS signal= — or `comms` for the panel."), Some(comfy_table::Color::Green), Some(comfy_table::Attribute::Bold));
+}
+
+/// Spec 378 debug: drop a signal contact on the system map.
+fn handle_contact_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::comms::{SignalContact, SystemCoordinate};
+    use scale::layer2::sensors::VisibilityStatus;
+    let x: f32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(50.0);
+    let y: f32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(90.0);
+    let id = world.spawn((SignalContact, SystemCoordinate { x, y }, VisibilityStatus { is_visible: false })).id();
+    print_dashboard_panel("COMMS RELAY", &format!("An unidentified contact (id {id:?}) drifts at ({x:.0}, {y:.0}) — hidden while the static covers it. Run `tick`: a clear zone reveals it (chronicle + STATS signal=)."), Some(comfy_table::Color::Yellow), Some(comfy_table::Attribute::Bold));
 }
 
 fn print_psionics(world: &mut World) {
