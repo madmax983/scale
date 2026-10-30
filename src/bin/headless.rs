@@ -517,6 +517,10 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "coredrills" => print_coredrills(world),
         "stability" => handle_stability_command(world, &parts),
         "schism" => handle_schism_command(world, &parts),
+        "seeds" => print_seeds(world),
+        "plant" | "sow" => handle_plant_command(world, &parts),
+        "reap" => handle_reap_command(world),
+        "seed_disaster" => handle_seed_disaster_command(world, &parts),
         "schisms" => print_schisms(world),
         "crossfire" => handle_crossfire_command(world, &parts),
         "crossfires" => print_crossfire(world),
@@ -3195,6 +3199,13 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::schism::seceded_faction_count;
         seceded_faction_count(world)
     };
+    // Spec 377: heirloom seed census for STATS.
+    let seeds_total = world
+        .get_resource::<scale::layer1::agriculture::heirloom::SeedStock>()
+        .map_or(0, |s| s.total());
+    let seeds_native = world
+        .get_resource::<scale::layer1::agriculture::heirloom::HeirloomSeedState>()
+        .is_some_and(|s| s.native_adopted);
     let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
@@ -3424,7 +3435,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={}",
         tick,
         scenario,
         pops,
@@ -3561,6 +3572,8 @@ fn print_stats(world: &mut World) {
         psion_sanity,
         schism_claimed,
         seceded_count,
+        seeds_total,
+        seeds_native,
     );
 }
 
@@ -8449,6 +8462,61 @@ fn handle_hive_command(world: &mut World, parts: &[&str]) {
 
 /// Spec 374: `psionics` panel — every awakened psion, their gift
 /// level, and the sanity that fuels (and endangers) it.
+/// Spec 377: show the Earth seed stock and native-adoption state.
+fn print_seeds(world: &mut World) {
+    use scale::layer1::agriculture::heirloom::{EarthCrop, HeirloomSeedState, SeedStock};
+    let stock = world.get_resource::<SeedStock>().copied().unwrap_or_default();
+    let state = world.get_resource::<HeirloomSeedState>().copied().unwrap_or_default();
+    let planted = world.query::<&EarthCrop>().iter(world).count();
+    print_dashboard_panel(
+        "HEIRLOOM SEEDS",
+        &format!(
+            "Earth seed stock: {} total (wheat {}, potatoes {})
+Planted Earth crops: {planted}
+Plantings: {}  Harvests: {}  Seeds returned: {}  Disasters: {}
+Native Grub-Root adopted: {}",
+            stock.total(), stock.wheat, stock.potatoes,
+            state.plantings, state.harvests, state.seeds_returned, state.disasters,
+            state.native_adopted
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 377 debug: plant one Earth crop.
+fn handle_plant_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::agriculture::heirloom::{EarthCrop, PlantCropEvent, SeedKind};
+    let kind = parts.get(1).and_then(|s| SeedKind::parse(s)).unwrap_or(SeedKind::Wheat);
+    let crop = world.spawn(EarthCrop::new(kind)).id();
+    world.init_resource::<bevy_ecs::event::Events<PlantCropEvent>>();
+    world.resource_mut::<bevy_ecs::event::Events<PlantCropEvent>>().send(PlantCropEvent { crop });
+    print_dashboard_panel("HEIRLOOM SEEDS", &format!("Planting one {kind:?} Earth crop — one seed will be consumed on the next tick."), Some(comfy_table::Color::Green), Some(comfy_table::Attribute::Bold));
+}
+
+/// Spec 377 debug: harvest every planted Earth crop.
+fn handle_reap_command(world: &mut World) {
+    use scale::layer1::agriculture::heirloom::{EarthCrop, HarvestCropEvent};
+    let crops: Vec<Entity> = world.query::<(Entity, &EarthCrop)>().iter(world).map(|(e, _)| e).collect();
+    let n = crops.len();
+    world.init_resource::<bevy_ecs::event::Events<HarvestCropEvent>>();
+    for crop in crops {
+        world.resource_mut::<bevy_ecs::event::Events<HarvestCropEvent>>().send(HarvestCropEvent { crop });
+    }
+    print_dashboard_panel("HEIRLOOM SEEDS", &format!("Harvesting {n} planted Earth crops on the next tick — food plus a seeded seed-return roll each."), Some(comfy_table::Color::Green), Some(comfy_table::Attribute::Bold));
+}
+
+/// Spec 377 debug: seed disaster.
+fn handle_seed_disaster_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::agriculture::heirloom::{DisasterTarget, SeedDisasterEvent, SeedDisasterKind};
+    let kind = if parts.get(1).is_some_and(|s| *s == "fire") { SeedDisasterKind::Fire } else { SeedDisasterKind::Disease };
+    let target = if parts.get(2).is_some_and(|s| *s == "planted") { DisasterTarget::PlantedCrops } else { DisasterTarget::StoredSeeds };
+    let severity: f32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.0);
+    world.init_resource::<bevy_ecs::event::Events<SeedDisasterEvent>>();
+    world.resource_mut::<bevy_ecs::event::Events<SeedDisasterEvent>>().send(SeedDisasterEvent { kind, target, severity });
+    print_dashboard_panel("HEIRLOOM SEEDS", &format!("A {kind:?} strikes {target:?} (severity {severity}) on the next tick."), Some(comfy_table::Color::Red), Some(comfy_table::Attribute::Bold));
+}
+
 fn print_psionics(world: &mut World) {
     use scale::layer1::map::GridPosition;
     use scale::layer1::psionics::{PsionicPotential, Sanity};

@@ -103,6 +103,8 @@ pub enum ItemType {
     Potato,
     /// Grain crop.
     Wheat,
+    /// Native root adopted when Earth seeds are gone (Spec 377).
+    GrubRoot,
     /// Rice crop.
     Rice,
     /// Corn crop.
@@ -178,6 +180,7 @@ impl ItemType {
         match self {
             Self::Alcohol => Some(ResourceType::Alcohol),
             Self::Potato
+            | Self::GrubRoot
             | Self::Wheat
             | Self::Rice
             | Self::Corn

@@ -743,6 +743,13 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 276 The Flesh Famine.
     world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
     world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
+    // Spec 377 Heirloom Seeds.
+    world.init_resource::<crate::layer1::agriculture::heirloom::SeedStock>();
+    world.init_resource::<crate::layer1::agriculture::heirloom::HeirloomSeedState>();
+    world.init_resource::<crate::layer1::agriculture::heirloom::SeedReturnRng>();
+    world.init_resource::<Events<crate::layer1::agriculture::heirloom::PlantCropEvent>>();
+    world.init_resource::<Events<crate::layer1::agriculture::heirloom::HarvestCropEvent>>();
+    world.init_resource::<Events<crate::layer1::agriculture::heirloom::SeedDisasterEvent>>();
     world.init_resource::<crate::layer1::economy::deep_sleep_syndicates::ProductionModifier>();
     world
         .init_resource::<Events<crate::layer1::economy::deep_sleep_syndicates::ThawSyndicateEvent>>(
@@ -2327,6 +2334,13 @@ mod tests {
         // Spec 276 The Flesh Famine.
         world.init_resource::<crate::layer1::social::flesh_famine::FleshFamineState>();
         world.init_resource::<Events<crate::layer1::social::flesh_famine::PlantBlight>>();
+        // Spec 377 Heirloom Seeds.
+        world.init_resource::<crate::layer1::agriculture::heirloom::SeedStock>();
+        world.init_resource::<crate::layer1::agriculture::heirloom::HeirloomSeedState>();
+        world.init_resource::<crate::layer1::agriculture::heirloom::SeedReturnRng>();
+        world.init_resource::<Events<crate::layer1::agriculture::heirloom::PlantCropEvent>>();
+        world.init_resource::<Events<crate::layer1::agriculture::heirloom::HarvestCropEvent>>();
+        world.init_resource::<Events<crate::layer1::agriculture::heirloom::SeedDisasterEvent>>();
         world.init_resource::<crate::layer1::economy::deep_sleep_syndicates::ProductionModifier>();
         world.init_resource::<Events<crate::layer1::economy::deep_sleep_syndicates::ThawSyndicateEvent>>();
         world.init_resource::<Events<crate::layer2::skyhooks::LaunchIntent>>();

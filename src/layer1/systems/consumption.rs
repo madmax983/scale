@@ -94,6 +94,18 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Consumption),
     );
 
+    // Spec 377 Heirloom Seeds: discrete plant/harvest/disaster/adoption.
+    // Separate add_systems (tuple arity limits, as with Spec 276 above).
+    schedule.add_systems(
+        (
+            crate::layer1::agriculture::heirloom::process_planting_system,
+            crate::layer1::agriculture::heirloom::process_harvest_yield_system,
+            crate::layer1::agriculture::heirloom::seed_disaster_system,
+            crate::layer1::agriculture::heirloom::native_adoption_system,
+        )
+            .in_set(Layer1SystemSet::Consumption),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::somnambulism::trigger_somnambulism_system.after(decay_needs_system),

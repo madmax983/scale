@@ -4,6 +4,10 @@
 
 pub mod farm;
 pub mod compost;
+pub mod heirloom;
+
+#[cfg(test)]
+mod heirloom_seeds_tests;
 pub mod gastronomy;
 pub mod husbandry;
 pub mod zero_g_flora;

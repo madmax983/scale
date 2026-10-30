@@ -458,6 +458,14 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<crate::layer1::psionics::FireEvent>>();
     world.init_resource::<Events<crate::layer1::psionics::WorkFailedEvent>>();
     world.init_resource::<Events<crate::layer1::shipbreaking_symbiotic::SymbioticSalvageEvent>>();
+    // Spec 377 Heirloom Seeds: stock/state/RNG + event channels must exist
+    // from setup (headless / run before the first tick).
+    world.init_resource::<crate::layer1::agriculture::heirloom::SeedStock>();
+    world.init_resource::<crate::layer1::agriculture::heirloom::HeirloomSeedState>();
+    world.init_resource::<crate::layer1::agriculture::heirloom::SeedReturnRng>();
+    world.init_resource::<Events<crate::layer1::agriculture::heirloom::PlantCropEvent>>();
+    world.init_resource::<Events<crate::layer1::agriculture::heirloom::HarvestCropEvent>>();
+    world.init_resource::<Events<crate::layer1::agriculture::heirloom::SeedDisasterEvent>>();
     world.init_resource::<Events<AddChronicleEvent>>();
     world.init_resource::<Events<crate::layer2::orphan_fleet::HackOrphanFleetEvent>>();
     world.init_resource::<Events<crate::layer2::orphan_fleet::OrphanFleetDefectionEvent>>();

@@ -75,6 +75,10 @@ const fn get_crop_stats(crop: &ItemType) -> CropStats {
             base_yield: 0.004,
             winter_modifier: 0.8,
         },
+        ItemType::GrubRoot => CropStats {
+            base_yield: 0.003,
+            winter_modifier: 0.9,
+        },
         ItemType::Rice => CropStats {
             base_yield: 0.005,
             winter_modifier: 0.5,
