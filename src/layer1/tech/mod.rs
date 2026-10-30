@@ -881,3 +881,9 @@ pub mod star_eater;
 /// with neural gel that imprints on their users — skilled hands
 /// optimize, stressed hands haunt.
 pub mod neural_architecture;
+
+/// Planetary Core Tapping (Spec 375): a Core Drill trades the
+/// planet's stability for limitless geothermal power.
+pub mod core_tapping;
+#[cfg(test)]
+mod core_tapping_tests;

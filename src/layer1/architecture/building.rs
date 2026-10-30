@@ -367,6 +367,8 @@ pub enum BuildingType {
     /// Shrine demanded by a Mundane Cult, parameterized by its
     /// `CultShrineFocus` component (Spec 365).
     CultShrine,
+    /// Mantle-tapping geothermal drill (Spec 375: Planetary Core Tapping).
+    CoreDrill,
 }
 
 impl BuildingType {
@@ -387,7 +389,7 @@ impl BuildingType {
 
             Self::Generator | Self::SolarPanel => Some((Category::Power, Tier::Basic)),
             Self::AuroralCollector => Some((Category::Power, Tier::Advanced)),
-            Self::AncientReactor => Some((Category::Power, Tier::HighTech)),
+            Self::AncientReactor | Self::CoreDrill => Some((Category::Power, Tier::HighTech)),
 
             Self::Library | Self::BulletinBoard => Some((Category::Research, Tier::Basic)),
             Self::Observatory | Self::CryoPod => Some((Category::Research, Tier::Advanced)),
@@ -549,7 +551,8 @@ impl BuildingType {
             | Self::AuroralCollector
             | Self::TetherArray
             | Self::HarpoonLauncher
-            | Self::CultShrine => false,
+            | Self::CultShrine
+            | Self::CoreDrill => false,
             Self::Recycler => true,
             Self::BulletinBoard => false,
             Self::HoloProjector => false,
@@ -631,6 +634,7 @@ impl BuildingType {
             Self::CryoPod => Some(Tech::Medical),
             Self::AuroralCollector => Some(Tech::Electromagnetism),
             Self::TetherArray => Some(Tech::Electromagnetism),
+            Self::CoreDrill => Some(Tech::Terraforming),
             Self::HarpoonLauncher => Some(Tech::Astronomy),
             Self::AtmosphericProcessor => Some(Tech::Terraforming),
             Self::GeneBank | Self::CloneVat | Self::HypnoPod => Some(Tech::Medical),
@@ -725,6 +729,7 @@ impl BuildingType {
             Self::TetherArray => "Tether Array",
             Self::HarpoonLauncher => "Harpoon Launcher",
             Self::CultShrine => "Cult Shrine",
+            Self::CoreDrill => "Core Drill",
         }
     }
 
@@ -793,6 +798,7 @@ impl BuildingType {
             Self::TetherArray => '⌁',
             Self::HarpoonLauncher => '⚓',
             Self::CultShrine => '♱',
+            Self::CoreDrill => '⊙',
         }
     }
 
@@ -1169,6 +1175,11 @@ impl BuildingType {
                 wood: 5.0,
                 ..ColonyResources::zeroed()
             },
+            Self::CoreDrill => ColonyResources {
+                metal: 100.0,
+                stone: 50.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1437,6 +1448,7 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
         | BuildingType::Battery
         | BuildingType::AncientReactor
         | BuildingType::Heater
+        | BuildingType::CoreDrill
         | BuildingType::AuroralCollector => configure_power(entity, building_type),
         BuildingType::Observatory
         | BuildingType::LifeSupport
@@ -2133,6 +2145,32 @@ fn configure_power_generation(entity: &mut EntityWorldMut, building_type: Buildi
                 structure.current_hp = 1000.0;
             }
         }
+        BuildingType::CoreDrill => {
+            // Spec 375: a fresh drill taps on placement — CoreDrill +
+            // a massive PowerSource + magma light + seismic vibration.
+            entity.insert((
+                crate::layer1::tech::core_tapping::CoreDrill::new(),
+                PowerSource {
+                    output: crate::layer1::tech::core_tapping::CORE_DRILL_OUTPUT,
+                    active: true,
+                },
+                LightSource {
+                    is_outdoor: true,
+                    radius: 6.0,
+                    intensity: 1.0,
+                    color: (255, 100, 0), // Magma orange
+                },
+                SeismicSource {
+                    intensity: 2.0,
+                    radius: 8.0,
+                },
+            ));
+            // Set high HP
+            if let Some(mut structure) = entity.get_mut::<crate::layer1::structure::Structure>() {
+                structure.max_hp = 1000.0;
+                structure.current_hp = 1000.0;
+            }
+        }
         BuildingType::AuroralCollector => {
             entity.insert((
                 PowerSource {
@@ -2777,7 +2815,11 @@ mod tests {
             BuildingType::HarpoonLauncher.next(),
             BuildingType::CultShrine
         );
-        assert_eq!(BuildingType::CultShrine.next(), BuildingType::Housing);
+        assert_eq!(
+            BuildingType::CultShrine.next(),
+            BuildingType::CoreDrill
+        );
+        assert_eq!(BuildingType::CoreDrill.next(), BuildingType::Housing);
     }
 
     #[test]
@@ -3033,6 +3075,8 @@ mod tests {
         assert_eq!(mode.selected, BuildingType::HarpoonLauncher);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::CultShrine);
+        mode.selected = mode.selected.next();
+        assert_eq!(mode.selected, BuildingType::CoreDrill);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Housing);
     }

@@ -563,6 +563,19 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(super::Layer1SystemSet::Execution),
     );
 
+    // Spec 375 Planetary Core Tapping: drill output + stability bleed,
+    // then quake triggering. Separate add_systems call to stay clear of
+    // the IntoSystemConfigs arity limit; process runs in Execution,
+    // before the Economy-set power grid reads PowerSource output.
+    schedule.add_systems(
+        (
+            crate::layer1::tech::core_tapping::process_core_drill_system,
+            crate::layer1::tech::core_tapping::trigger_earthquake_system
+                .after(crate::layer1::tech::core_tapping::process_core_drill_system),
+        )
+            .in_set(super::Layer1SystemSet::Execution),
+    );
+
     // Spec 324 Kinetic Harpoons: tether launch, winch reel-in, impact
     // resolution, passing-wanderer spawns. Separate add_systems call to stay
     // clear of the IntoSystemConfigs arity limit.

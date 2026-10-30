@@ -513,6 +513,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "shadow" => handle_shadow_command(world, &parts),
         "tether" => handle_tether_command(world, &parts),
         "tethers" => print_tethers(world),
+        "coredrill" => handle_coredrill_command(world, &parts),
+        "coredrills" => print_coredrills(world),
+        "stability" => handle_stability_command(world, &parts),
         "crossfire" => handle_crossfire_command(world, &parts),
         "crossfires" => print_crossfire(world),
         "director" => handle_director_command(world, &parts),
@@ -3168,6 +3171,19 @@ fn print_stats(world: &mut World) {
         use scale::layer1::disasters::deorbit::tether_array_count;
         tether_array_count(world)
     };
+    // Spec 375: core-tapping census for STATS (full panel: `coredrills`).
+    let stability = {
+        use scale::layer1::tech::core_tapping::planetary_stability_level;
+        planetary_stability_level(world)
+    };
+    let (coredrills, core_active) = {
+        use scale::layer1::tech::core_tapping::core_drill_counts;
+        core_drill_counts(world)
+    };
+    let core_failed = {
+        use scale::layer1::tech::core_tapping::core_failed;
+        core_failed(world)
+    };
     let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
@@ -3397,7 +3413,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2}",
         tick,
         scenario,
         pops,
@@ -3445,6 +3461,10 @@ fn print_stats(world: &mut World) {
         vetting,
         deorbit,
         tethers,
+        stability,
+        coredrills,
+        core_active,
+        core_failed,
         void_label,
         empathy,
         pirates,
@@ -10700,6 +10720,169 @@ fn print_tethers(world: &mut World) {
             "{count} tether arrays standing, total strength {strength:.1}.\nDeorbit: {status}."
         ),
         Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: planetary core tapping (Spec 375).
+/// `coredrill` builds one drill near the colony center (grants
+/// Terraforming and the metal/stone to build it, like the other debug
+/// build commands); `coredrill on|off|toggle` drives every drill.
+fn handle_coredrill_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::core_tapping::{
+        core_drill_counts, core_failed, planetary_stability_level, set_all_drills_active,
+        toggle_all_drills,
+    };
+    world.init_resource::<scale::layer1::tech::core_tapping::PlanetaryStability>();
+    match parts.get(1).copied() {
+        Some("on") => {
+            if core_failed(world) {
+                print_dashboard_panel(
+                    "CORE BREACH",
+                    "CORE BREACH — The planet has breached.\nThe wrecked drills cannot be restarted.",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            } else {
+                set_all_drills_active(world, true);
+                let (total, active) = core_drill_counts(world);
+                print_dashboard_panel(
+                    "CORE DRILLS",
+                    &format!("All core drills tapping: {active}/{total} active.\nPlanetary stability {:.2} and falling.", planetary_stability_level(world)),
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+        }
+        Some("off") => {
+            set_all_drills_active(world, false);
+            let (total, active) = core_drill_counts(world);
+            print_dashboard_panel(
+                "CORE DRILLS",
+                &format!("All core drills shut down: {active}/{total} active.\nPlanetary stability {:.2} — recovery is slow (+0.0002/tick).", planetary_stability_level(world)),
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("toggle") => {
+            if !toggle_all_drills(world) {
+                print_dashboard_panel(
+                    "CORE BREACH",
+                    "CORE BREACH — The planet has breached.\nThe wrecked drills cannot be restarted.",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            } else {
+                let (total, active) = core_drill_counts(world);
+                print_dashboard_panel(
+                    "CORE DRILLS",
+                    &format!("Core drills toggled: {active}/{total} active.\nPlanetary stability {:.2}.", planetary_stability_level(world)),
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+        }
+        _ => {
+            use scale::layer1::tech::{Tech, TechState};
+            {
+                let mut tech = world.resource_mut::<TechState>();
+                tech.total_capacity = tech.total_capacity.max(200.0);
+                if !tech.is_unlocked(Tech::Terraforming) {
+                    tech.unlock(Tech::Terraforming);
+                }
+            }
+            {
+                let mut resources = world.resource_mut::<ColonyResources>();
+                resources.metal = resources.metal.max(500.0);
+                resources.stone = resources.stone.max(300.0);
+            }
+            let mut placed = 0usize;
+            'scan: for y in 18..=30 {
+                for x in 28..=52 {
+                    if placed >= 1 {
+                        break 'scan;
+                    }
+                    if try_place_building(world, x, y, BuildingType::CoreDrill) {
+                        placed += 1;
+                    }
+                }
+            }
+            let (total, active) = core_drill_counts(world);
+            print_dashboard_panel(
+                "CORE DRILL",
+                &format!(
+                    "Built {placed} core drill near the colony center.\n{active}/{total} drills tapping — planetary stability {:.2}.\nLimitless power, at the cost of the world.",
+                    planetary_stability_level(world)
+                ),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// Debug: list core drills and planetary stability (Spec 375).
+fn print_coredrills(world: &mut World) {
+    use scale::layer1::tech::core_tapping::{
+        core_drill_counts, core_failed, planetary_stability_level,
+    };
+    world.init_resource::<scale::layer1::tech::core_tapping::PlanetaryStability>();
+    let (total, active) = core_drill_counts(world);
+    let level = planetary_stability_level(world);
+    let body = if core_failed(world) {
+        format!(
+            "PLANET BREACHED (stability {level:.2})\n{total} wrecked drill(s) stand silent over the wound.\nThe core is breached. There is no recovery."
+        )
+    } else {
+        format!(
+            "{active}/{total} drills tapping — planetary stability {level:.2}\nActive drills bleed stability at 0.001/tick and feed the seismic grid;\nwith every drill off, the planet recovers at +0.0002/tick."
+        )
+    };
+    print_dashboard_panel(
+        "CORE DRILLS",
+        &body,
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: set planetary stability directly (Spec 375).
+/// `stability <0..1>` — refuses to un-breach a latched failure.
+fn handle_stability_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::core_tapping::{core_failed, PlanetaryStability};
+    world.init_resource::<PlanetaryStability>();
+    let Some(value) = parts.get(1).and_then(|s| s.parse::<f32>().ok()) else {
+        print_dashboard_panel(
+            "STABILITY",
+            &format!(
+                "Planetary stability is {:.2}.\nUsage: `stability <0..1>`",
+                world.resource::<PlanetaryStability>().level
+            ),
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    if core_failed(world) {
+        print_dashboard_panel(
+            "CORE BREACH",
+            "The core has breached — stability is latched at 0.00. There is no recovery.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let clamped = value.clamp(0.0, 1.0);
+    {
+        let mut stability = world.resource_mut::<PlanetaryStability>();
+        stability.level = clamped;
+        stability.last_band =
+            scale::layer1::tech::core_tapping::stability_band(clamped);
+    }
+    print_dashboard_panel(
+        "STABILITY",
+        &format!("Planetary stability set to {clamped:.2}.\nRun `tick` and watch STATS stability= — below 0.25 the quakes turn deterministic, and at 0.00 the core breaches."),
+        Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
     );
 }

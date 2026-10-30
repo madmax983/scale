@@ -542,6 +542,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::architecture::construction_sabotage::VettingPolicy>();
     world.init_resource::<crate::layer1::architecture::construction_sabotage::SabotageDirector>();
     world.init_resource::<Events<crate::layer1::architecture::construction_sabotage::BuildingFailureEvent>>();
+    // Spec 375 Planetary Core Tapping: stability resource + quake events
+    // (first-tick pattern — the drill systems read/write these on tick one).
+    world.init_resource::<crate::layer1::tech::core_tapping::PlanetaryStability>();
+    world.init_resource::<Events<crate::layer1::geology::GeologicalEvent>>();
     // Spec 277 Orbital Megastructure Deorbiting: event, countdown state, director.
     world.init_resource::<Events<crate::layer1::disasters::deorbit::DeorbitEvent>>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitState>();
