@@ -797,3 +797,12 @@ pub mod architectural_spite;
 /// sacred work. No glob re-export on purpose: callers use the full
 /// path.
 pub mod mundane_cult;
+
+/// The Schism (Spec 376): a faction at critical unhappiness secedes,
+/// claims a building cluster, and bars the doors to outsiders.
+/// No glob re-export on purpose: callers use the full path, so the
+/// generic names (SchismEvent, SchismConfig) stay namespaced.
+pub mod schism;
+
+#[cfg(test)]
+mod schism_tests;

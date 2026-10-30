@@ -516,6 +516,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "coredrill" => handle_coredrill_command(world, &parts),
         "coredrills" => print_coredrills(world),
         "stability" => handle_stability_command(world, &parts),
+        "schism" => handle_schism_command(world, &parts),
+        "schisms" => print_schisms(world),
         "crossfire" => handle_crossfire_command(world, &parts),
         "crossfires" => print_crossfire(world),
         "director" => handle_director_command(world, &parts),
@@ -3184,6 +3186,15 @@ fn print_stats(world: &mut World) {
         use scale::layer1::tech::core_tapping::core_failed;
         core_failed(world)
     };
+    // Spec 376: schism census for STATS (full panel: `schism`).
+    let schism_claimed = {
+        use scale::layer1::social::schism::seceded_territory_count;
+        seceded_territory_count(world)
+    };
+    let seceded_count = {
+        use scale::layer1::social::schism::seceded_faction_count;
+        seceded_faction_count(world)
+    };
     let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
@@ -3413,7 +3424,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={}",
         tick,
         scenario,
         pops,
@@ -3548,6 +3559,8 @@ fn print_stats(world: &mut World) {
         nomad_label,
         psion_count,
         psion_sanity,
+        schism_claimed,
+        seceded_count,
     );
 }
 
@@ -11585,6 +11598,97 @@ fn print_winches(world: &mut World) {
     );
 }
 
+/// Debug: the Schism (Spec 376). `schism` prints the panel;
+/// `schism trigger [faction]` forces a secession (sets satisfaction
+/// to zero and sends the event — the live satisfaction system would
+/// otherwise recompute it from policies on the next tick);
+/// `schism threshold <0..1>` retunes the secession threshold.
+fn handle_schism_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::schism::{
+        parse_faction_id, set_faction_satisfaction, SchismConfig, SchismEvent, SchismState,
+    };
+    world.init_resource::<SchismConfig>();
+    world.init_resource::<SchismState>();
+    world.init_resource::<bevy_ecs::event::Events<SchismEvent>>();
+    match parts.get(1).copied() {
+        Some("trigger") => {
+            let faction = parts
+                .get(2)
+                .and_then(|name| parse_faction_id(name))
+                .unwrap_or(scale::layer1::factions::FactionId::MinersGuild);
+            set_faction_satisfaction(world, faction, 0.0);
+            world
+                .resource_mut::<bevy_ecs::event::Events<SchismEvent>>()
+                .send(SchismEvent { faction });
+            print_dashboard_panel(
+                "THE SCHISM",
+                &format!(
+                    "The {:?} have reached breaking point and are seceding.\nRun `tick` — they will claim a cluster of buildings and bar the doors to outsiders. Watch STATS schism= and the chronicle.",
+                    faction
+                ),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("threshold") => {
+            let value = parts.get(2).and_then(|text| text.parse::<f32>().ok());
+            match value {
+                Some(value) => {
+                    let clamped = value.clamp(0.0, 1.0);
+                    world.resource_mut::<SchismConfig>().threshold = clamped;
+                    print_dashboard_panel(
+                        "SCHISM",
+                        &format!(
+                            "Schism threshold set to {clamped:.2}.\nA faction secedes when its effective happiness (the lower of stored satisfaction and member morale) reaches the threshold."
+                        ),
+                        Some(comfy_table::Color::Yellow),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                }
+                None => print_dashboard_panel(
+                    "SCHISM",
+                    &format!(
+                        "Schism threshold is {:.2}.\nUsage: `schism threshold <0..1>`",
+                        world.resource::<SchismConfig>().threshold
+                    ),
+                    Some(comfy_table::Color::Cyan),
+                    Some(comfy_table::Attribute::Bold),
+                ),
+            }
+        }
+        _ => print_schisms(world),
+    }
+}
+
+/// Debug: list seceded factions and claimed territory (Spec 376).
+fn print_schisms(world: &mut World) {
+    use scale::layer1::social::schism::{
+        seceded_faction_count, seceded_factions_label, seceded_territory_count, SchismConfig,
+        SchismState,
+    };
+    world.init_resource::<SchismConfig>();
+    world.init_resource::<SchismState>();
+    let threshold = world.resource::<SchismConfig>().threshold;
+    let factions = seceded_faction_count(world);
+    let claimed = seceded_territory_count(world);
+    let label = seceded_factions_label(world);
+    let body = if factions == 0 {
+        format!(
+            "No faction has seceded. Threshold {threshold:.2}.\nA faction secedes when its effective happiness falls to the threshold: it claims a cluster of housing and workplaces and bars the doors to outsiders.\nForce one with `schism trigger [miners|farmers|masons|loggers|artisans|scholars|unaligned|cartel]`."
+        )
+    } else {
+        format!(
+            "{factions} faction(s) seceded: {label}.\n{claimed} building(s) held as seceded territory, doors barred to outsiders.\nThe seceded are on strike behind their doors. Negotiation and force are not yet modelled — the schism itself is the crisis."
+        )
+    };
+    print_dashboard_panel(
+        "THE SCHISM",
+        &body,
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 #[cfg(test)]
 mod reproduction_tests {
     // Spec 1376: the sell console command sells the artifact by entity id
@@ -12122,3 +12226,4 @@ fn probe_print_row(world: &mut World, tick: u64, pops: usize) {
         "CSV,{tick},{pops},{min_p:.3},{mean_p:.3},{ls_n},{ls_hp:.1},{ls_on},{min_wall_hp:.1},{lt30},{fires},{ruins},{src_out:.1},{cons_on},{cons_n},{repair_actors},{work_actors},{food:.1},{suits_pool},{suits_worn},{suit_air_out:.1}"
     );
 }
+

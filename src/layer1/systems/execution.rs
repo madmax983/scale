@@ -576,6 +576,18 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(super::Layer1SystemSet::Execution),
     );
 
+    // Spec 376 The Schism: unhappy factions secede and claim
+    // territory. Separate add_systems call to stay clear of the
+    // IntoSystemConfigs arity limit; handle runs after process.
+    schedule.add_systems(
+        (
+            crate::layer1::social::schism::process_schism_system,
+            crate::layer1::social::schism::handle_schism_event_system
+                .after(crate::layer1::social::schism::process_schism_system),
+        )
+            .in_set(super::Layer1SystemSet::Execution),
+    );
+
     // Spec 324 Kinetic Harpoons: tether launch, winch reel-in, impact
     // resolution, passing-wanderer spawns. Separate add_systems call to stay
     // clear of the IntoSystemConfigs arity limit.
