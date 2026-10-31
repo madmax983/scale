@@ -221,6 +221,21 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 381 Room Zones: designated rooms re-evaluate on a throttled
+    // cadence (dirty flag forces it), mood applies on the same cadence,
+    // and legendary/barracks firsts are chronicled. Chained so a room
+    // evaluated this tick can move moods and be chronicled this tick.
+    schedule.add_systems(
+        (
+            crate::layer1::architecture::room_zones::evaluate_rooms_system,
+            crate::layer1::architecture::room_zones::apply_room_mood_system,
+            crate::layer1::architecture::room_zones::room_zone_chronicle_bridge_system,
+        )
+            .chain(),
+    );
+    schedule.add_systems((update_event_buffer::<
+        crate::layer1::architecture::room_zones::RoomEvaluatedEvent,
+    >,));
     // Spec 290 The Phantom Shift: Fringe pops work a secret night shift
     // repairing damaged structures off the books, growing a shadow economy
     // when the colony backlog is critical.
@@ -500,6 +515,11 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 1375 Ship of Fools: its arrival-event resource was never initialized;
     // without this the first tick panics on a fresh world (pre-existing bug).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::ship_of_fools::ShipOfFoolsArrivalEvent>>();
+    // Spec 381 Room Zones: evaluation events + throttle/chronicle state
+    // (first-tick pattern — the evaluation system writes from tick one).
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::architecture::room_zones::RoomEvaluatedEvent>>();
+    world.init_resource::<crate::layer1::architecture::room_zones::RoomZoneState>();
+    world.init_resource::<crate::layer1::architecture::room_zones::RoomChronicleState>();
     // Spec 271 Subcontractor Factions: lease + sweep events.
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::factions::subcontractor_factions::LeaseZoneEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::factions::subcontractor_factions::MegacorpSecuritySweepEvent>>();

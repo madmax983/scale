@@ -77,6 +77,10 @@ pub enum MemoryType {
     /// the dissatisfaction ledger at a Bitter crossing; deliberately
     /// small next to the bridge modifier, which does the heavy lifting.
     GroundDown,
+    /// Envied a far finer designated room elsewhere in the colony (Spec 381).
+    JealousOfSuite,
+    /// Shared an overcrowded barracks-style designated room (Spec 381).
+    CrampedBarracks,
 }
 
 impl MemoryType {
@@ -98,6 +102,8 @@ impl MemoryType {
             Self::SurvivedFamine => -0.10, // Spec 341: the hunger years leave a mark
             Self::ColonyFounder => 0.05, // Spec 341: quiet pride of the first landing
             Self::GroundDown => -0.1, // Spec 1387: summary of the ledger; the bridge does the heavy lifting
+            Self::JealousOfSuite => -0.04, // Spec 381: envy of the fine suite down the hall
+            Self::CrampedBarracks => -0.06, // Spec 381: no privacy, no quiet, no mercy
             Self::SawCorpse => -0.05,
             Self::SleptInAwfulRoom => -0.1,
             Self::SleptInDullRoom => -0.05,
@@ -124,6 +130,8 @@ impl MemoryType {
             Self::SurvivedFamine => 0.0005, // Spec 341: slow fade, like WitnessedDeath
             Self::ColonyFounder => 0.0002, // Spec 341: founding is identity — fades slowest of all
             Self::GroundDown => 0.0005, // Spec 1387: slow fade — outlives the ledger's decay tail
+            Self::JealousOfSuite => 0.002, // Spec 381: envy lingers while the suite stands
+            Self::CrampedBarracks => 0.01, // Spec 381: fades like other room thoughts (~100 ticks)
             Self::SawCorpse | Self::AdmiredArt | Self::DisgustedByVermin => 0.01, // Very fast fade (100 ticks)
             Self::InspectorImpressed | Self::InspectorDisappointed | Self::FakePositive => 0.005, // Medium-long duration (~200 ticks)
             // Room thoughts last 1 day (100 ticks)

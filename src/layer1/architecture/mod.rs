@@ -32,6 +32,9 @@ mod structure_maintenance_tests;
 pub mod parasitic_architecture;
 /// Logic for calculating room quality.
 pub mod room_quality;
+/// Designated room zones with cached value, assignment and mood (Spec 381).
+pub mod room_zones;
+pub use room_zones::*;
 /// Ruins mechanisms.
 pub mod ruins;
 /// Spontaneous architecture mechanics.

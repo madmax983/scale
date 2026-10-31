@@ -518,6 +518,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "stability" => handle_stability_command(world, &parts),
         "schism" => handle_schism_command(world, &parts),
         "seeds" => print_seeds(world),
+        "roomzone" => handle_roomzone_command(world, &parts),
+        "roomzones" => print_roomzones(world),
+        "assignroom" => handle_assignroom_command(world, &parts),
         "comms" => print_comms(world),
         "window" | "windows" => print_launch_windows(world, &parts),
         "filter" => handle_filter_command(world, &parts),
@@ -3218,6 +3221,8 @@ fn print_stats(world: &mut World) {
     let window_label = scale::layer2::logistics::launch::launch_stats_label(world);
     // Spec 380: great-filter census for STATS (full panel: `filter`).
     let filter_label = scale::layer3::events::great_filter::filter_stats_label(world);
+    // Spec 381: room-zone census for STATS (full panel: `roomzones`).
+    let room_census = scale::layer1::architecture::room_zones::room_zone_census(world);
     let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
@@ -3447,7 +3452,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={}",
         tick,
         scenario,
         pops,
@@ -3589,6 +3594,9 @@ fn print_stats(world: &mut World) {
         signal_label,
         window_label,
         filter_label,
+        room_census.rooms,
+        room_census.avg_value,
+        room_census.barracks,
     );
 }
 
@@ -12679,4 +12687,205 @@ fn handle_filter_command(world: &mut World, parts: &[&str]) {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Spec 381 Room Zones: designation, listing, assignment (panel: `roomzones`).
+// ---------------------------------------------------------------------------
+
+fn handle_roomzone_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::architecture::room_zones::{
+        designate_room_zone, zone_type_label, Furniture, InRoom, RoomZoneState,
+    };
+    use scale::layer1::zone::ZoneType;
+
+    let usage = "Usage: roomzone <bedroom|dining|hospital> <x> <y> <w> <h> [furniture_quality]";
+    if parts.len() < 6 {
+        println!("{usage}");
+        return;
+    }
+    let zone_type = match parts[1].to_lowercase().as_str() {
+        "bedroom" => ZoneType::Bedroom,
+        "dining" => ZoneType::Dining,
+        "hospital" => ZoneType::Hospital,
+        other => {
+            println!("Unknown room type '{other}'. {usage}");
+            return;
+        }
+    };
+    let parse = |s: &str| s.parse::<i32>().ok();
+    let (Some(x), Some(y), Some(w), Some(h)) = (
+        parse(parts[2]),
+        parse(parts[3]),
+        parse(parts[4]),
+        parse(parts[5]),
+    ) else {
+        println!("Coordinates and size must be integers. {usage}");
+        return;
+    };
+    if w <= 0 || h <= 0 {
+        println!("Room size must be positive. {usage}");
+        return;
+    }
+    let mut tiles: Vec<(i32, i32)> = Vec::new();
+    for dx in 0..w {
+        for dy in 0..h {
+            tiles.push((x + dx, y + dy));
+        }
+    }
+    let tile_count = tiles.len();
+    let first_tile = tiles.first().copied();
+    let room = designate_room_zone(world, zone_type, tiles);
+    // Optional furniture: one well-made piece at the room's first tile.
+    let furniture_note = if let Some(q) = parts.get(6).and_then(|s| s.parse::<f32>().ok()) {
+        if let Some((fx, fy)) = first_tile {
+            world.spawn((
+                Furniture { quality: q },
+                GridPosition { x: fx, y: fy },
+                InRoom(room),
+            ));
+        }
+        if let Some(mut state) = world.get_resource_mut::<RoomZoneState>() {
+            state.dirty = true;
+        }
+        format!("\nFurniture placed (quality {q:.1}) — run `tick` to re-evaluate.")
+    } else {
+        String::new()
+    };
+    print_dashboard_panel(
+        "ROOM ZONE",
+        &format!(
+            "A {} of {} tiles is designated at ({x}, {y}) (id {room:?}).{furniture_note}\nRun `tick` and watch STATS roomzones= / roomvalue= — or `roomzones` for the ledger, `assignroom <pop|all> <room #>` to house pops.",
+            zone_type_label(zone_type),
+            tile_count
+        ),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn print_roomzones(world: &mut World) {
+    use scale::layer1::architecture::room_zones::{
+        effective_occupant_count, is_overcrowded, room_zone_census, zone_type_label, Furniture,
+        InRoom, OccupantCount, RoomZone,
+    };
+    use scale::layer1::resonant_architecture::AssignedRoom;
+    use std::collections::HashMap;
+
+    let mut derived: HashMap<Entity, usize> = HashMap::new();
+    {
+        let mut q = world.query::<&AssignedRoom>();
+        for a in q.iter(world) {
+            *derived.entry(a.0).or_insert(0) += 1;
+        }
+    }
+    let mut furniture_by_room: HashMap<Entity, f32> = HashMap::new();
+    {
+        let mut q = world.query::<(&Furniture, &InRoom)>();
+        for (f, in_room) in q.iter(world) {
+            *furniture_by_room.entry(in_room.0).or_insert(0.0) += f.quality;
+        }
+    }
+    let mut rows: Vec<String> = Vec::new();
+    {
+        let mut q = world.query::<(Entity, &RoomZone, Option<&OccupantCount>)>();
+        for (idx, (entity, room, stored)) in q.iter(world).enumerate() {
+            let occupants =
+                effective_occupant_count(derived.get(&entity).copied().unwrap_or(0), stored);
+            let furniture = furniture_by_room.get(&entity).copied().unwrap_or(0.0);
+            rows.push(format!(
+                "#{idx} {entity:?} {} — {} tiles, value {:.1} (furniture {:.1} + walls {:.1}), occupants {} {}",
+                zone_type_label(room.zone_type),
+                room.tiles.len(),
+                room.value(),
+                furniture,
+                room.wall_bonus,
+                occupants,
+                if is_overcrowded(occupants) {
+                    "[BARRACKS — overcrowded]"
+                } else {
+                    ""
+                },
+            ));
+        }
+    }
+    let census = room_zone_census(world);
+    if rows.is_empty() {
+        print_dashboard_panel(
+            "ROOM ZONES",
+            "No designated rooms yet.\n\nDesignate one with `roomzone <bedroom|dining|hospital> <x> <y> <w> <h> [furniture_quality]`, house pops with `assignroom`, and watch STATS roomzones= / roomvalue= / barracks=.",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        print_dashboard_panel(
+            "ROOM ZONES",
+            &format!(
+                "{} room(s), average value {:.1}, {} barracks, {} pop(s) assigned.\n\n{}\n\nRoom Value = Size + Furniture Quality + Wall Material. High-value rooms (over 20) buff their pops; more than 2 occupants makes a barracks — and everyone in a hovel envies the finest suite.",
+                census.rooms,
+                census.avg_value,
+                census.barracks,
+                census.assigned,
+                rows.join("\n")
+            ),
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+}
+
+fn handle_assignroom_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::architecture::room_zones::RoomZone;
+    use scale::layer1::pop::Pop;
+    use scale::layer1::resonant_architecture::AssignedRoom;
+
+    if parts.len() < 3 {
+        println!("Usage: assignroom <pop index|all> <room index (see `roomzones`)>");
+        return;
+    }
+    let rooms: Vec<Entity> = {
+        let mut q = world.query::<(Entity, &RoomZone)>();
+        q.iter(world).map(|(e, _)| e).collect()
+    };
+    let Some(&room) = parts[2].parse::<usize>().ok().and_then(|i| rooms.get(i)) else {
+        println!("No designated room with that index. Run `roomzones` first.");
+        return;
+    };
+    let pops: Vec<Entity> = {
+        let mut q = world.query_filtered::<Entity, With<Pop>>();
+        q.iter(world).collect()
+    };
+    let targets: Vec<Entity> = if parts[1].eq_ignore_ascii_case("all") {
+        pops.clone()
+    } else if let Some(&pop) = parts[1].parse::<usize>().ok().and_then(|i| pops.get(i)) {
+        vec![pop]
+    } else {
+        // Fall back to matching a pop by name.
+        let wanted = parts[1].to_lowercase();
+        let mut found = Vec::new();
+        for pop in &pops {
+            if let Some(name) = world.get::<PopName>(*pop) {
+                if name.0.to_lowercase().contains(&wanted) {
+                    found.push(*pop);
+                }
+            }
+        }
+        found
+    };
+    if targets.is_empty() {
+        println!("No pop matched '{}'. Run `pops` for the roster.", parts[1]);
+        return;
+    }
+    let count = targets.len();
+    for pop in targets {
+        world.entity_mut(pop).insert(AssignedRoom(room));
+    }
+    print_dashboard_panel(
+        "ROOM ASSIGNMENT",
+        &format!(
+            "{count} pop(s) assigned to room {room:?}.\nRun `tick` (mood applies on the 50-tick cadence) and watch STATS roomzones= / barracks= — or `roomzones` for the ledger."
+        ),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
 }
