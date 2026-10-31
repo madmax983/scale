@@ -55,6 +55,7 @@ pub mod guilt;
 pub mod zoo_hypothesis;
 
 pub mod galaxy;
+pub mod tech;
 pub mod quarantine;
 pub mod sovereign_armada;
 pub mod tourism_integration;

@@ -783,6 +783,12 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer2::logistics::launch::LaunchCommand>>();
     world.init_resource::<Events<crate::layer2::logistics::launch::LaunchedEvent>>();
     world.init_resource::<Events<crate::layer2::logistics::launch::LaunchRefusedEvent>>();
+    // Spec 380 The Great Filter: ledger + event buses (first-tick Events pattern).
+    world.init_resource::<crate::layer3::events::great_filter::GreatFilterLedger>();
+    world.init_resource::<Events<crate::layer3::tech::TechAdvanceEvent>>();
+    world.init_resource::<Events<crate::layer3::events::great_filter::FilterEvent>>();
+    world.init_resource::<Events<crate::layer3::events::great_filter::FilterSurvivedEvent>>();
+    world.init_resource::<Events<crate::layer3::events::great_filter::CivilizationWipeEvent>>();
     world.init_resource::<crate::layer1::economy::deep_sleep_syndicates::ProductionModifier>();
     world
         .init_resource::<Events<crate::layer1::economy::deep_sleep_syndicates::ThawSyndicateEvent>>(
@@ -1487,6 +1493,10 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         update_event_buffer::<crate::layer2::logistics::launch::LaunchCommand>,
         update_event_buffer::<crate::layer2::logistics::launch::LaunchedEvent>,
         update_event_buffer::<crate::layer2::logistics::launch::LaunchRefusedEvent>,
+        update_event_buffer::<crate::layer3::tech::TechAdvanceEvent>,
+        update_event_buffer::<crate::layer3::events::great_filter::FilterEvent>,
+        update_event_buffer::<crate::layer3::events::great_filter::FilterSurvivedEvent>,
+        update_event_buffer::<crate::layer3::events::great_filter::CivilizationWipeEvent>,
         update_event_buffer::<ShipDestroyedEvent>,
         update_event_buffer::<crate::layer2::orbital_necropolis::EntityDestroyedEvent>,
         update_event_buffer::<crate::layer2::dead_protocols::ViolationEvent>,
@@ -1849,6 +1859,21 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     ));
 
     schedule.add_systems((crate::layer3::events::refugee_waves::process_refugee_decision,));
+    // Spec 380 The Great Filter: advance -> trigger -> activate -> tick
+    // -> fail -> wipe, with benefit + chronicle bridges after the chain.
+    schedule.add_systems(
+        (
+            crate::layer3::tech::advance_tech_system,
+            crate::layer3::events::great_filter::trigger_filter_events_system,
+            crate::layer3::events::great_filter::activate_filters_system,
+            crate::layer3::events::great_filter::tick_active_filters_system,
+            crate::layer3::events::great_filter::process_failed_filters_system,
+            crate::layer3::events::great_filter::apply_civilization_wipe_system,
+            crate::layer3::events::great_filter::filter_survival_benefit_system,
+            crate::layer3::events::great_filter::filter_chronicle_bridge_system,
+        )
+            .chain(),
+    );
     schedule.add_systems((
         crate::layer3::economy::market_shock::monitor_luxury_production_system,
         crate::layer3::economy::market_shock::trigger_ally_civil_war_system,

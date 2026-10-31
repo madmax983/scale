@@ -520,6 +520,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "seeds" => print_seeds(world),
         "comms" => print_comms(world),
         "window" | "windows" => print_launch_windows(world, &parts),
+        "filter" => handle_filter_command(world, &parts),
         "launch_fleet" => handle_launch_fleet_command(world, &parts),
         "relay" => handle_relay_command(world, &parts),
         "contact" => handle_contact_command(world, &parts),
@@ -3215,6 +3216,8 @@ fn print_stats(world: &mut World) {
     let signal_label = scale::layer2::comms::comms_stats_label(world);
     // Spec 379: launch-window census for STATS (full panel: `window`).
     let window_label = scale::layer2::logistics::launch::launch_stats_label(world);
+    // Spec 380: great-filter census for STATS (full panel: `filter`).
+    let filter_label = scale::layer3::events::great_filter::filter_stats_label(world);
     let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
@@ -3444,7 +3447,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={}",
         tick,
         scenario,
         pops,
@@ -3585,6 +3588,7 @@ fn print_stats(world: &mut World) {
         seeds_native,
         signal_label,
         window_label,
+        filter_label,
     );
 }
 
@@ -7023,6 +7027,11 @@ fn print_help() {
                     "launch_fleet [idx]",
                     "",
                     "Order a fuel-gated fleet launch to the body at list index (Spec 379)",
+                ),
+                (
+                    "filter [civ [level] [containment] | advance <n> | fail]",
+                    "",
+                    "The Great Filter: census panel / spawn a civ on trial / advance tech / force a fall (Spec 380)",
                 ),
                 ("constellation", "", "Show Propaganda Constellation status"),
                 ("godmind", "", "Debug: upload a dying leader as the Eternal Ruler (Spec 1381)"),
@@ -12540,3 +12549,134 @@ fn probe_print_row(world: &mut World, tick: u64, pops: usize) {
     );
 }
 
+
+/// Spec 380: The Great Filter headless commands.
+/// `filter` — census panel (ledger, live trials, ruins).
+/// `filter civ [level] [containment]` — spawn a demo civilization at a
+/// tech level (default 100, right at the threshold) with two worlds;
+/// run `tick` and watch the trial resolve over 100 ticks.
+/// `filter advance <n>` — advance the first filter civ's tech level.
+/// `filter fail` — force the first live trial to fail next tick.
+fn handle_filter_command(world: &mut World, parts: &[&str]) {
+    use scale::layer3::events::great_filter::{
+        great_filter_census, ActiveFilter, CivWorld, CivilizationResilience, ExplorableRuin,
+        GreatFilterLedger,
+    };
+    use scale::layer3::tech::{CivilizationTechLevel, TechAdvanceEvent};
+
+    world.init_resource::<GreatFilterLedger>();
+    world.init_resource::<bevy_ecs::event::Events<TechAdvanceEvent>>();
+
+    match parts.get(1).copied() {
+        Some("civ") => {
+            let level: u32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(100);
+            let containment: f32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(40.0);
+            let civ = world
+                .spawn((
+                    scale::layer3::diplomacy_reflection::Civilization {
+                        id: format!("Filter Civ {}", level),
+                    },
+                    CivilizationTechLevel { level },
+                    CivilizationResilience { containment },
+                ))
+                .id();
+            for name in ["Prime", "Second"] {
+                world.spawn((CivWorld {
+                    owner: civ,
+                    name: name.to_string(),
+                },));
+            }
+            print_dashboard_panel(
+                "THE GREAT FILTER",
+                &format!(
+                    "A civilization (id {civ:?}) stands at tech level {level} with containment {containment:.0} and two worlds.\nRun `tick 1` — crossing the threshold wakes its Filter — then `tick 100` to see the trial resolve: contained, it turns transcendent; under-contained, its worlds become ruins. Watch STATS filter=."
+                ),
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("advance") => {
+            let amount: u32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(10);
+            let civ = {
+                let mut q = world.query::<(bevy_ecs::prelude::Entity, &CivilizationTechLevel)>();
+                q.iter(world).map(|(e, _)| e).next()
+            };
+            match civ {
+                Some(civ) => {
+                    world
+                        .resource_mut::<bevy_ecs::event::Events<TechAdvanceEvent>>()
+                        .send(TechAdvanceEvent { civ, amount });
+                    print_dashboard_panel(
+                        "THE GREAT FILTER",
+                        &format!(
+                            "Civilization {civ:?} advances {amount} tech. Run `tick` — if the level crosses 100, the Filter wakes. Watch STATS filter=."
+                        ),
+                        Some(comfy_table::Color::Cyan),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                }
+                None => {
+                    print_dashboard_panel(
+                        "THE GREAT FILTER",
+                        "No civilization with a tech level exists yet. Spawn one with `filter civ [level] [containment]` first.",
+                        Some(comfy_table::Color::Yellow),
+                        Some(comfy_table::Attribute::Bold),
+                    );
+                }
+            }
+        }
+        Some("fail") => {
+            let mut q = world.query::<&mut ActiveFilter>();
+            let mut forced = 0;
+            for mut active in q.iter_mut(world) {
+                active.failed = true;
+                forced += 1;
+            }
+            print_dashboard_panel(
+                "THE GREAT FILTER",
+                &format!(
+                    "Forced {forced} live trial(s) to fail. Run `tick` — the fallen civ's worlds become explorable ruins. Watch STATS filter=."
+                ),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        _ => {
+            let (triggered, survived, fallen, active, _ruins) = great_filter_census(world);
+            let ruins = {
+                let mut q = world.query::<&ExplorableRuin>();
+                q.iter(world).count()
+            };
+            let trials: Vec<String> = {
+                let mut q = world.query::<(bevy_ecs::prelude::Entity, &ActiveFilter)>();
+                q.iter(world)
+                    .map(|(e, a)| {
+                        format!(
+                            "  {e:?}: {} — tick {}/{}, pressure {:.0}/{:.0}, containment {:.0}{}",
+                            a.kind.label(),
+                            a.elapsed,
+                            a.duration,
+                            a.pressure(),
+                            a.final_pressure(),
+                            a.containment,
+                            if a.failed { " (FAILING)" } else { "" }
+                        )
+                    })
+                    .collect()
+            };
+            let trials_text = if trials.is_empty() {
+                "No live trials. The galaxy is quiet — for now.".to_string()
+            } else {
+                trials.join("\n")
+            };
+            print_dashboard_panel(
+                "THE GREAT FILTER",
+                &format!(
+                    "Filters triggered: {triggered}  Survived: {survived}  Fallen: {fallen}\nLive trials: {active}  Explorable ruins: {ruins}\n{trials_text}\n\nCivilizations crossing tech level 100 wake a Filter: 100 ticks of growing pressure against their containment. Survive and turn transcendent (+100 knowledge for the local civ); fail and every owned world becomes a ruin.\nDebug: `filter civ [level] [containment]`, `filter advance <n>`, `filter fail`."
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
