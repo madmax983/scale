@@ -49,6 +49,7 @@ pub mod derelict_stations;
 pub mod events;
 pub mod events_new;
 pub mod fleet;
+pub mod logistics;
 pub mod generation;
 pub mod governance;
 pub mod integration;

@@ -70,6 +70,19 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 379 Launch Windows: orbits drift first, then launch
+    // commands are priced against the fresh positions and fuel-gated.
+    schedule.add_systems(
+        (
+            crate::layer2::logistics::launch::advance_orbits_system,
+            crate::layer2::logistics::launch::launch_command_system,
+        )
+            .chain(),
+    );
+    schedule.add_systems(
+        crate::layer2::logistics::launch::transfer_completion_system
+            .after(crate::layer2::fleet::fleet_movement_system),
+    );
     schedule.add_systems((
         crate::layer1::social::bureau_of_regrets::check_penitent_faction_formation_system,
         crate::layer1::core::integration::starvation_atrocity_bridge,
@@ -764,6 +777,12 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer2::comms::SignalNoiseMap>();
     world.init_resource::<crate::layer2::comms::CommsRevealState>();
     world.init_resource::<Events<crate::layer2::comms::EntityRevealedEvent>>();
+    // Spec 379 Launch Windows: ledger + launch event buses (first-tick
+    // Events pattern — the launch system reads/writes these on tick one).
+    world.init_resource::<crate::layer2::logistics::launch::LaunchLedger>();
+    world.init_resource::<Events<crate::layer2::logistics::launch::LaunchCommand>>();
+    world.init_resource::<Events<crate::layer2::logistics::launch::LaunchedEvent>>();
+    world.init_resource::<Events<crate::layer2::logistics::launch::LaunchRefusedEvent>>();
     world.init_resource::<crate::layer1::economy::deep_sleep_syndicates::ProductionModifier>();
     world
         .init_resource::<Events<crate::layer1::economy::deep_sleep_syndicates::ThawSyndicateEvent>>(
@@ -1465,6 +1484,9 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
     schedule.add_systems((
         // Cleanup Layer 2 events
         update_event_buffer::<LaunchEvent>,
+        update_event_buffer::<crate::layer2::logistics::launch::LaunchCommand>,
+        update_event_buffer::<crate::layer2::logistics::launch::LaunchedEvent>,
+        update_event_buffer::<crate::layer2::logistics::launch::LaunchRefusedEvent>,
         update_event_buffer::<ShipDestroyedEvent>,
         update_event_buffer::<crate::layer2::orbital_necropolis::EntityDestroyedEvent>,
         update_event_buffer::<crate::layer2::dead_protocols::ViolationEvent>,

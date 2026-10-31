@@ -519,6 +519,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "schism" => handle_schism_command(world, &parts),
         "seeds" => print_seeds(world),
         "comms" => print_comms(world),
+        "window" | "windows" => print_launch_windows(world, &parts),
+        "launch_fleet" => handle_launch_fleet_command(world, &parts),
         "relay" => handle_relay_command(world, &parts),
         "contact" => handle_contact_command(world, &parts),
         "plant" | "sow" => handle_plant_command(world, &parts),
@@ -3211,6 +3213,8 @@ fn print_stats(world: &mut World) {
         .is_some_and(|s| s.native_adopted);
     // Spec 378: signal-noise census for STATS (full panel: `comms`).
     let signal_label = scale::layer2::comms::comms_stats_label(world);
+    // Spec 379: launch-window census for STATS (full panel: `window`).
+    let window_label = scale::layer2::logistics::launch::launch_stats_label(world);
     let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
@@ -3440,7 +3444,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={}",
         tick,
         scenario,
         pops,
@@ -3580,6 +3584,7 @@ fn print_stats(world: &mut World) {
         seeds_total,
         seeds_native,
         signal_label,
+        window_label,
     );
 }
 
@@ -7009,6 +7014,16 @@ fn print_help() {
                     "Designate a building as a museum (Spec 1376)",
                 ),
                 ("launch_sat", "", "Launch a slogan satellite (Propaganda Constellation)"),
+                (
+                    "window [a] [b]",
+                    "",
+                    "Launch Window Predictor: bodies, pair price, upcoming low-fuel windows (Spec 379)",
+                ),
+                (
+                    "launch_fleet [idx]",
+                    "",
+                    "Order a fuel-gated fleet launch to the body at list index (Spec 379)",
+                ),
                 ("constellation", "", "Show Propaganda Constellation status"),
                 ("godmind", "", "Debug: upload a dying leader as the Eternal Ruler (Spec 1381)"),
                 ("unplug", "", "Debug: unplug the Eternal Ruler (risks schism)"),
@@ -8536,6 +8551,185 @@ fn print_comms(world: &mut World) {
             total.saturating_sub(clear)
         ),
         Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 379: Launch Window Predictor. `window` lists the orbiting
+/// bodies (index, name, angle, radius, angular speed) and prices the
+/// default pair; `window <a> <b>` prices the pair at list indices a/b
+/// and shows the next three low-fuel window openings.
+fn print_launch_windows(world: &mut World, parts: &[&str]) {
+    use scale::layer2::logistics::launch::{
+        angular_separation, orbiting_bodies, upcoming_windows, LaunchCostCalculator, LaunchLedger,
+    };
+    world.init_resource::<LaunchLedger>();
+    let bodies = orbiting_bodies(world);
+    if bodies.len() < 2 {
+        print_dashboard_panel(
+            "LAUNCH WINDOWS",
+            "Fewer than two orbiting bodies in this system — no transfer can be priced.\n\nWindows open when two bodies align within 45 degrees: baseline 100 fuel in window, 1000 out of it. Watch STATS window=.",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let pick = |slot: usize, default: usize| -> usize {
+        parts
+            .get(slot)
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n < bodies.len())
+            .unwrap_or(default)
+    };
+    let a_idx = pick(1, 0);
+    let b_idx = pick(2, if a_idx == 0 { 1 } else { 0 });
+    let (a, b) = (&bodies[a_idx], &bodies[b_idx]);
+
+    let mut lines: Vec<String> = bodies
+        .iter()
+        .enumerate()
+        .map(|(i, (_, name, orbit))| {
+            format!(
+                "  [{i}] {name}: angle {:.0} deg, radius {:.0}, speed {:.3} rad/tick",
+                orbit.angle.to_degrees(),
+                orbit.radius,
+                orbit.speed
+            )
+        })
+        .collect();
+    let cost = LaunchCostCalculator::calculate_from_orbits(&a.2, &b.2);
+    let separation = angular_separation(&a.2, &b.2).to_degrees();
+    let windows = upcoming_windows(&a.2, &b.2, 3);
+    let windows_text = if windows.is_empty() {
+        "none foreseeable".to_string()
+    } else if windows[0] == 0 {
+        format!(
+            "OPEN NOW (further openings: {})",
+            windows[1..]
+                .iter()
+                .map(|t| format!("+{t}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    } else {
+        windows
+            .iter()
+            .map(|t| format!("+{t} ticks"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let fuel = world
+        .get_resource::<scale::layer1::economy::resources::ColonyResources>()
+        .map_or(0.0, |r| r.fuel);
+    let ledger = world.resource::<LaunchLedger>();
+    lines.push(String::new());
+    lines.push(format!(
+        "Pair [{}] {} -> [{}] {}: separation {:.0} deg — {}",
+        a_idx,
+        a.1,
+        b_idx,
+        b.1,
+        separation,
+        match cost {
+            scale::layer2::logistics::launch::LaunchCost::InWindow(f) => {
+                format!("IN WINDOW, {f} fuel")
+            }
+            scale::layer2::logistics::launch::LaunchCost::OutOfWindow(f) => {
+                format!("out of window, {f} fuel (10x)")
+            }
+        }
+    ));
+    lines.push(format!("Upcoming low-fuel windows: {windows_text}"));
+    lines.push(format!(
+        "Colony fuel: {fuel:.0}. Launches so far: {} (refused {}), fuel burned {:.0}.",
+        ledger.launches, ledger.refused, ledger.fuel_spent
+    ));
+    lines.push(String::new());
+    lines.push(
+        "Launch with `launch_fleet <body-index>` — the gate refuses when the pool cannot pay. Watch STATS window=."
+            .to_string(),
+    );
+    print_dashboard_panel(
+        "LAUNCH WINDOWS",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 379 debug: order a fleet launch through the fuel gate.
+/// `launch_fleet [dest-index]` sends a `LaunchCommand` for the first
+/// fleet in orbit (spawning a demo fleet at the first body when the
+/// system has none); the next `tick` prices it, burns the fuel and
+/// departs — or refuses and leaves the fleet in orbit.
+fn handle_launch_fleet_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::fleet::{Fleet, InOrbit};
+    use scale::layer2::logistics::launch::{
+        orbiting_bodies, LaunchCommand, LaunchCostCalculator, LaunchedEvent, LaunchLedger,
+        LaunchRefusedEvent,
+    };
+    world.init_resource::<LaunchLedger>();
+    world.init_resource::<bevy_ecs::event::Events<LaunchCommand>>();
+    world.init_resource::<bevy_ecs::event::Events<LaunchedEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<LaunchRefusedEvent>>();
+    let bodies = orbiting_bodies(world);
+    if bodies.len() < 2 {
+        print_dashboard_panel(
+            "LAUNCH WINDOWS",
+            "Fewer than two orbiting bodies — nowhere to launch to.",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let found = {
+        let mut query = world.query_filtered::<(Entity, &InOrbit), With<Fleet>>();
+        query.iter(world).next().map(|(e, orbit)| (e, orbit.parent))
+    };
+    let (fleet, origin) = match found {
+        Some(pair) => pair,
+        None => {
+            let home = bodies[0].0;
+            let fleet = world.spawn((Fleet, InOrbit { parent: home })).id();
+            (fleet, home)
+        }
+    };
+    let origin_idx = bodies
+        .iter()
+        .position(|(entity, _, _)| *entity == origin)
+        .unwrap_or(0);
+    let dest_idx = parts
+        .get(1)
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n < bodies.len() && n != origin_idx)
+        .unwrap_or(if origin_idx == 0 { 1 } else { 0 });
+    let destination = bodies[dest_idx].0;
+    let cost =
+        LaunchCostCalculator::calculate_from_orbits(&bodies[origin_idx].2, &bodies[dest_idx].2);
+    let fuel = world
+        .get_resource::<scale::layer1::economy::resources::ColonyResources>()
+        .map_or(0.0, |r| r.fuel);
+    world
+        .resource_mut::<bevy_ecs::event::Events<LaunchCommand>>()
+        .send(LaunchCommand {
+            fleet,
+            destination,
+        });
+    print_dashboard_panel(
+        "LAUNCH WINDOWS",
+        &format!(
+            "Launch ordered: fleet {} from {} to {}.\nPrice: {} fuel ({}); colony pool holds {fuel:.0}.\nRun `tick` — the gate burns the fuel and departs, or refuses and the fleet stays in orbit. Watch STATS window=.",
+            fleet.index(),
+            bodies[origin_idx].1,
+            bodies[dest_idx].1,
+            cost.fuel(),
+            if cost.is_in_window() {
+                "in window"
+            } else {
+                "out of window, 10x"
+            },
+        ),
+        Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
     );
 }
