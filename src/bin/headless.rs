@@ -519,6 +519,10 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "schism" => handle_schism_command(world, &parts),
         "seeds" => print_seeds(world),
         "roomzone" => handle_roomzone_command(world, &parts),
+        "tradepad" => handle_tradepad_command(world, &parts),
+        "merchant" | "merchants" => print_merchants(world),
+        "land_merchant" => handle_land_merchant_command(world),
+        "trade" => handle_trade_command(world, &parts),
         "roomzones" => print_roomzones(world),
         "assignroom" => handle_assignroom_command(world, &parts),
         "comms" => print_comms(world),
@@ -3223,6 +3227,9 @@ fn print_stats(world: &mut World) {
     let filter_label = scale::layer3::events::great_filter::filter_stats_label(world);
     // Spec 381: room-zone census for STATS (full panel: `roomzones`).
     let room_census = scale::layer1::architecture::room_zones::room_zone_census(world);
+    // Spec 382: merchant landing census for STATS (full panel: `merchant`).
+    let merchant_census = scale::layer2::trade::merchant_landings::merchant_census(world);
+    let merchant_label = scale::layer2::trade::merchant_landings::merchant_stats_label(world);
     let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
@@ -3452,7 +3459,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={}",
         tick,
         scenario,
         pops,
@@ -3597,6 +3604,9 @@ fn print_stats(world: &mut World) {
         room_census.rooms,
         room_census.avg_value,
         room_census.barracks,
+        merchant_label,
+        merchant_census.pads,
+        merchant_census.trades,
     );
 }
 
@@ -12888,4 +12898,166 @@ fn handle_assignroom_command(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Spec 382 Merchant Landings: pad placement, landing, trading (panel: `merchant`).
+// ---------------------------------------------------------------------------
+
+fn handle_tradepad_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::trade::merchant_landings::trade_pad_count;
+    world.init_resource::<scale::layer2::trade::merchant_landings::MerchantLandingState>();
+    {
+        let mut resources = world.resource_mut::<ColonyResources>();
+        resources.metal = resources.metal.max(200.0);
+        resources.stone = resources.stone.max(200.0);
+    }
+    let placed = match (parts.get(1), parts.get(2)) {
+        (Some(xs), Some(ys)) => match (xs.parse::<i32>(), ys.parse::<i32>()) {
+            (Ok(x), Ok(y)) => usize::from(try_place_building(world, x, y, BuildingType::TradePad)),
+            _ => 0,
+        },
+        _ => {
+            let mut n = 0;
+            'scan: for y in 18..=30 {
+                for x in 28..=52 {
+                    if try_place_building(world, x, y, BuildingType::TradePad) {
+                        n = 1;
+                        break 'scan;
+                    }
+                }
+            }
+            n
+        }
+    };
+    let total = trade_pad_count(world);
+    print_dashboard_panel(
+        "TRADE PAD",
+        &format!(
+            "Placed {placed} trade pad(s); {total} active pad(s) standing.\nMerchant ships can now land — run `tick`, force one with `land_merchant`, inspect with `merchant`, and barter with `trade <amount>`. Watch STATS merchant= / tradepads=."
+        ),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_land_merchant_command(world: &mut World) {
+    use scale::layer2::trade::merchant_landings::{
+        merchant_ship_count, spawn_merchant_ship_system, trade_pad_count, MerchantLandingState,
+    };
+    world.init_resource::<MerchantLandingState>();
+    world.init_resource::<bevy_ecs::event::Events<scale::layer2::trade::merchant_landings::TradeEvent>>();
+    if trade_pad_count(world) == 0 {
+        print_dashboard_panel(
+            "MERCHANT LANDING",
+            "No active trade pad — a merchant has nowhere to land.\nBuild one with `tradepad` first.",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    world.resource_mut::<MerchantLandingState>().next_arrival_tick = 0;
+    spawn_merchant_ship_system(world);
+    let ships = merchant_ship_count(world);
+    print_dashboard_panel(
+        "MERCHANT LANDING",
+        &format!(
+            "{ships} merchant ship(s) down on the pad.\nRun `merchant` for the offer on the table, `trade <amount>` to buy at the posted rate (it drifts every 50 ticks)."
+        ),
+        Some(comfy_table::Color::Green),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn print_merchants(world: &mut World) {
+    use scale::layer2::trade::merchant_landings::{
+        merchant_census, resource_label, MerchantShip,
+    };
+    let census = merchant_census(world);
+    let mut rows: Vec<String> = Vec::new();
+    {
+        let mut q = world.query::<&MerchantShip>();
+        for ship in q.iter(world) {
+            rows.push(format!(
+                "{} — takes {}, gives {} at {:.2} to 1, {:.0} in stock, departs tick {}",
+                ship.name,
+                resource_label(ship.buying),
+                resource_label(ship.selling),
+                ship.exchange_rate,
+                ship.inventory,
+                ship.departure_tick
+            ));
+        }
+    }
+    if rows.is_empty() {
+        print_dashboard_panel(
+            "MERCHANT LANDINGS",
+            &format!(
+                "{} pad(s) standing, no ship down. {} visit(s) so far, {} trade(s) completed.\n\nBuild a pad with `tradepad`, force a landing with `land_merchant` (or wait for `tick`), then `trade <amount>`."
+                , census.pads, census.visits, census.trades
+            ),
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        print_dashboard_panel(
+            "MERCHANT LANDINGS",
+            &format!(
+                "{} ship(s) down, {} trade(s) completed across {} visit(s).\n\n{}\n\n`trade <amount>` buys that many units of the ship's goods at the posted rate — the rate drifts every 50 ticks, and the ship lifts off at its departure tick."
+                , census.ships, census.trades, census.visits, rows.join("\n")
+            ),
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+}
+
+fn handle_trade_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::trade::merchant_landings::{
+        execute_merchant_trade, resource_label, MerchantLandingState, MerchantShip,
+    };
+    world.init_resource::<MerchantLandingState>();
+    let Some(amount) = parts.get(1).and_then(|s| s.parse::<f32>().ok()) else {
+        println!("Usage: trade <amount>  (buys that many units from the landed merchant — see `merchant`)");
+        return;
+    };
+    let ship_entity = {
+        let mut q = world.query::<(Entity, &MerchantShip)>();
+        q.iter(world).next().map(|(e, _)| e)
+    };
+    let Some(ship_entity) = ship_entity else {
+        println!("No merchant ship is down. Build a `tradepad` and `land_merchant` (or `tick`) first.");
+        return;
+    };
+    let (name, buying, selling, rate) = {
+        let ship = world.get::<MerchantShip>(ship_entity).unwrap();
+        (ship.name.clone(), ship.buying, ship.selling, ship.exchange_rate)
+    };
+    let before = world.resource::<MerchantLandingState>().trades_completed;
+    let ok = execute_merchant_trade(world, ship_entity, amount);
+    let after = world.resource::<MerchantLandingState>().trades_completed;
+    if ok && after > before {
+        let res = world.resource::<ColonyResources>();
+        print_dashboard_panel(
+            "TRADE COMPLETE",
+            &format!(
+                "Bought {amount:.1} {} from the {name} at {rate:.2} {} per unit.\nColony now holds {:.1} {} and {:.1} {}.",
+                resource_label(selling),
+                resource_label(buying),
+                res.get_amount(selling),
+                resource_label(selling),
+                res.get_amount(buying),
+                resource_label(buying),
+            ),
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        println!(
+            "Trade refused: the colony cannot pay {:.1} {} for {amount:.1} {}, or the ship is out of stock. See `merchant`.",
+            amount * rate,
+            resource_label(buying),
+            resource_label(selling),
+        );
+    }
 }

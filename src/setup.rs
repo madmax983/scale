@@ -353,6 +353,10 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<crate::layer1::architecture::room_zones::RoomEvaluatedEvent>>();
     world.init_resource::<crate::layer1::architecture::room_zones::RoomZoneState>();
     world.init_resource::<crate::layer1::architecture::room_zones::RoomChronicleState>();
+    // Spec 382 Merchant Landings: ledger + trade bus must exist from
+    // setup — headless `tradepad`/`merchant`/`trade` run pre-tick.
+    world.init_resource::<crate::layer2::trade::merchant_landings::MerchantLandingState>();
+    world.init_resource::<Events<crate::layer2::trade::merchant_landings::TradeEvent>>();
     // Spec 341 Pop Memory: witness events, episode state, colony identity.
     world.init_resource::<Events<crate::layer1::memory::WitnessEvent>>();
     world.init_resource::<crate::layer1::memory::PopMemoryState>();

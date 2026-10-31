@@ -8,6 +8,7 @@ pub mod feral_logistics;
 pub use biomass_tariff::*;
 pub mod blockade;
 pub mod escape_velocity;
+pub mod merchant_landings;
 pub mod penal_contracts;
 pub mod phantom_limb_logistics;
 pub mod phantom_trade_routes;

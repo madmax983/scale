@@ -83,6 +83,19 @@ pub fn build_simulation_schedule() -> Schedule {
         crate::layer2::logistics::launch::transfer_completion_system
             .after(crate::layer2::fleet::fleet_movement_system),
     );
+    // Spec 382 Merchant Landings: land -> fluctuate -> trade -> depart.
+    schedule.add_systems(
+        (
+            crate::layer2::trade::merchant_landings::spawn_merchant_ship_system,
+            crate::layer2::trade::merchant_landings::fluctuate_merchant_prices_system,
+            crate::layer2::trade::merchant_landings::process_trade_system,
+            crate::layer2::trade::merchant_landings::merchant_departure_system,
+        )
+            .chain(),
+    );
+    schedule.add_systems((update_event_buffer::<
+        crate::layer2::trade::merchant_landings::TradeEvent,
+    >,));
     schedule.add_systems((
         crate::layer1::social::bureau_of_regrets::check_penitent_faction_formation_system,
         crate::layer1::core::integration::starvation_atrocity_bridge,
@@ -803,6 +816,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer2::logistics::launch::LaunchCommand>>();
     world.init_resource::<Events<crate::layer2::logistics::launch::LaunchedEvent>>();
     world.init_resource::<Events<crate::layer2::logistics::launch::LaunchRefusedEvent>>();
+    // Spec 382 Merchant Landings: landing ledger + trade event bus
+    // (first-tick pattern — systems read/write these on tick one).
+    world.init_resource::<crate::layer2::trade::merchant_landings::MerchantLandingState>();
+    world.init_resource::<Events<crate::layer2::trade::merchant_landings::TradeEvent>>();
     // Spec 380 The Great Filter: ledger + event buses (first-tick Events pattern).
     world.init_resource::<crate::layer3::events::great_filter::GreatFilterLedger>();
     world.init_resource::<Events<crate::layer3::tech::TechAdvanceEvent>>();

@@ -844,6 +844,7 @@ pub const fn get_building_char(building: BuildingType) -> &'static str {
         BuildingType::HarpoonLauncher => "\u{2693}",
         BuildingType::CultShrine => "♱",
         BuildingType::CoreDrill => "\u{2299}",
+        BuildingType::TradePad => "\u{00A4}",
     }
 }
 
@@ -931,6 +932,7 @@ pub const fn get_building_color(building: BuildingType, material: MaterialType) 
             BuildingType::HarpoonLauncher => Color::Rgb(255, 180, 120),
             BuildingType::CultShrine => Color::Rgb(255, 215, 0),
             BuildingType::CoreDrill => Color::Rgb(255, 100, 0),
+            BuildingType::TradePad => Color::Rgb(255, 200, 100),
         }
     }
 }

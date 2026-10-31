@@ -369,6 +369,8 @@ pub enum BuildingType {
     CultShrine,
     /// Mantle-tapping geothermal drill (Spec 375: Planetary Core Tapping).
     CoreDrill,
+    /// Landing pad for merchant ships (Spec 382: Merchant Landings).
+    TradePad,
 }
 
 impl BuildingType {
@@ -476,6 +478,7 @@ impl BuildingType {
                 | Self::FlowerBed
                 | Self::Grave
                 | Self::TradeDepot
+                | Self::TradePad
                 | Self::Landfill
                 | Self::PersonalGarden
                 | Self::Airlock // Vent is explicitly an obstacle for standard movement (blocks Pops),
@@ -559,7 +562,7 @@ impl BuildingType {
             Self::Nanoforge => false,
             Self::School | Self::MediaStation => false,
             Self::Mainframe | Self::CommsRelay => false,
-            Self::Billboard | Self::BiomassExtractor => false,
+            Self::Billboard | Self::BiomassExtractor | Self::TradePad => false,
         }
     }
 
@@ -730,6 +733,7 @@ impl BuildingType {
             Self::HarpoonLauncher => "Harpoon Launcher",
             Self::CultShrine => "Cult Shrine",
             Self::CoreDrill => "Core Drill",
+            Self::TradePad => "Trade Pad",
         }
     }
 
@@ -799,6 +803,7 @@ impl BuildingType {
             Self::HarpoonLauncher => '⚓',
             Self::CultShrine => '♱',
             Self::CoreDrill => '⊙',
+            Self::TradePad => '¤',
         }
     }
 
@@ -1180,6 +1185,11 @@ impl BuildingType {
                 stone: 50.0,
                 ..ColonyResources::zeroed()
             },
+            Self::TradePad => ColonyResources {
+                metal: 30.0,
+                stone: 20.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1441,7 +1451,8 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
         | BuildingType::Vent
         | BuildingType::TetherArray
         | BuildingType::HarpoonLauncher
-        | BuildingType::CultShrine => configure_infrastructure(entity, building_type),
+        | BuildingType::CultShrine
+        | BuildingType::TradePad => configure_infrastructure(entity, building_type),
         BuildingType::Generator
         | BuildingType::SolarPanel
         | BuildingType::PowerPole
@@ -2075,6 +2086,18 @@ fn configure_infrastructure(entity: &mut EntityWorldMut, building_type: Building
                     radius: 3.0,
                     intensity: 0.5,
                     color: (120, 180, 255), // Tether beacon blue
+                },
+            ));
+        }
+        BuildingType::TradePad => {
+            // Spec 382: the marker component powers merchant landings.
+            entity.insert((
+                crate::layer2::trade::merchant_landings::TradePad { active: true },
+                LightSource {
+                    is_outdoor: true,
+                    radius: 3.0,
+                    intensity: 0.5,
+                    color: (255, 200, 100), // Landing-pad amber
                 },
             ));
         }
@@ -2830,7 +2853,8 @@ mod tests {
             BuildingType::CultShrine.next(),
             BuildingType::CoreDrill
         );
-        assert_eq!(BuildingType::CoreDrill.next(), BuildingType::Housing);
+        assert_eq!(BuildingType::CoreDrill.next(), BuildingType::TradePad);
+        assert_eq!(BuildingType::TradePad.next(), BuildingType::Housing);
     }
 
     #[test]
@@ -3088,6 +3112,8 @@ mod tests {
         assert_eq!(mode.selected, BuildingType::CultShrine);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::CoreDrill);
+        mode.selected = mode.selected.next();
+        assert_eq!(mode.selected, BuildingType::TradePad);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Housing);
     }
