@@ -26,6 +26,7 @@ pub mod ftl;
 pub mod memorial_fleet;
 pub mod planet;
 pub mod planetary_scarring;
+pub mod terraforming_backlash;
 pub use memorial_fleet::*;
 pub mod barnacles;
 pub mod binary_star;

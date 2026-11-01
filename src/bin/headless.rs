@@ -530,6 +530,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "comms" => print_comms(world),
         "window" | "windows" => print_launch_windows(world, &parts),
         "synch" => print_synch(world),
+        "backlash" => handle_backlash_command(world, &parts),
         "synchwin" => handle_synchwin_command(world, &parts),
         "synchbuild" => handle_synchbuild_command(world, &parts),
         "filter" => handle_filter_command(world, &parts),
@@ -3230,6 +3231,8 @@ fn print_stats(world: &mut World) {
     let window_label = scale::layer2::logistics::launch::launch_stats_label(world);
     // Spec 384: orbital-synch census for STATS (full panel: `synch`).
     let synch_label = scale::layer2::logistics::orbital_synch::synch_stats_label(world);
+    // Spec 385: terraforming-backlash census for STATS (full panel: `backlash`).
+    let backlash_label = scale::layer2::terraforming_backlash::backlash_stats_label(world);
     // Spec 380: great-filter census for STATS (full panel: `filter`).
     let filter_label = scale::layer3::events::great_filter::filter_stats_label(world);
     // Spec 381: room-zone census for STATS (full panel: `roomzones`).
@@ -3469,7 +3472,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={}",
         tick,
         scenario,
         pops,
@@ -3620,6 +3623,7 @@ fn print_stats(world: &mut World) {
         marriages,
         allied,
         synch_label,
+        backlash_label,
     );
 }
 
@@ -8772,6 +8776,93 @@ fn print_synch(world: &mut World) {
         "ORBITAL SYNCH",
         &lines.join("\n"),
         Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 385: `backlash` panel - terraforming velocity, generalized
+/// stress, and the Planetary Defense ledger. `backlash trigger
+/// [temp_delta] [toxicity_delta]` forces a rapid change against the
+/// real PlanetaryAtmosphere and runs one check cycle immediately, so
+/// the backlash fires through the live systems on the spot.
+fn handle_backlash_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::environment::terraforming::PlanetaryAtmosphere;
+    use scale::layer2::terraforming_backlash::{
+        backlash_stats_label, BacklashLedger, BacklashTracker, CHECK_INTERVAL_TICKS,
+    };
+    world.init_resource::<BacklashLedger>();
+    world.init_resource::<BacklashTracker>();
+    world.init_resource::<bevy_ecs::event::Events<scale::layer2::terraforming_backlash::BacklashEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<scale::layer1::geology::GeologicalEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<scale::layer1::chronicle::AddChronicleEvent>>();
+
+    if parts.get(1).copied() == Some("trigger") {
+        let temp_delta: f32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(10.0);
+        let tox_delta: f32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+        let (base_temp, base_tox) = {
+            let atmo = world.resource::<PlanetaryAtmosphere>();
+            (atmo.temperature, atmo.toxicity)
+        };
+        // Park the clock exactly on the next check boundary (the tick
+        // runs the schedule before incrementing), prime
+        // the velocity snapshot at the current live values, then apply
+        // the violent change to the REAL atmosphere resource. One real
+        // simulation tick carries the clock onto the boundary, so the
+        // live schedule fires check + handler exactly once (an ad-hoc
+        // schedule here would re-read stale events and double-fire).
+        let tick_now = world.resource::<scale::shared::time::SimulationTime>().tick;
+        let boundary = ((tick_now / CHECK_INTERVAL_TICKS) + 1) * CHECK_INTERVAL_TICKS;
+        world.resource_mut::<scale::shared::time::SimulationTime>().tick = boundary;
+        world.insert_resource(BacklashTracker {
+            last_temperature: base_temp,
+            last_toxicity: base_tox,
+            last_check_tick: boundary - 1,
+            initialized: true,
+        });
+        {
+            let mut atmo = world.resource_mut::<PlanetaryAtmosphere>();
+            atmo.temperature = (atmo.temperature + temp_delta).clamp(-100.0, 100.0);
+            atmo.toxicity = (atmo.toxicity + tox_delta).clamp(0.0, 1.0);
+        }
+        run_ticks(world, 1);
+        let ledger = world.resource::<BacklashLedger>();
+        print_dashboard_panel(
+            "TERRAFORMING BACKLASH",
+            &format!(
+                "Forced a {:+.1} C / {:+.2} toxicity swing on the planetary atmosphere. Backlash total: {} (storms {}, quakes {}, fauna {}). Watch STATS backlash=.",
+                temp_delta, tox_delta, ledger.total, ledger.storms, ledger.quakes, ledger.fauna_awakenings
+            ),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+
+    let atmo = world.resource::<PlanetaryAtmosphere>();
+    let tracker = world.resource::<BacklashTracker>();
+    let ledger = world.resource::<BacklashLedger>();
+    let lines = [
+        format!(
+            "Planetary atmosphere: {:.1} C, toxicity {:.2} (live PlanetaryAtmosphere).",
+            atmo.temperature, atmo.toxicity
+        ),
+        format!(
+            "Velocity snapshot: {:.1} C / {:.2} toxicity at tick {} (checks every {} ticks).",
+            tracker.last_temperature, tracker.last_toxicity, tracker.last_check_tick,
+            CHECK_INTERVAL_TICKS
+        ),
+        format!(
+            "Backlash ledger: {} total - storms {}, quakes {}, fauna awakenings {}; last at tick {}, peak stress {:.1}x.",
+            ledger.total, ledger.storms, ledger.quakes, ledger.fauna_awakenings, ledger.last_tick,
+            ledger.peak_stress
+        ),
+        format!("STATS backlash={} (total/storms/quakes/fauna).", backlash_stats_label(world)),
+        "Rapid terraforming (over +5 C or 0.25 toxicity per check interval) wakes the planet's defenses. Slow work is safe. Debug: `backlash trigger [temp_delta] [toxicity_delta]`.".to_string(),
+    ];
+    print_dashboard_panel(
+        "TERRAFORMING BACKLASH",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Red),
         Some(comfy_table::Attribute::Bold),
     );
 }

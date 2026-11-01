@@ -97,6 +97,19 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems((update_event_buffer::<
         crate::layer2::logistics::orbital_synch::SynchChangedEvent,
     >,));
+    // Spec 385 Terraforming Backlash: throttled velocity check over
+    // the real PlanetaryAtmosphere, then dispatch through the real
+    // weather / geology / fauna hazard systems.
+    schedule.add_systems(
+        (
+            crate::layer2::terraforming_backlash::check_terraforming_backlash_system,
+            crate::layer2::terraforming_backlash::handle_backlash_system,
+        )
+            .chain(),
+    );
+    schedule.add_systems((update_event_buffer::<
+        crate::layer2::terraforming_backlash::BacklashEvent,
+    >,));
     // Spec 382 Merchant Landings: land -> fluctuate -> trade -> depart.
     schedule.add_systems(
         (
@@ -844,6 +857,11 @@ fn init_simulation_resources(world: &mut World) {
     // Events pattern — the synch system writes these on tick one).
     world.init_resource::<crate::layer2::logistics::orbital_synch::SynchLedger>();
     world.init_resource::<Events<crate::layer2::logistics::orbital_synch::SynchChangedEvent>>();
+    // Spec 385 Terraforming Backlash: tracker + ledger + event bus
+    // (first-tick pattern — the check system reads these on tick one).
+    world.init_resource::<crate::layer2::terraforming_backlash::BacklashTracker>();
+    world.init_resource::<crate::layer2::terraforming_backlash::BacklashLedger>();
+    world.init_resource::<Events<crate::layer2::terraforming_backlash::BacklashEvent>>();
     // Spec 382 Merchant Landings: landing ledger + trade event bus
     // (first-tick pattern — systems read/write these on tick one).
     world.init_resource::<crate::layer2::trade::merchant_landings::MerchantLandingState>();
