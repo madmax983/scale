@@ -163,6 +163,16 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Consumption),
     );
 
+    // Spec 386 Social Mimicry: per-pop consumable preferences spread from
+    // high-status pops to nearby lower-status pops. Separate add_systems
+    // call (the trend tuple above is a sibling block; arity discipline as
+    // with Spec 276).
+    schedule.add_systems(
+        (crate::layer1::social::social_mimicry::preference_mimicry_system
+            .after(consume_food_system),)
+            .in_set(Layer1SystemSet::Consumption),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::law::justice::update_inmates_system.after(decay_needs_system),

@@ -531,6 +531,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "window" | "windows" => print_launch_windows(world, &parts),
         "synch" => print_synch(world),
         "backlash" => handle_backlash_command(world, &parts),
+        "mimicry" => handle_mimicry_command(world, &parts),
+        "prefs" => print_prefs(world),
         "synchwin" => handle_synchwin_command(world, &parts),
         "synchbuild" => handle_synchbuild_command(world, &parts),
         "filter" => handle_filter_command(world, &parts),
@@ -3233,6 +3235,8 @@ fn print_stats(world: &mut World) {
     let synch_label = scale::layer2::logistics::orbital_synch::synch_stats_label(world);
     // Spec 385: terraforming-backlash census for STATS (full panel: `backlash`).
     let backlash_label = scale::layer2::terraforming_backlash::backlash_stats_label(world);
+    // Spec 386: social-mimicry census for STATS (full panel: `prefs`).
+    let mimicry_label = scale::layer1::social::social_mimicry::mimicry_stats_label(world);
     // Spec 380: great-filter census for STATS (full panel: `filter`).
     let filter_label = scale::layer3::events::great_filter::filter_stats_label(world);
     // Spec 381: room-zone census for STATS (full panel: `roomzones`).
@@ -3472,7 +3476,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={}",
         tick,
         scenario,
         pops,
@@ -3624,6 +3628,7 @@ fn print_stats(world: &mut World) {
         allied,
         synch_label,
         backlash_label,
+        mimicry_label,
     );
 }
 
@@ -8777,6 +8782,95 @@ fn print_synch(world: &mut World) {
         &lines.join("\n"),
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 386: `prefs` panel — every pop's consumable tastes and status.
+/// `mimicry` shows the change ledger; `mimicry seed` stages a
+/// deterministic trend (first pop becomes a prestige-10 trendsetter with
+/// a taste for luxury meals, everyone else starts on potatoes, and the
+/// mimicry probability is pinned to 1.0) so a few `tick`s demonstrate
+/// preference spread through the live schedule.
+fn print_prefs(world: &mut World) {
+    use scale::layer1::social::social_mimicry::Preferences;
+    use scale::layer1::social_stratification::Prestige;
+    let mut query = world.query::<(Entity, &PopName, &Preferences, Option<&Prestige>)>();
+    let mut lines = Vec::new();
+    for (entity, name, prefs, prestige) in query.iter(world) {
+        lines.push(format!(
+            "{} ({:?}): status={} food={:?} drink={:?}",
+            name.0,
+            entity,
+            prestige.map_or(1, |p| p.value),
+            prefs.favorite_food,
+            prefs.favorite_drink
+        ));
+    }
+    if lines.is_empty() {
+        lines.push("No pops with preferences.".to_string());
+    }
+    print_dashboard_panel(
+        "PREFERENCES",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_mimicry_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::items::ItemType;
+    use scale::layer1::social::social_mimicry::{
+        MimicryConfig, MimicryCooldown, MimicryStats, Preferences,
+    };
+    use scale::layer1::social_stratification::Prestige;
+    world.init_resource::<MimicryStats>();
+    world.init_resource::<MimicryConfig>();
+    if parts.get(1).copied() == Some("seed") {
+        // Deterministic staging for playtests (debug command only).
+        world.insert_resource(MimicryConfig {
+            probability: 1.0,
+            ..MimicryConfig::default()
+        });
+        let entities: Vec<Entity> = {
+            let mut query = world.query_filtered::<Entity, With<Pop>>();
+            query.iter(world).collect()
+        };
+        for (idx, entity) in entities.iter().enumerate() {
+            if idx == 0 {
+                world.entity_mut(*entity).insert((
+                    Prestige { value: 10 },
+                    Preferences {
+                        favorite_food: Some(ItemType::LuxuryMeal),
+                        favorite_drink: None,
+                    },
+                ));
+            } else {
+                if world.get::<Prestige>(*entity).is_none() {
+                    world.entity_mut(*entity).insert(Prestige { value: 1 });
+                }
+                if let Some(mut prefs) = world.get_mut::<Preferences>(*entity) {
+                    prefs.favorite_food = Some(ItemType::Potato);
+                } else {
+                    world.entity_mut(*entity).insert(Preferences {
+                        favorite_food: Some(ItemType::Potato),
+                        favorite_drink: None,
+                    });
+                }
+            }
+            if let Some(mut cd) = world.get_mut::<MimicryCooldown>(*entity) {
+                cd.remaining = 0;
+            }
+        }
+        println!(
+            "MIMICRY SEEDED: first pop is a prestige-10 trendsetter (LuxuryMeal); {} other pops start on Potato, probability=1.0. Run `tick` then `prefs`.",
+            entities.len().saturating_sub(1)
+        );
+        return;
+    }
+    let stats = world.resource::<MimicryStats>();
+    println!(
+        "MIMICRY changes={} last_item={:?}",
+        stats.changes, stats.last_item
     );
 }
 

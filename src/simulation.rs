@@ -562,6 +562,12 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 1373 Recalled Product: manufacturer recalls, failure chance, returns.
     world.init_resource::<crate::layer1::economy::recall::RecallManager>();
     world.init_resource::<crate::layer1::economy::recall::RecallConfig>();
+    // Spec 386 Social Mimicry: tuning, change ledger, and the
+    // preference-change event stream (first-tick pattern — the mimicry
+    // system reads/writes these from tick one).
+    world.init_resource::<crate::layer1::social::social_mimicry::MimicryConfig>();
+    world.init_resource::<crate::layer1::social::social_mimicry::MimicryStats>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::social_mimicry::PreferenceChangedEvent>>();
     // Spec 1375 Ship of Fools: its arrival-event resource was never initialized;
     // without this the first tick panics on a fresh world (pre-existing bug).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::ship_of_fools::ShipOfFoolsArrivalEvent>>();

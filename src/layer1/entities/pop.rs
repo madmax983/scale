@@ -34,7 +34,8 @@ use crate::layer1::funeral::Corpse;
 use crate::layer1::gut_biome::GutBiome;
 use crate::layer1::health::{Dead, Health};
 use crate::layer1::hygiene::Filth;
-use crate::layer1::items::Equipment;
+use crate::layer1::items::{Equipment, ItemType};
+use crate::layer1::social::social_mimicry::Preferences;
 use crate::layer1::language::{Dialect, Linguistics};
 use crate::layer1::lifecycle::Age;
 use crate::layer1::map::{GridPosition, ScreenShake};
@@ -350,6 +351,10 @@ pub struct PopBundle {
     pub admin_consumer: AdminConsumer,
     /// Food variety history.
     pub dietary_history: DietaryHistory,
+    /// Consumable tastes (Spec 386). Bundled for the same total-coverage
+    /// reason as the dissatisfaction ledger: every pop-spawn site goes
+    /// through this bundle, so social mimicry always has material.
+    pub preferences: Preferences,
     /// Personal currency.
     pub wallet: Wallet,
     /// Structural dissatisfaction ledger (Spec 1387). Every pop-spawn
@@ -421,6 +426,15 @@ impl PopBundle {
             wild_exposure: WildExposure::default(),
             admin_consumer: AdminConsumer { demand: 1.0 },
             dietary_history: DietaryHistory::default(),
+            preferences: Preferences {
+                favorite_food: Some(match rng.gen_range(0..4) {
+                    0 => ItemType::Potato,
+                    1 => ItemType::Wheat,
+                    2 => ItemType::Rice,
+                    _ => ItemType::Corn,
+                }),
+                favorite_drink: None,
+            },
             wallet: Wallet { credits: 50.0 },
             dissatisfaction: crate::layer1::social::dissatisfaction::Dissatisfaction::default(),
             night_shift: crate::layer1::social::shift_work::NightShiftAdaptation::default(),
