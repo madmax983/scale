@@ -492,6 +492,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "travelers" => print_travelers(world),
         "shipout" => handle_shipout_command(world),
         "martyr" => handle_martyr_command(world, &parts),
+        "marry" => handle_marry_command(world, &parts),
+        "marriages" => print_marriages(world),
         "nostalgia" => handle_nostalgia_command(world, &parts),
         "spite" => handle_spite_command(world, &parts),
         "insurance" => handle_insurance_command(world, &parts),
@@ -3230,6 +3232,9 @@ fn print_stats(world: &mut World) {
     // Spec 382: merchant landing census for STATS (full panel: `merchant`).
     let merchant_census = scale::layer2::trade::merchant_landings::merchant_census(world);
     let merchant_label = scale::layer2::trade::merchant_landings::merchant_stats_label(world);
+    // Spec 383: diplomatic-marriage census for STATS (full panel: `marriages`).
+    let marriages = scale::layer3::diplomacy::diplomatic_marriage::marriage_count(world);
+    let allied = scale::layer3::diplomacy::diplomatic_marriage::allied_faction_count(world);
     let void_label = scale::layer2::void_between::void_stats_label(world);
     let empathy = {
         use scale::layer1::social::empathy_broadcast::empathy_broadcast_status_label;
@@ -3459,7 +3464,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={}",
         tick,
         scenario,
         pops,
@@ -3607,6 +3612,8 @@ fn print_stats(world: &mut World) {
         merchant_label,
         merchant_census.pads,
         merchant_census.trades,
+        marriages,
+        allied,
     );
 }
 
@@ -6861,6 +6868,16 @@ fn print_help() {
                     "Debug: Homeworld courier delivers n noble scions (Spec 1208)",
                 ),
                 (
+                    "marry <pop_id|name> [faction_id]",
+                    "",
+                    "Marry off a high-skill / high-status pop to a faction — pop departs, faction allies (Spec 383)",
+                ),
+                (
+                    "marriages",
+                    "",
+                    "List diplomatic marriages and refusals (Spec 383)",
+                ),
+                (
                     "traveler [n] [stay]",
                     "",
                     "Debug: n Long-Haulers sign on for a tour of [stay] ticks (Spec 351)",
@@ -9340,6 +9357,151 @@ fn handle_vetting_command(world: &mut World, parts: &[&str]) {
         "CREW VETTING",
         &format!("Current vetting mode: {}", vetting_mode_label(world)),
         None,
+        None,
+    );
+}
+
+/// Marry off a pop to a foreign faction (Spec 383): `marry <pop_id|name>
+/// [faction_id]`. Eligible pops (best skill >= 8, or high-status) depart
+/// next tick and the faction becomes an ally; the rest are refused.
+fn handle_marry_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::skills::Skills;
+    use scale::layer3::diplomacy::diplomatic_marriage::{
+        is_high_status, is_marriageable, marriage_best_skill, marriage_faction_name,
+        MarryOffEvent, MarriageLedger, MARRIAGE_FACTION_ID,
+    };
+
+    let Some(target) = parts.get(1) else {
+        print_dashboard_panel(
+            "ERROR",
+            "Usage: marry <pop_id|name> [faction_id] — list candidates with `pops`.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let found: Option<(Entity, String)> = match target.parse::<u32>() {
+        Ok(id) => find_pop_by_id(world, id),
+        Err(_) => world
+            .query::<(Entity, &Pop, &PopName)>()
+            .iter(world)
+            .find(|(_, _, n)| n.0.eq_ignore_ascii_case(target))
+            .map(|(e, _, n)| (e, n.0.clone())),
+    };
+    let Some((entity, name)) = found else {
+        print_dashboard_panel(
+            "ERROR",
+            "No such pop. List candidates with `pops`.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let faction_id: u32 = parts
+        .get(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(MARRIAGE_FACTION_ID);
+
+    // Pre-validate so the player gets an immediate answer; the system
+    // re-checks on the tick and is the authority.
+    let skills = world.get::<Skills>(entity).cloned();
+    let high_status = is_high_status(
+        world
+            .get::<scale::layer1::leader_ascension::Leader>(entity)
+            .is_some(),
+        world
+            .get::<scale::layer1::leader_ascension::AscensionCandidate>(entity)
+            .is_some(),
+        world
+            .get::<scale::layer1::chain_of_command::Officer>(entity)
+            .is_some(),
+        world
+            .get::<scale::layer1::social::cadet::NobleScion>(entity)
+            .is_some(),
+        world.get::<scale::layer1::psychology::traits::Traits>(entity),
+    );
+    if !is_marriageable(skills.as_ref(), high_status) {
+        let best = skills
+            .as_ref()
+            .and_then(marriage_best_skill)
+            .map_or(0, |(_, l)| l);
+        print_dashboard_panel(
+            "MARRIAGE REFUSED",
+            &format!(
+                "{name} is refused by {}: best skill level {best}, and no high station. Only the skilled (level 8+) or the high-born make acceptable spouses.",
+                marriage_faction_name(faction_id)
+            ),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+
+    world.init_resource::<MarriageLedger>();
+    world.init_resource::<bevy_ecs::event::Events<MarryOffEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<MarryOffEvent>>()
+        .send(MarryOffEvent {
+            pop: entity,
+            target_faction: faction_id,
+        });
+    let id = entity.index();
+    print_dashboard_panel(
+        "DIPLOMATIC MARRIAGE",
+        &format!(
+            "{name} (id {id}) will wed into {} (faction {faction_id}) — the marriage is sealed next tick: the pop departs for good and the faction becomes an ally. Watch STATS marriages= / allied=."
+            , marriage_faction_name(faction_id)
+        ),
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 383: list diplomatic marriages sealed (and offers refused).
+fn print_marriages(world: &mut World) {
+    use scale::layer3::diplomacy::diplomatic_marriage::{
+        marriage_faction_name, MarriageLedger,
+    };
+    world.init_resource::<MarriageLedger>();
+    let ledger = world.resource::<MarriageLedger>();
+    if ledger.records.is_empty() {
+        print_dashboard_panel(
+            "DIPLOMATIC MARRIAGE",
+            &format!(
+                "No diplomatic marriages yet ({} offer(s) refused).\n\nMarry off a pop with `marry <pop_id|name> [faction_id]` — best skill level 8+ or high station required. The pop leaves forever; the faction becomes an ally. Watch STATS marriages= / allied=.",
+                ledger.refusals
+            ),
+            Some(comfy_table::Color::Magenta),
+            None,
+        );
+        return;
+    }
+    let mut lines = vec![format!(
+        "{} marriage(s) sealed, {} offer(s) refused.\n",
+        ledger.marriages, ledger.refusals
+    )];
+    for record in &ledger.records {
+        let basis = if record.by_status {
+            "high station".to_string()
+        } else {
+            match record.skill {
+                Some(skill) => format!("{skill:?} level {}", record.skill_level),
+                None => "no skill".to_string(),
+            }
+        };
+        lines.push(format!(
+            "- {} wed into {} (faction {}) at tick {} — sent for {}.",
+            record.pop_name,
+            marriage_faction_name(record.faction_id),
+            record.faction_id,
+            record.tick,
+            basis
+        ));
+    }
+    print_dashboard_panel(
+        "DIPLOMATIC MARRIAGE",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Magenta),
         None,
     );
 }

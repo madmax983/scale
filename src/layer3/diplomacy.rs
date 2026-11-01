@@ -98,3 +98,7 @@ pub mod trade_embargoes;
 
 pub mod bureaucratic_blackout;
 pub mod xenolinguistics;
+
+/// Diplomatic Marriage (Spec 383): marry off a high-status / high-skill
+/// pop to a foreign faction to seal an alliance.
+pub mod diplomatic_marriage;

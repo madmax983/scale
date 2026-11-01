@@ -96,6 +96,16 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems((update_event_buffer::<
         crate::layer2::trade::merchant_landings::TradeEvent,
     >,));
+    // Spec 383 Diplomatic Marriage: marry off a high-status / high-skill
+    // pop to a foreign faction — the pop departs, the faction allies.
+    schedule.add_systems(
+        crate::layer3::diplomacy::diplomatic_marriage::process_marriage_system,
+    );
+    schedule.add_systems((
+        update_event_buffer::<crate::layer3::diplomacy::diplomatic_marriage::MarryOffEvent>,
+        update_event_buffer::<crate::layer3::diplomacy::diplomatic_marriage::MarriedOffEvent>,
+        update_event_buffer::<crate::layer3::diplomacy::diplomatic_marriage::MarriageRefusedEvent>,
+    ));
     schedule.add_systems((
         crate::layer1::social::bureau_of_regrets::check_penitent_faction_formation_system,
         crate::layer1::core::integration::starvation_atrocity_bridge,
@@ -820,6 +830,13 @@ fn init_simulation_resources(world: &mut World) {
     // (first-tick pattern — systems read/write these on tick one).
     world.init_resource::<crate::layer2::trade::merchant_landings::MerchantLandingState>();
     world.init_resource::<Events<crate::layer2::trade::merchant_landings::TradeEvent>>();
+    // Spec 383 Diplomatic Marriage: ledger + event buses (first-tick
+    // pattern — the marriage system reads/writes these on tick one).
+    world.init_resource::<crate::layer3::diplomacy::system_sovereignty::FactionRelations>();
+    world.init_resource::<crate::layer3::diplomacy::diplomatic_marriage::MarriageLedger>();
+    world.init_resource::<Events<crate::layer3::diplomacy::diplomatic_marriage::MarryOffEvent>>();
+    world.init_resource::<Events<crate::layer3::diplomacy::diplomatic_marriage::MarriedOffEvent>>();
+    world.init_resource::<Events<crate::layer3::diplomacy::diplomatic_marriage::MarriageRefusedEvent>>();
     // Spec 380 The Great Filter: ledger + event buses (first-tick Events pattern).
     world.init_resource::<crate::layer3::events::great_filter::GreatFilterLedger>();
     world.init_resource::<Events<crate::layer3::tech::TechAdvanceEvent>>();
