@@ -83,6 +83,20 @@ pub fn build_simulation_schedule() -> Schedule {
         crate::layer2::logistics::launch::transfer_completion_system
             .after(crate::layer2::fleet::fleet_movement_system),
     );
+    // Spec 384 Orbital Synch: tag gated buildings at spawn, then gate
+    // them on the colony planet's real Orbit angle (drifted above by
+    // spec 379's advance_orbits_system, which runs earlier in the
+    // schedule, so synch reads this tick's fresh angle).
+    schedule.add_systems(
+        (
+            crate::layer2::logistics::orbital_synch::apply_orbital_synch_spawn_system,
+            crate::layer2::logistics::orbital_synch::update_orbital_synch_system,
+        )
+            .chain(),
+    );
+    schedule.add_systems((update_event_buffer::<
+        crate::layer2::logistics::orbital_synch::SynchChangedEvent,
+    >,));
     // Spec 382 Merchant Landings: land -> fluctuate -> trade -> depart.
     schedule.add_systems(
         (
@@ -826,6 +840,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer2::logistics::launch::LaunchCommand>>();
     world.init_resource::<Events<crate::layer2::logistics::launch::LaunchedEvent>>();
     world.init_resource::<Events<crate::layer2::logistics::launch::LaunchRefusedEvent>>();
+    // Spec 384 Orbital Synch: ledger + edge-event bus (first-tick
+    // Events pattern — the synch system writes these on tick one).
+    world.init_resource::<crate::layer2::logistics::orbital_synch::SynchLedger>();
+    world.init_resource::<Events<crate::layer2::logistics::orbital_synch::SynchChangedEvent>>();
     // Spec 382 Merchant Landings: landing ledger + trade event bus
     // (first-tick pattern — systems read/write these on tick one).
     world.init_resource::<crate::layer2::trade::merchant_landings::MerchantLandingState>();

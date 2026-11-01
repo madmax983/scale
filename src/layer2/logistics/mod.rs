@@ -4,6 +4,10 @@
 //!   fuel-gated fleet launches, and the window predictor.
 
 pub mod launch;
+pub mod orbital_synch;
 
 #[cfg(test)]
 mod launch_window_tests;
+
+#[cfg(test)]
+mod orbital_synch_tests;

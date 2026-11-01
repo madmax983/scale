@@ -529,6 +529,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "assignroom" => handle_assignroom_command(world, &parts),
         "comms" => print_comms(world),
         "window" | "windows" => print_launch_windows(world, &parts),
+        "synch" => print_synch(world),
+        "synchwin" => handle_synchwin_command(world, &parts),
+        "synchbuild" => handle_synchbuild_command(world, &parts),
         "filter" => handle_filter_command(world, &parts),
         "launch_fleet" => handle_launch_fleet_command(world, &parts),
         "relay" => handle_relay_command(world, &parts),
@@ -3225,6 +3228,8 @@ fn print_stats(world: &mut World) {
     let signal_label = scale::layer2::comms::comms_stats_label(world);
     // Spec 379: launch-window census for STATS (full panel: `window`).
     let window_label = scale::layer2::logistics::launch::launch_stats_label(world);
+    // Spec 384: orbital-synch census for STATS (full panel: `synch`).
+    let synch_label = scale::layer2::logistics::orbital_synch::synch_stats_label(world);
     // Spec 380: great-filter census for STATS (full panel: `filter`).
     let filter_label = scale::layer3::events::great_filter::filter_stats_label(world);
     // Spec 381: room-zone census for STATS (full panel: `roomzones`).
@@ -3464,7 +3469,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={}",
         tick,
         scenario,
         pops,
@@ -3614,6 +3619,7 @@ fn print_stats(world: &mut World) {
         merchant_census.trades,
         marriages,
         allied,
+        synch_label,
     );
 }
 
@@ -8696,6 +8702,156 @@ fn print_launch_windows(world: &mut World, parts: &[&str]) {
     print_dashboard_panel(
         "LAUNCH WINDOWS",
         &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 384: `synch` panel — the colony planet's orbital angle,
+/// every gated building's window and live state, and the transition
+/// ledger. Burst windows are the game: watch a building fall silent,
+/// then `synchwin` the heavens back into its arc.
+fn print_synch(world: &mut World) {
+    use scale::layer2::logistics::orbital_synch::{
+        colony_angle_degrees, synch_census, OrbitalSynch, SynchLedger,
+    };
+    world.init_resource::<SynchLedger>();
+    let angle = colony_angle_degrees(world);
+    let (in_synch, total) = synch_census(world);
+    let transitions = world.resource::<SynchLedger>().transitions;
+    let mut lines = vec![match angle {
+        Some(deg) => format!("Colony orbital angle: {deg:.0} degrees"),
+        None => "Colony orbital angle: unknown (no colony body in this world)".to_string(),
+    }];
+    lines.push(format!(
+        "Gated buildings: {total} ({in_synch} in synch, {} gated off)",
+        total - in_synch
+    ));
+    lines.push(format!("Synch transitions so far: {transitions}"));
+    let mut rows: Vec<(u32, String)> = Vec::new();
+    {
+        let mut query =
+            world.query::<(Entity, &OrbitalSynch, Option<&scale::layer1::energy::PowerSource>)>();
+        for (entity, synch, power) in query.iter(world) {
+            let power_text = power.map_or_else(
+                || "no power source".to_string(),
+                |src| {
+                    format!(
+                        "power output {:.1}, {}",
+                        src.output,
+                        if src.active { "ON" } else { "OFF" }
+                    )
+                },
+            );
+            rows.push((
+                entity.index(),
+                format!(
+                    "  [#{}] {}: window {:.0}->{:.0} deg — {} ({power_text})",
+                    entity.index(),
+                    synch.kind.label(),
+                    synch.required_angle_start,
+                    synch.required_angle_end,
+                    if synch.active { "IN SYNCH" } else { "gated off" }
+                ),
+            ));
+        }
+    }
+    rows.sort_by_key(|(idx, _)| *idx);
+    lines.extend(rows.into_iter().map(|(_, line)| line));
+    if total == 0 {
+        lines.push(
+            "No synch-gated buildings yet. Solar Panels and Observatories are gated at spawn."
+                .to_string(),
+        );
+    }
+    lines.push(
+        "Move the heavens with `synchwin <solar|telescope|degrees>`; watch STATS synch=."
+            .to_string(),
+    );
+    print_dashboard_panel(
+        "ORBITAL SYNCH",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 384 debug: `synchwin <solar|telescope|<degrees>>` parks the
+/// colony planet's real `Orbit` at that window's centre (or at the
+/// given angle); the next `tick` re-gates every building on it.
+fn handle_synchwin_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::logistics::orbital_synch::{set_colony_angle_degrees, SynchKind};
+    let Some(arg) = parts.get(1) else {
+        print_dashboard_panel(
+            "ORBITAL SYNCH",
+            "Usage: synchwin <solar|telescope|degrees>",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let degrees = if let Some(kind) = SynchKind::parse(arg) {
+        kind.window_center()
+    } else if let Ok(value) = arg.parse::<f32>() {
+        value
+    } else {
+        print_dashboard_panel(
+            "ORBITAL SYNCH",
+            &format!("Unknown synch window '{arg}'. Try solar, telescope, or a degree value."),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    if set_colony_angle_degrees(world, degrees) {
+        print_dashboard_panel(
+            "ORBITAL SYNCH",
+            &format!(
+                "Colony orbit parked at {degrees:.0} degrees. Run `tick` — gated buildings re-synch on the new angle. Watch STATS synch=."
+            ),
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        print_dashboard_panel(
+            "ORBITAL SYNCH",
+            "No colony body in this world — nothing to move.",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+}
+
+/// Spec 384 debug: `synchbuild <solar|telescope> [x] [y]` raises a
+/// synch-gated building on the spot (the starter colony has none, and
+/// the console `build` verb only covers farm/housing/stockpile). The
+/// spawn-tagging system gates it on the next `tick`.
+fn handle_synchbuild_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::building::{spawn_building, BuildingType, MaterialType};
+    use scale::layer2::logistics::orbital_synch::SynchKind;
+    let Some(kind) = parts.get(1).and_then(|arg| SynchKind::parse(arg)) else {
+        print_dashboard_panel(
+            "ORBITAL SYNCH",
+            "Usage: synchbuild <solar|telescope> [x] [y]",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let building_type = match kind {
+        SynchKind::Solar => BuildingType::SolarPanel,
+        SynchKind::Telescope => BuildingType::Observatory,
+    };
+    let x: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(10);
+    let y: i32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(10);
+    let entity = spawn_building(world, x, y, building_type, MaterialType::default());
+    print_dashboard_panel(
+        "ORBITAL SYNCH",
+        &format!(
+            "Raised a {} at ({x}, {y}) — entity #{}. Run `tick`: it gains its synch gate and is judged against the current orbital angle.",
+            kind.label(),
+            entity.index()
+        ),
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
