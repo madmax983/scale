@@ -673,6 +673,12 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::social::schism::SchismState>();
     world.init_resource::<Events<crate::layer1::social::schism::SchismEvent>>();
     world.init_resource::<Events<crate::layer1::geology::GeologicalEvent>>();
+    // Spec 389 Geological Instability: quake ledger + random director
+    // (first-tick pattern — the apply/director systems read these on
+    // tick one), plus the ruin pipeline's removal event.
+    world.init_resource::<crate::layer1::geology::GeologicalStats>();
+    world.init_resource::<crate::layer1::geology::GeologicalDirector>();
+    world.init_resource::<Events<crate::layer1::core::events::BuildingRemovedEvent>>();
     // Spec 277 Orbital Megastructure Deorbiting: event, countdown state, director.
     world.init_resource::<Events<crate::layer1::disasters::deorbit::DeorbitEvent>>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitState>();

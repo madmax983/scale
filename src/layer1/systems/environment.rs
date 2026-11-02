@@ -248,9 +248,11 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::geology::subsurface::kinetic_strike_system,
             crate::layer1::geology::check_seismic_events
                 .after(crate::layer1::geology::seismic_decay_system),
+            crate::layer1::geology::random_geological_event_system,
             crate::layer1::geology::apply_geological_event_system
                 .after(crate::layer1::geology::check_seismic_events)
-                .after(crate::layer1::environment::seismic::seismic_instability_system),
+                .after(crate::layer1::environment::seismic::seismic_instability_system)
+                .after(crate::layer1::geology::random_geological_event_system),
             crate::layer1::core::integration::trigger_tectonic_fracking_system,
             crate::layer1::core::integration::heavy_industry_tectonic_stress_bridge,
             crate::layer1::geology::tectonic::update_stress_system,

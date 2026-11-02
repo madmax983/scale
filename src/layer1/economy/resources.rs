@@ -33,6 +33,14 @@ pub struct MiningEvent {
     pub amount: f32,
 }
 
+/// Seismic stress a single completed mine adds to the
+/// [`SeismicGrid`][crate::layer1::geology::SeismicGrid] at the mined
+/// tile (Spec 389: mining increases instability in local areas). Ten
+/// completed mines on one tile reach the grid's 100.0 quake
+/// threshold; decay (0.5/tick across the grid) bleeds it off, so only
+/// sustained digging in one spot courts a quake.
+pub const MINING_SEISMIC_STRESS_PER_COMPLETION: f32 = 10.0;
+
 /// Types of resources in the game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceType {
@@ -1291,6 +1299,16 @@ pub fn mine_rock(world: &mut World, designation_entity: Entity, work_amount: f32
             amount: work_amount,
         });
 
+        // Spec 389: mining increases instability *locally*. The
+        // MiningEvent above carries no position, so the local feed
+        // into the real SeismicGrid happens here — the one place that
+        // knows the mined tile. (The global TectonicStress feed via
+        // MiningEvent in geology::tectonic already existed.) Tolerates
+        // worlds without a seismic grid (unit tests, menus).
+        if let Some(mut grid) = world.get_resource_mut::<crate::layer1::geology::SeismicGrid>() {
+            grid.add_stress(pos.x, pos.y, MINING_SEISMIC_STRESS_PER_COMPLETION);
+        }
+
         // Remove designation
         world.despawn(designation_entity);
 
@@ -1619,6 +1637,54 @@ mod tests {
         let log = world.resource::<MessageLog>();
         assert!(!log.messages.is_empty());
         assert_eq!(log.messages[0].text, "Mined Stone (Needs Hauling)");
+    }
+
+    #[test]
+    fn test_mine_rock_completion_feeds_local_seismic_stress() {
+        // Spec 389: a completed mine adds stress to the SeismicGrid at
+        // the mined tile (and nowhere else) — the local leg of
+        // "mining increases instability".
+        let mut world = World::new();
+        let mut tiles = vec![TerrainType::Grass; 100];
+        tiles[55] = TerrainType::Rock;
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles,
+        });
+        world.insert_resource(ColonyResources::default());
+        world.insert_resource(MessageLog::default());
+        world.insert_resource(crate::layer1::structural_integrity::RoofGrid::new(10, 10));
+        world.insert_resource(crate::layer1::geology::SeismicGrid::new(10, 10));
+        world.init_resource::<Events<MiningEvent>>();
+
+        let designation = world
+            .spawn((
+                Designation {
+                    designation_type: DesignationType::Mine,
+                },
+                MiningProgress {
+                    current: 9.0,
+                    max: 10.0,
+                },
+                GridPosition { x: 5, y: 5 },
+            ))
+            .id();
+
+        mine_rock(&mut world, designation, 1.0);
+
+        let grid = world.resource::<crate::layer1::geology::SeismicGrid>();
+        assert_eq!(
+            grid.get_stress(5, 5),
+            MINING_SEISMIC_STRESS_PER_COMPLETION,
+            "mined tile gains local seismic stress"
+        );
+        assert_eq!(grid.get_stress(0, 0), 0.0, "stress stays local");
+        assert_eq!(
+            grid.total_stress(),
+            MINING_SEISMIC_STRESS_PER_COMPLETION,
+            "exactly one tile is stressed"
+        );
     }
 
     #[test]
