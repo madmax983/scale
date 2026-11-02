@@ -286,6 +286,19 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems((update_event_buffer::<
         crate::layer1::architecture::room_zones::RoomEvaluatedEvent,
     >,));
+    // Spec 387 Workplace Hazards: building-level accidents. Process
+    // rolls occupied buildings, injury applies the severity machinery;
+    // chained so an accident is applied the tick it fires.
+    schedule.add_systems(
+        (
+            crate::layer1::environment::workplace_hazards::process_workplace_hazards_system,
+            crate::layer1::environment::workplace_hazards::workplace_accident_injury_system,
+        )
+            .chain(),
+    );
+    schedule.add_systems((update_event_buffer::<
+        crate::layer1::environment::workplace_hazards::WorkplaceAccidentEvent,
+    >,));
     // Spec 290 The Phantom Shift: Fringe pops work a secret night shift
     // repairing damaged structures off the books, growing a shadow economy
     // when the colony backlog is critical.
@@ -562,6 +575,11 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 1373 Recalled Product: manufacturer recalls, failure chance, returns.
     world.init_resource::<crate::layer1::economy::recall::RecallManager>();
     world.init_resource::<crate::layer1::economy::recall::RecallConfig>();
+    // Spec 387 Workplace Hazards: accident ledger + event channel
+    // (first-tick pattern — the process/injury systems write from
+    // tick one).
+    world.init_resource::<crate::layer1::environment::workplace_hazards::AccidentLedger>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::environment::workplace_hazards::WorkplaceAccidentEvent>>();
     // Spec 386 Social Mimicry: tuning, change ledger, and the
     // preference-change event stream (first-tick pattern — the mimicry
     // system reads/writes these from tick one).

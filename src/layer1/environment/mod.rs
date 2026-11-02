@@ -14,6 +14,8 @@ pub mod disasters;
 pub mod geomes;
 pub mod hazards;
 pub mod hazards_tests;
+pub mod workplace_hazards;
+pub mod workplace_hazards_tests;
 pub mod light_pollution;
 pub mod orbital_crossfire;
 pub mod orbital_shadow;

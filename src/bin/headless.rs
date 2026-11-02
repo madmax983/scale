@@ -511,6 +511,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "broadcast" => handle_broadcast_command(world, &parts),
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
+        "safety" => handle_safety_command(world, &parts),
+        "hazards" => print_hazards(world),
+        "hazardize" => handle_hazardize_command(world, &parts),
         "deorbit" => handle_deorbit_command(world, &parts),
         "shadow" => handle_shadow_command(world, &parts),
         "tether" => handle_tether_command(world, &parts),
@@ -3235,6 +3238,9 @@ fn print_stats(world: &mut World) {
     let synch_label = scale::layer2::logistics::orbital_synch::synch_stats_label(world);
     // Spec 385: terraforming-backlash census for STATS (full panel: `backlash`).
     let backlash_label = scale::layer2::terraforming_backlash::backlash_stats_label(world);
+    // Spec 387: workplace-accident census for STATS (panel: `hazards`).
+    let accidents_total = scale::layer1::environment::workplace_hazards::accident_count(world);
+    let safety_state = scale::layer1::environment::workplace_hazards::safety_label(world);
     // Spec 386: social-mimicry census for STATS (full panel: `prefs`).
     let mimicry_label = scale::layer1::social::social_mimicry::mimicry_stats_label(world);
     // Spec 380: great-filter census for STATS (full panel: `filter`).
@@ -3476,7 +3482,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={}",
         tick,
         scenario,
         pops,
@@ -3629,6 +3635,8 @@ fn print_stats(world: &mut World) {
         synch_label,
         backlash_label,
         mimicry_label,
+        accidents_total,
+        safety_state,
     );
 }
 
@@ -9657,6 +9665,133 @@ fn handle_sabotage_command(world: &mut World, parts: &[&str]) {
     };
     let _ = count;
     print_dashboard_panel("ARCHITECTURAL SABOTAGE", &body, None, None);
+}
+
+/// Spec 387: toggle or inspect the Safety Protocols edict.
+/// `safety` prints the state; `safety on|off` sets it (idempotent).
+fn handle_safety_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::administration::edicts::{ColonyPolicies, Policy};
+
+    if world.get_resource::<ColonyPolicies>().is_none() {
+        world.insert_resource(ColonyPolicies::default());
+    }
+    match parts.get(1).map(|s| s.to_lowercase()).as_deref() {
+        Some("on") | Some("off") => {
+            let want_on = parts[1].eq_ignore_ascii_case("on");
+            let mut policies = world.resource_mut::<ColonyPolicies>();
+            let is_on = policies.is_active(Policy::SafetyProtocols);
+            if is_on != want_on {
+                policies.toggle(Policy::SafetyProtocols);
+            }
+            print_dashboard_panel(
+                "SAFETY PROTOCOLS",
+                &format!(
+                    "Safety Protocols are now {}. Hazard risk x0.5 colony-wide; work speed -0.10. Watch STATS safety= / accidents=.",
+                    if want_on { "ON" } else { "OFF" }
+                ),
+                None,
+                None,
+            );
+        }
+        _ => {
+            let state = scale::layer1::environment::workplace_hazards::safety_label(world);
+            print_dashboard_panel(
+                "SAFETY PROTOCOLS",
+                &format!(
+                    "Safety Protocols: {state}. Toggle with `safety on` / `safety off`."
+                ),
+                None,
+                None,
+            );
+        }
+    }
+}
+
+/// Spec 387: list buildings with non-zero accident risk + the ledger.
+fn print_hazards(world: &mut World) {
+    use scale::layer1::environment::workplace_hazards::{
+        accident_count, risky_buildings, safety_label, AccidentLedger,
+    };
+    let risky = risky_buildings(world);
+    let ledger = world
+        .get_resource::<AccidentLedger>()
+        .copied()
+        .unwrap_or_default();
+    let mut lines = vec![
+        format!(
+            "Accidents so far: {} (minor {}, major {}, critical {}) — STATS accidents={}",
+            ledger.total,
+            ledger.minor,
+            ledger.major,
+            ledger.critical,
+            accident_count(world)
+        ),
+        format!("Safety Protocols: {}", safety_label(world)),
+    ];
+    if risky.is_empty() {
+        lines.push(
+            "No risky buildings: no staffed building carries accident risk right now."
+                .to_string(),
+        );
+    } else {
+        for r in risky.iter().take(20) {
+            lines.push(format!(
+                "{:?} at ({}, {}): {} worker(s), risk {:.3}/tick",
+                r.building_type, r.position.x, r.position.y, r.workers, r.risk
+            ));
+        }
+    }
+    print_dashboard_panel("WORKPLACE HAZARDS", &lines.join("\n"), None, None);
+}
+
+/// Spec 387 debug staging: `hazardize [risk]` sets an AccidentRiskOverride
+/// on every building (default 1.0), so the building-level accident lane
+/// can be playtested on demand. `hazardize clear` removes overrides.
+fn handle_hazardize_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::architecture::building::Building;
+    use scale::layer1::environment::workplace_hazards::AccidentRiskOverride;
+
+    if parts.get(1).is_some_and(|s| s.eq_ignore_ascii_case("clear")) {
+        let targets: Vec<Entity> = world
+            .query::<(Entity, &Building)>()
+            .iter(world)
+            .map(|(e, _)| e)
+            .collect();
+        for e in &targets {
+            world.entity_mut(*e).remove::<AccidentRiskOverride>();
+        }
+        print_dashboard_panel(
+            "WORKPLACE HAZARDS",
+            &format!("Cleared accident-risk overrides on {} building(s).", targets.len()),
+            None,
+            None,
+        );
+        return;
+    }
+    let risk: f32 = parts
+        .get(1)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0);
+    let targets: Vec<Entity> = world
+        .query::<(Entity, &Building)>()
+        .iter(world)
+        .map(|(e, _)| e)
+        .collect();
+    for e in &targets {
+        world
+            .entity_mut(*e)
+            .insert(AccidentRiskOverride { risk });
+    }
+    print_dashboard_panel(
+        "WORKPLACE HAZARDS",
+        &format!(
+            "Staged accident risk {risk:.2} on {} building(s). Run `tick` and watch STATS accidents= — or `hazards` for the risk list. `hazardize clear` restores derived risk.",
+            targets.len()
+        ),
+        None,
+        None,
+    );
 }
 
 /// Set or inspect the construction-crew vetting policy (Spec 275).

@@ -152,6 +152,8 @@ pub enum Policy {
     /// Spec 323 The Informant's Dilemma: pays pops a credit bounty for
     /// reporting dissent — crushes unrest, breeds colony-wide paranoia.
     CitizenInformant,
+    /// Spec 387: Safety Protocols — global edict: hazard risk x0.5 colony-wide, work speed -0.10.
+    SafetyProtocols,
 }
 
 #[derive(Event, Debug)]
@@ -671,6 +673,21 @@ pub fn get_hunger_decay_modifier(policies: &ColonyPolicies) -> f32 {
 /// assert_eq!(get_work_speed_modifier(&policies), 1.2);
 /// ```
 ///
+/// Hazard-risk multiplier from active policies.
+/// Spec 387: Safety Protocols multiplies all hazard risk by 0.5 —
+/// consumed by the per-action hazard lane in `general_work.rs`
+/// (passed as `hazard_modifier` to `handle_workplace_hazards`) and
+/// mirrored for the building-level lane in
+/// `workplace_hazards::safety_risk_multiplier`.
+#[must_use]
+pub fn get_hazard_modifier(policies: &ColonyPolicies) -> f64 {
+    if policies.is_active(Policy::SafetyProtocols) {
+        0.5
+    } else {
+        1.0
+    }
+}
+
 #[must_use]
 pub fn get_work_speed_modifier(policies: &ColonyPolicies) -> f32 {
     let mut modifier = 1.0;
@@ -679,6 +696,9 @@ pub fn get_work_speed_modifier(policies: &ColonyPolicies) -> f32 {
     }
     if policies.is_active(Policy::PestControl) {
         modifier -= 0.05;
+    }
+    if policies.is_active(Policy::SafetyProtocols) {
+        modifier -= 0.10;
     }
     modifier
 }

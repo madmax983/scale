@@ -7,7 +7,7 @@ use crate::layer1::cybernetics::get_efficiency_bonus;
 use crate::layer1::day_night::DayNightCycle;
 use crate::layer1::designation::{Designation, DesignationType};
 use crate::layer1::economy::{get_wage_for_job, pay_wage};
-use crate::layer1::edicts::{get_work_speed_modifier, ColonyPolicies};
+use crate::layer1::edicts::{get_hazard_modifier, get_work_speed_modifier, ColonyPolicies};
 use crate::layer1::environment::hazards::handle_workplace_hazards;
 use crate::layer1::eureka::check_for_eureka_world;
 use crate::layer1::execution::components::{AtTarget, MovementTarget};
@@ -653,6 +653,12 @@ fn handle_post_work_effects(
     } else {
         1.0
     };
+    // Spec 387: Safety Protocols halves hazard risk in this per-action
+    // lane too (global edict, per the spec architect call).
+    let hazard_modifier = hazard_modifier
+        * world
+            .get_resource::<ColonyPolicies>()
+            .map_or(1.0, get_hazard_modifier);
 
     handle_workplace_hazards(
         world,

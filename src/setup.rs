@@ -540,6 +540,8 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<crate::layer1::haunted_assembly_lines::PopDiedInAccidentEvent>>();
     world.init_resource::<Events<crate::layer1::genetics::GeneSplicingEvent>>();
     world.init_resource::<Events<crate::layer1::environment::hazards::AmputationEvent>>();
+    world.init_resource::<crate::layer1::environment::workplace_hazards::AccidentLedger>();
+    world.init_resource::<Events<crate::layer1::environment::workplace_hazards::WorkplaceAccidentEvent>>();
     world.init_resource::<Events<crate::layer1::social::FavorChange>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::mobile_architecture::TransformCommand>>();
     world
