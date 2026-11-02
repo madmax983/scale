@@ -550,6 +550,9 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<crate::layer1::social::debt::LifeSavedEvent>>();
     world.init_resource::<Events<crate::layer1::social::debt::CallInFavorEvent>>();
     world.init_resource::<Events<crate::layer1::eureka::EurekaEvent>>();
+    // Spec 390: breakthrough config + per-tech progress ledger.
+    world.init_resource::<crate::layer1::eureka::EurekaConfig>();
+    world.init_resource::<crate::layer1::eureka::EurekaProgress>();
     world.init_resource::<Events<crate::layer1::items::UnequipEvent>>();
     world.init_resource::<Events<crate::layer1::economy::bio_loom::UnequipFailedEvent>>();
     world.init_resource::<Events<crate::layer1::construction::GreatWorkCompletedEvent>>();

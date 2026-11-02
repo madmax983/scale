@@ -522,6 +522,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "coredrills" => print_coredrills(world),
         "quake" => handle_quake_command(world, &parts),
         "quakes" => print_quakes(world),
+        "eureka" => handle_eureka_command(world, &parts),
         "stability" => handle_stability_command(world, &parts),
         "schism" => handle_schism_command(world, &parts),
         "seeds" => print_seeds(world),
@@ -3227,6 +3228,8 @@ fn print_stats(world: &mut World) {
         use scale::layer1::geology::total_seismic_stress;
         total_seismic_stress(world)
     };
+    // Spec 390: eureka breakthrough census for STATS (full panel: `eureka`).
+    let eureka_label = scale::layer1::eureka::eureka_stats_label(world);
     // Spec 376: schism census for STATS (full panel: `schism`).
     let schism_claimed = {
         use scale::layer1::social::schism::seceded_territory_count;
@@ -3500,7 +3503,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={}",
         tick,
         scenario,
         pops,
@@ -3660,6 +3663,7 @@ fn print_stats(world: &mut World) {
         safety_state,
         friction_label,
         strat_label,
+        eureka_label,
     );
 }
 
@@ -11974,6 +11978,67 @@ fn handle_stability_command(world: &mut World, parts: &[&str]) {
         "STABILITY",
         &format!("Planetary stability set to {clamped:.2}.\nRun `tick` and watch STATS stability= — below 0.25 the quakes turn deterministic, and at 0.00 the core breaches."),
         Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 390 Eureka Moments: `eureka` prints the breakthrough ledger
+/// (total breakthroughs, per-tech research points toward cost);
+/// `eureka <tech>` forces one breakthrough toward that tech — points
+/// accumulate in the EurekaProgress ledger and the tech unlocks only
+/// when its cost is covered (Spec 390 §8). Watch STATS `eureka=`.
+fn handle_eureka_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use scale::layer1::eureka::{
+        eureka_progress_label, parse_eureka_tech, EurekaConfig, EurekaEvent, EurekaProgress,
+    };
+    world.init_resource::<EurekaProgress>();
+    world.init_resource::<EurekaConfig>();
+    world.init_resource::<Events<EurekaEvent>>();
+
+    if parts.len() < 2 {
+        let config = world.resource::<EurekaConfig>().clone();
+        let body = format!(
+            "{}\nEach breakthrough grants {:.0} flat research points toward its related tech; already-unlocked techs pay out {:.0} Knowledge instead.\nForce one with `eureka <tech>` (e.g. `eureka astronomy`) — it lands on the next `tick`.",
+            eureka_progress_label(world),
+            config.breakthrough_points,
+            config.knowledge_reward,
+        );
+        print_dashboard_panel(
+            "EUREKA MOMENTS",
+            &body,
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+
+    let tech_name = parts[1..].join(" ");
+    let Some(tech) = parse_eureka_tech(&tech_name) else {
+        print_dashboard_panel(
+            "ERROR",
+            &format!("Unknown technology: '{tech_name}'"),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let config = world.resource::<EurekaConfig>().clone();
+    world.resource_mut::<Events<EurekaEvent>>().send(EurekaEvent {
+        action: scale::layer1::ActionType::Work,
+        related_tech: Some(tech),
+        reward_amount: config.knowledge_reward,
+        breakthrough_points: config.breakthrough_points,
+    });
+    print_dashboard_panel(
+        "EUREKA — FORCED BREAKTHROUGH",
+        &format!(
+            "A breakthrough toward {} (+{:.0} research points) has been sparked.\nRun `tick` to resolve it through the eureka handler — points accumulate, the tech unlocks only at its {:.0}-point cost. Watch STATS eureka= or `eureka` for the ledger.",
+            tech.label(),
+            config.breakthrough_points,
+            tech.cost(),
+        ),
+        Some(comfy_table::Color::Green),
         Some(comfy_table::Attribute::Bold),
     );
 }

@@ -26,6 +26,7 @@ fn test_food_production_satisfies_hunger() {
     world.insert_resource(scale::layer1::eureka::EurekaConfig {
         base_chance: 0.0,
         knowledge_reward: 0.0,
+        breakthrough_points: 0.0,
     });
 
     // 2. Spawn a working Farmer to produce food

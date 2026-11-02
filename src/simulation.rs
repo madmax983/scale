@@ -717,6 +717,9 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer2::propaganda_engine::DiplomaticWeight>();
     world.init_resource::<crate::layer2::propaganda_engine::InspectorEvent>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::core::chronicle::AddChronicleEvent>>();
+    // Spec 390: eureka breakthrough ledger (handler accumulates here).
+    world.init_resource::<crate::layer1::eureka::EurekaProgress>();
+    world.init_resource::<crate::layer1::eureka::EurekaConfig>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::architecture::potemkin::PotemkinDestroyedEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::accidental_terraforming::BiomeShiftEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::economy::biomass_dividend::RecycleEvent>>();
