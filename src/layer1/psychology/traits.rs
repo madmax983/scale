@@ -144,6 +144,8 @@ pub enum Trait {
     Traumatized,
     /// Braver than most: resists panic cascades (Spec 1371).
     Courage,
+    /// Sees no station in others: immune to class friction (Spec 388).
+    Egalitarian,
     /// Arrived on the Ship of Fools (Spec 1375): demands luxury, produces nothing.
     Entitled,
     /// Cannot keep a secret: carries word twice as far (Spec 343).
@@ -232,6 +234,7 @@ impl Trait {
             Self::Trauma => "Trauma",
             Self::Hacker => "Hacker",
             Self::Courage => "Courageous",
+            Self::Egalitarian => "Egalitarian",
             Self::Entitled => "Entitled",
             Self::Gossip => "Gossip",
             Self::Skeptic => "Skeptic",
@@ -311,6 +314,7 @@ impl Traits {
             Trait::Bureaucrat,
             Trait::InsomniaDrive,
             Trait::Courage,
+            Trait::Egalitarian,
         ];
 
         let mut added = 0;
@@ -370,6 +374,12 @@ impl Traits {
                 continue;
             }
             if t == Trait::Agoraphobic && traits.has(Trait::Courage) {
+                continue;
+            }
+            if t == Trait::Egalitarian && traits.has(Trait::Entitled) {
+                continue;
+            }
+            if t == Trait::Entitled && traits.has(Trait::Egalitarian) {
                 continue;
             }
 

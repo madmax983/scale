@@ -173,6 +173,15 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Consumption),
     );
 
+    // Spec 388 Social Stratification: class friction from prestige gaps
+    // drains Needs.leisure for nearby mismatched pops. Separate
+    // add_systems call (arity discipline, as with Spec 386 above).
+    schedule.add_systems(
+        (crate::layer1::social::social_stratification::apply_class_friction_system
+            .after(decay_needs_system),)
+            .in_set(Layer1SystemSet::Consumption),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::law::justice::update_inmates_system.after(decay_needs_system),

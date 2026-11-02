@@ -586,6 +586,11 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::social::social_mimicry::MimicryConfig>();
     world.init_resource::<crate::layer1::social::social_mimicry::MimicryStats>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::social_mimicry::PreferenceChangedEvent>>();
+    // Spec 388 Social Stratification: friction tuning + ledger (the
+    // friction system reads/writes these from tick one; the chronicle
+    // event channel it sends on is initialized in setup.rs).
+    world.init_resource::<crate::layer1::social::social_stratification::StratificationConfig>();
+    world.init_resource::<crate::layer1::social::social_stratification::StratificationStats>();
     // Spec 1375 Ship of Fools: its arrival-event resource was never initialized;
     // without this the first tick panics on a fresh world (pre-existing bug).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::ship_of_fools::ShipOfFoolsArrivalEvent>>();

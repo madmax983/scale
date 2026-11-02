@@ -536,6 +536,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "backlash" => handle_backlash_command(world, &parts),
         "mimicry" => handle_mimicry_command(world, &parts),
         "prefs" => print_prefs(world),
+        "strat" => print_strat(world),
+        "stratify" => handle_stratify_command(world, &parts),
         "synchwin" => handle_synchwin_command(world, &parts),
         "synchbuild" => handle_synchbuild_command(world, &parts),
         "filter" => handle_filter_command(world, &parts),
@@ -3243,6 +3245,11 @@ fn print_stats(world: &mut World) {
     let safety_state = scale::layer1::environment::workplace_hazards::safety_label(world);
     // Spec 386: social-mimicry census for STATS (full panel: `prefs`).
     let mimicry_label = scale::layer1::social::social_mimicry::mimicry_stats_label(world);
+    // Spec 388: class-friction census for STATS (full panel: `strat`).
+    let friction_label =
+        scale::layer1::social::social_stratification::stratification_stats_label(world);
+    let strat_label =
+        scale::layer1::social::social_stratification::stratification_events_label(world);
     // Spec 380: great-filter census for STATS (full panel: `filter`).
     let filter_label = scale::layer3::events::great_filter::filter_stats_label(world);
     // Spec 381: room-zone census for STATS (full panel: `roomzones`).
@@ -3482,7 +3489,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={}",
         tick,
         scenario,
         pops,
@@ -3637,6 +3644,8 @@ fn print_stats(world: &mut World) {
         mimicry_label,
         accidents_total,
         safety_state,
+        friction_label,
+        strat_label,
     );
 }
 
@@ -8791,6 +8800,83 @@ fn print_synch(world: &mut World) {
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Spec 388: `strat` panel — every pop's station and live friction.
+/// `stratify seed` stages a deterministic class mix (first pop becomes
+/// prestige-10, everyone else prestige-1) so a few `tick`s demonstrate
+/// friction through the live schedule; watch STATS friction= / strat=.
+fn print_strat(world: &mut World) {
+    use scale::layer1::needs::Needs;
+    use scale::layer1::social::social_stratification::{
+        ClassFriction, Prestige, SocialClass, StratificationStats,
+    };
+    use scale::layer1::traits::Traits;
+    let mut lines = Vec::new();
+    {
+        let mut query = world.query::<(
+            Entity,
+            &PopName,
+            &Needs,
+            Option<&Prestige>,
+            Option<&ClassFriction>,
+            Option<&Traits>,
+        )>();
+        for (entity, name, needs, prestige, friction, traits) in query.iter(world) {
+            let value = prestige.map_or(1, |p| p.value);
+            let class = SocialClass::from_prestige_value(value);
+            lines.push(format!(
+                "{} ({:?}): prestige={} class={:?} leisure={:.3} friction={:.4} egalitarian={}",
+                name.0,
+                entity,
+                value,
+                class,
+                needs.leisure,
+                friction.map_or(0.0, |f| f.amount),
+                traits.is_some_and(|t| t.has(scale::layer1::traits::Trait::Egalitarian)),
+            ));
+        }
+    }
+    if lines.is_empty() {
+        lines.push("No pops.".to_string());
+    }
+    if let Some(stats) = world.get_resource::<StratificationStats>() {
+        lines.push(format!(
+            "LEDGER friction_events={} affected_now={} max_gap_now={}",
+            stats.friction_events, stats.affected_now, stats.max_gap_now
+        ));
+    }
+    print_dashboard_panel(
+        "SOCIAL STRATIFICATION",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_stratify_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::social_stratification::{
+        Prestige, StratificationConfig, StratificationStats,
+    };
+    world.init_resource::<StratificationStats>();
+    world.init_resource::<StratificationConfig>();
+    if parts.get(1).copied() == Some("seed") {
+        let entities: Vec<Entity> = {
+            let mut query = world.query_filtered::<Entity, With<Pop>>();
+            query.iter(world).collect()
+        };
+        for (idx, entity) in entities.iter().enumerate() {
+            let value = if idx == 0 { 10 } else { 1 };
+            world.entity_mut(*entity).insert(Prestige { value });
+        }
+        println!(
+            "STRATIFY SEEDED: first pop is prestige-10, {} other pop(s) prestige-1. Run `tick` then `strat` — friction lands where they stand within {} tiles of each other.",
+            entities.len().saturating_sub(1),
+            3
+        );
+        return;
+    }
+    print_strat(world);
 }
 
 /// Spec 386: `prefs` panel — every pop's consumable tastes and status.
