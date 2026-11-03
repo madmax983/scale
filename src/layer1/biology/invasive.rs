@@ -15,13 +15,21 @@
 //!   converted into `BurnOrder`s by [`process_burn_designations_system`].
 //! - Burns jump the work queue (processed immediately at high priority per
 //!   spec section 7) rather than routing through the slow job system.
+//! - Item 166 (item 160 sub-item 1): spread never converts a tile that
+//!   holds a building or is occupied by a pop. The balance report
+//!   2026-11-02 showed a patch converting the Lander / LifeSupport /
+//!   farms / Stockpile / walls / airlock tiles and killing a resting pop
+//!   stack when its tile converted underneath it.
 
 use bevy_ecs::prelude::*;
+use bevy_utils::HashSet;
 use rand::Rng;
 
+use crate::layer1::building::{Building, BuildingMap, OccupiedTiles};
 use crate::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
 use crate::layer1::core::map::GridPosition;
 use crate::layer1::nature::terrain::{TerrainGrid, TerrainType};
+use crate::layer1::pop::Pop;
 use crate::layer1::director::DirectorState;
 use crate::layer2::trade::blockade::TradeShipArrivalEvent;
 
@@ -226,17 +234,49 @@ pub fn spore_hitchhiker_system(
 /// Each tick, spores take root (converting their home tile to SporeBloom)
 /// and, when their timer fires, infect the first infectable neighbor in
 /// deterministic east-first scan order.
+///
+/// Item 166 spread guard: a tile that holds a building or is occupied by
+/// a pop is never converted — neither as a spore's home tile nor as a
+/// spread target. Blocked neighbors are skipped, not terminal: the scan
+/// continues to the next neighbor, so the frontier still grows around
+/// buildings and pops. The building seam is a union because no single
+/// registry covers every building (placement maintains `OccupiedTiles`
+/// and `BuildingMap`, but e.g. standalone graves are in neither — the
+/// same reason `try_place_building` scans entities as well as the map):
+/// a tile is blocked if `OccupiedTiles` or `BuildingMap` claims it OR a
+/// live `Building` entity stands on it. Pop occupancy comes from live
+/// `Pop` + `GridPosition` positions. Both sets are snapshotted once per
+/// run (the flora-spread cache pattern), so the per-spore checks are O(1).
 pub fn spore_spread_system(
     mut commands: Commands,
     mut terrain: ResMut<TerrainGrid>,
     config: Res<InvasiveConfig>,
     mut spores: Query<(Entity, &mut Spore)>,
+    occupied_tiles: Option<Res<OccupiedTiles>>,
+    building_map: Option<Res<BuildingMap>>,
+    buildings: Query<&GridPosition, With<Building>>,
+    pops: Query<&GridPosition, With<Pop>>,
 ) {
+    // Snapshot of tiles a spore must never convert.
+    let mut building_tiles: HashSet<(i32, i32)> = HashSet::default();
+    if let Some(occupied) = occupied_tiles.as_deref() {
+        building_tiles.extend(occupied.0.iter().copied());
+    }
+    if let Some(map) = building_map.as_deref() {
+        building_tiles.extend(map.0.keys().copied());
+    }
+    building_tiles.extend(buildings.iter().map(|p| (p.x, p.y)));
+    let pop_tiles: HashSet<(i32, i32)> = pops.iter().map(|p| (p.x, p.y)).collect();
+    let is_blocked = |x: i32, y: i32| {
+        building_tiles.contains(&(x, y)) || pop_tiles.contains(&(x, y))
+    };
+
     let mut live = spores.iter().count();
     for (entity, mut spore) in spores.iter_mut() {
-        // Take root: convert the home tile to SporeBloom.
+        // Take root: convert the home tile to SporeBloom — unless a
+        // building stands there or a pop is standing on it (item 166).
         let (hx, hy) = (spore.position.x, spore.position.y);
-        if hx >= 0 && hy >= 0 {
+        if hx >= 0 && hy >= 0 && !is_blocked(hx, hy) {
             let (x, y) = (hx as usize, hy as usize);
             if matches!(terrain.get(x, y), Some(t) if is_infectable(t)) {
                 terrain.set(x, y, TerrainType::SporeBloom);
@@ -262,6 +302,12 @@ pub fn spore_spread_system(
         for (dx, dy) in SPREAD_NEIGHBORS {
             let (nx, ny) = (hx + dx, hy + dy);
             if nx < 0 || ny < 0 {
+                continue;
+            }
+            // Item 166: never spread onto a building or pop-occupied
+            // tile; skip it and keep scanning so the frontier grows
+            // around the blocked tile instead of stalling on it.
+            if is_blocked(nx, ny) {
                 continue;
             }
             let (x, y) = (nx as usize, ny as usize);
@@ -663,6 +709,158 @@ mod tests {
         assert_eq!(
             app.world().resource::<TerrainGrid>().get(5, 5),
             Some(TerrainType::Ash)
+        );
+    }
+
+    // --- Item 166: spread guard (item 160 sub-item 1) ---
+    // Balance report 2026-11-02: a spore patch converted tiles under the
+    // Lander / LifeSupport / farms / Stockpile / walls / airlock and
+    // killed a resting pop stack when its tile converted under it.
+    // Spread must never convert a tile holding a building or a pop, but
+    // the frontier must still grow around blocked tiles.
+
+    /// Registers a building at (x, y) through every authoritative seam
+    /// the placement code maintains: the Building entity itself, the
+    /// OccupiedTiles set, and the BuildingMap.
+    fn place_test_building(app: &mut App, x: i32, y: i32) {
+        let entity = app
+            .world_mut()
+            .spawn((
+                crate::layer1::building::Building::default(),
+                GridPosition { x, y },
+            ))
+            .id();
+        app.insert_resource({
+            let mut occupied = crate::layer1::building::OccupiedTiles::default();
+            occupied.0.insert((x, y));
+            occupied
+        });
+        app.insert_resource({
+            let mut map = crate::layer1::building::BuildingMap::default();
+            map.0.insert((x, y), entity);
+            map
+        });
+    }
+
+    fn spore_positions(app: &mut App) -> Vec<GridPosition> {
+        app.world_mut()
+            .query::<&Spore>()
+            .iter(app.world())
+            .map(|s| s.position)
+            .collect()
+    }
+
+    #[test]
+    fn test_spore_does_not_convert_tile_under_building() {
+        let mut app = setup_test_app();
+        place_test_building(&mut app, 5, 5);
+        app.world_mut().spawn(Spore {
+            position: GridPosition { x: 5, y: 5 },
+            strain: SporeStrain::TerranKudzu,
+            spread_timer: 999,
+            age: 0,
+        });
+        app.update();
+        let terrain = app.world().resource::<TerrainGrid>();
+        assert_eq!(
+            terrain.get(5, 5),
+            Some(TerrainType::Grass),
+            "A spore must not convert the tile a building stands on."
+        );
+    }
+
+    #[test]
+    fn test_spore_spread_skips_building_tile_and_grows_around() {
+        let mut app = setup_test_app();
+        // Building on the east neighbor — first in spread scan order.
+        place_test_building(&mut app, 6, 5);
+        app.world_mut().spawn(Spore {
+            position: GridPosition { x: 5, y: 5 },
+            strain: SporeStrain::Xenofungus,
+            spread_timer: 0,
+            age: 0,
+        });
+        app.update();
+        let positions = spore_positions(&mut app);
+        assert!(
+            !positions.contains(&GridPosition { x: 6, y: 5 }),
+            "Spread must not spawn a daughter spore on a building tile."
+        );
+        assert!(
+            positions.contains(&GridPosition { x: 5, y: 6 }),
+            "Frontier must grow around the blocked tile (next scan neighbor, south)."
+        );
+        let terrain = app.world().resource::<TerrainGrid>();
+        assert_eq!(
+            terrain.get(6, 5),
+            Some(TerrainType::Grass),
+            "The building tile's terrain must stay untouched."
+        );
+    }
+
+    #[test]
+    fn test_spore_does_not_convert_tile_occupied_by_pop() {
+        let mut app = setup_test_app();
+        app.world_mut().spawn((
+            crate::layer1::pop::Pop,
+            GridPosition { x: 5, y: 5 },
+        ));
+        app.world_mut().spawn(Spore {
+            position: GridPosition { x: 5, y: 5 },
+            strain: SporeStrain::TerranKudzu,
+            spread_timer: 999,
+            age: 0,
+        });
+        app.update();
+        let terrain = app.world().resource::<TerrainGrid>();
+        assert_eq!(
+            terrain.get(5, 5),
+            Some(TerrainType::Grass),
+            "A spore must not convert the tile a pop is standing on."
+        );
+    }
+
+    #[test]
+    fn test_spore_spread_skips_occupied_tile_and_grows_around() {
+        let mut app = setup_test_app();
+        // A pop resting on the east neighbor — first in spread scan order.
+        app.world_mut().spawn((
+            crate::layer1::pop::Pop,
+            GridPosition { x: 6, y: 5 },
+        ));
+        app.world_mut().spawn(Spore {
+            position: GridPosition { x: 5, y: 5 },
+            strain: SporeStrain::Xenofungus,
+            spread_timer: 0,
+            age: 0,
+        });
+        app.update();
+        let positions = spore_positions(&mut app);
+        assert!(
+            !positions.contains(&GridPosition { x: 6, y: 5 }),
+            "Spread must not spawn a daughter spore on a pop-occupied tile."
+        );
+        assert!(
+            positions.contains(&GridPosition { x: 5, y: 6 }),
+            "Frontier must grow around the occupied tile (next scan neighbor, south)."
+        );
+    }
+
+    #[test]
+    fn test_spore_still_converts_empty_infectable_tile() {
+        let mut app = setup_test_app();
+        app.world_mut().spawn(Spore {
+            position: GridPosition { x: 5, y: 5 },
+            strain: SporeStrain::TerranKudzu,
+            spread_timer: 999,
+            age: 0,
+        });
+        app.update();
+        let terrain = app.world().resource::<TerrainGrid>();
+        assert_eq!(
+            terrain.get(5, 5),
+            Some(TerrainType::SporeBloom),
+            "An empty infectable tile must still convert (guard must not shut spread down)."
         );
     }
 
