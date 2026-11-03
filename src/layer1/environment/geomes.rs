@@ -14,15 +14,41 @@ pub struct GeomeHazard {
 /// ⚡ Bolt Optimization:
 /// - Replaced `std::collections::{HashMap, HashSet}` with `bevy::utils::{HashMap, HashSet}` (AHash).
 /// - Using AHash eliminates SipHash overhead on `GridPosition` keys, reducing lookup/insertion times.
+/// The hazard a terrain type sustains, if any: SporeBloom seeps spore
+/// damage, MagmaRock radiates heat damage. Any other terrain sustains no
+/// `GeomeHazard` — a hazard entity left on such a tile is stale.
+#[must_use]
+pub fn hazard_damage_for_terrain(terrain: TerrainType) -> Option<f32> {
+    match terrain {
+        TerrainType::SporeBloom => Some(5.0),
+        TerrainType::MagmaRock => Some(10.0),
+        _ => None,
+    }
+}
+
 pub fn diffuse_geome_hazards_system(
     mut commands: Commands,
     grid: Res<TerrainGrid>,
-    hazard_query: Query<&GridPosition, With<GeomeHazard>>,
+    hazard_query: Query<(Entity, &GridPosition, &GeomeHazard)>,
 ) {
-    // Collect existing hazard positions to avoid spawning multiple hazards on the same tile
+    // Collect existing hazard positions to avoid spawning multiple hazards
+    // on the same tile. Hazards whose tile no longer sustains them (the
+    // terrain changed off SporeBloom/MagmaRock — e.g. a quarantine burn
+    // scorched the tile to Ash, item 165) are despawned here: before this
+    // cleanup they were immortal, so burned tiles kept dealing damage.
     let mut existing_hazards = HashSet::new();
-    for pos in hazard_query.iter() {
-        existing_hazards.insert(*pos);
+    for (entity, pos, hazard) in hazard_query.iter() {
+        let sustained = usize::try_from(pos.x)
+            .ok()
+            .zip(usize::try_from(pos.y).ok())
+            .and_then(|(x, y)| grid.get(x, y))
+            .and_then(hazard_damage_for_terrain)
+            .is_some_and(|damage| (damage - hazard.damage_per_tick).abs() < f32::EPSILON);
+        if sustained {
+            existing_hazards.insert(*pos);
+        } else {
+            commands.entity(entity).despawn();
+        }
     }
 
     let width = grid.width as i32;
@@ -32,26 +58,14 @@ pub fn diffuse_geome_hazards_system(
         for x in 0..width {
             let pos = GridPosition { x, y };
             if let Some(terrain) = grid.get(x as usize, y as usize) {
-                // If this is a SporeBloom tile, it should spawn a hazard
-                if terrain == TerrainType::SporeBloom && !existing_hazards.contains(&pos) {
-                    commands.spawn((
-                        GeomeHazard {
-                            damage_per_tick: 5.0,
-                        },
-                        pos,
-                    ));
-                    existing_hazards.insert(pos);
-                }
-
-                // If this is a MagmaRock tile, it should spawn a hazard
-                if terrain == TerrainType::MagmaRock && !existing_hazards.contains(&pos) {
-                    commands.spawn((
-                        GeomeHazard {
-                            damage_per_tick: 10.0,
-                        },
-                        pos,
-                    ));
-                    existing_hazards.insert(pos);
+                // Only terrain that sustains a hazard spawns one — a tile
+                // scorched off SporeBloom (or any other terrain change)
+                // must never (re)gain a hazard here.
+                if let Some(damage_per_tick) = hazard_damage_for_terrain(terrain) {
+                    if !existing_hazards.contains(&pos) {
+                        commands.spawn((GeomeHazard { damage_per_tick }, pos));
+                        existing_hazards.insert(pos);
+                    }
                 }
             }
         }
@@ -155,6 +169,88 @@ mod tests {
         assert!(
             health.current < 100.0,
             "Miner should take damage from breached geome hazard"
+        );
+    }
+
+    fn hazard_count(world: &mut World) -> usize {
+        world.query::<&GeomeHazard>().iter(world).count()
+    }
+
+    #[test]
+    fn test_hazard_despawns_when_terrain_changes_off_spore_bloom() {
+        // Item 165: a burned (or otherwise changed) tile must stop being
+        // hazardous — GeomeHazard entities used to be immortal.
+        let mut world = World::new();
+        let mut grid = TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Rock; 100],
+        };
+        grid.set(6, 5, TerrainType::SporeBloom);
+        grid.set(2, 2, TerrainType::MagmaRock);
+        world.insert_resource(grid);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(diffuse_geome_hazards_system);
+        schedule.run(&mut world);
+        assert_eq!(hazard_count(&mut world), 2, "both hazard tiles spawn");
+
+        // Terrain changes off SporeBloom (quarantine burn -> Ash).
+        world
+            .resource_mut::<TerrainGrid>()
+            .set(6, 5, TerrainType::Ash);
+        schedule.run(&mut world);
+        assert_eq!(
+            hazard_count(&mut world),
+            1,
+            "the Ash tile's hazard must despawn; the MagmaRock hazard stays"
+        );
+
+        // And it must not respawn on later ticks.
+        schedule.run(&mut world);
+        assert_eq!(hazard_count(&mut world), 1, "no respawn on Ash");
+    }
+
+    #[test]
+    fn test_no_damage_on_scorched_tile() {
+        let mut world = World::new();
+        let mut grid = TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Rock; 100],
+        };
+        grid.set(6, 5, TerrainType::SporeBloom);
+        world.insert_resource(grid);
+        let miner = world
+            .spawn((
+                Pop,
+                Health {
+                    current: 100.0,
+                    max: 100.0,
+                    has_rust_lung: false,
+                },
+                GridPosition { x: 6, y: 5 },
+            ))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((
+            diffuse_geome_hazards_system,
+            environmental_damage_system.after(diffuse_geome_hazards_system),
+        ));
+        schedule.run(&mut world);
+        let hurt = world.get::<Health>(miner).unwrap().current;
+        assert!(hurt < 100.0, "standing on bloom hurts before the burn");
+
+        // Scorch the tile (what quarantine_burn_system does) and re-run.
+        world
+            .resource_mut::<TerrainGrid>()
+            .set(6, 5, TerrainType::Ash);
+        schedule.run(&mut world);
+        assert_eq!(
+            world.get::<Health>(miner).unwrap().current,
+            hurt,
+            "a scorched tile must deal no further environmental damage"
         );
     }
 }

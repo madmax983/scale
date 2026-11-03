@@ -947,7 +947,7 @@ fn parse_designation_type(name: &str) -> Option<DesignationType> {
         return parse_zone_type(inner).map(DesignationType::SetZone);
     }
     use DesignationType::{
-        Cannibalize, Chop, ClearFlora, CollectSample, Consume, Demolish, Destroy, Douse,
+        Burn, Cannibalize, Chop, ClearFlora, CollectSample, Consume, Demolish, Destroy, Douse,
         ExcavateDust, JuryRig, Mine, Repair, Tame,
     };
     Some(match name {
@@ -964,6 +964,7 @@ fn parse_designation_type(name: &str) -> Option<DesignationType> {
         "CollectSample" => CollectSample,
         "ExcavateDust" => ExcavateDust,
         "Douse" => Douse,
+        "Burn" => Burn,
         _ => return None,
     })
 }

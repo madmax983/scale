@@ -406,6 +406,7 @@ pub(crate) const fn get_skill_for_designation(
         DesignationType::SetZone(_)
         | DesignationType::Tame
         | DesignationType::Consume
+        | DesignationType::Burn
         | DesignationType::Douse => None,
     }
 }
@@ -563,6 +564,7 @@ fn execute_work_on_designation(
         }
         DesignationType::ExcavateDust => handle_dust_excavation(world, designation_entity, pos),
         DesignationType::Douse => handle_douse(world, designation_entity, pos),
+        DesignationType::Burn => handle_burn(world, designation_entity, pos),
         DesignationType::SetZone(_) | DesignationType::Tame => false,
     }
 }
@@ -592,6 +594,27 @@ fn handle_dust_excavation(
 /// but no executable path ever put a pop on a burning tile: fires burned
 /// until the structure under them became a ruin. Dousing removes every
 /// `Fire` entity on the tile and completes the designation.
+/// Queue a quarantine burn for a designation tile (item 165).
+///
+/// Fallback path: `process_burn_designations_system` normally converts
+/// Burn designations into `BurnOrder`s immediately, but if a pop is ever
+/// assigned one through the work queue, working it must do the same
+/// conversion instead of stalling the designation forever.
+fn handle_burn(
+    world: &mut World,
+    designation_entity: Entity,
+    pos: Option<GridPosition>,
+) -> bool {
+    if let Some(p) = pos {
+        world.spawn(crate::layer1::biology::invasive::BurnOrder { position: p });
+        if let Some(mut log) = world.get_resource_mut::<crate::shared::log::MessageLog>() {
+            log.add(format!("Quarantine burn ordered at ({}, {})", p.x, p.y));
+        }
+    }
+    world.despawn(designation_entity);
+    true
+}
+
 fn handle_douse(
     world: &mut World,
     designation_entity: Entity,

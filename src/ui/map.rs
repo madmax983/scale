@@ -964,6 +964,7 @@ pub const fn get_designation_char(tool: DesignationType) -> &'static str {
         DesignationType::Consume => "E",
         DesignationType::ExcavateDust => "U",
         DesignationType::Douse => "~",
+        DesignationType::Burn => "B",
     }
 }
 

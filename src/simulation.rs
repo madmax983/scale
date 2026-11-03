@@ -1267,6 +1267,9 @@ fn init_simulation_resources(world: &mut World) {
                 (
                     crate::layer1::biology::invasive::spore_hitchhiker_system,
                     crate::layer1::biology::invasive::spore_spread_system,
+                    // Item 165: player Burn designations become BurnOrders
+                    // immediately before the burn system consumes them.
+                    crate::layer1::biology::invasive::process_burn_designations_system,
                     crate::layer1::biology::invasive::quarantine_burn_system,
                 )
                     .chain(),

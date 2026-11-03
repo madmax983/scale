@@ -3,12 +3,16 @@
 //! with quarantine burns.
 //!
 //! Design notes:
-//! - The spec sketch assumed `Ship { origin: BiomeType::Alien }`,
-//!   `TerrainType::Xenofungus`, and `DesignationType::Burn`; none exist.
-//!   Adapted: the real [`TradeShipArrivalEvent`] (faction-string heuristic
-//!   for "alien biome"), the existing [`TerrainType::SporeBloom`] for the
-//!   infestation, a new [`TerrainType::Ash`] only for burn aftermath, and a
-//!   new [`BurnOrder`] component instead of the nonexistent designation.
+//! - The spec sketch assumed `Ship { origin: BiomeType::Alien }` and
+//!   `TerrainType::Xenofungus`; neither exists. Adapted: the real
+//!   [`TradeShipArrivalEvent`] (faction-string heuristic for "alien
+//!   biome"), the existing [`TerrainType::SporeBloom`] for the
+//!   infestation, and a new [`TerrainType::Ash`] only for burn aftermath.
+//! - The sketch's `DesignationType::Burn` also did not exist, so burns
+//!   were originally a bare [`BurnOrder`] component — unreachable from
+//!   the player's seat (balance report 2026-11-02, Headline 4). Item 165
+//!   wired the real designation: `DesignationType::Burn` designations are
+//!   converted into `BurnOrder`s by [`process_burn_designations_system`].
 //! - Burns jump the work queue (processed immediately at high priority per
 //!   spec section 7) rather than routing through the slow job system.
 
@@ -275,6 +279,27 @@ pub fn spore_spread_system(
     }
 }
 
+/// Converts player `DesignationType::Burn` designations into
+/// [`BurnOrder`]s (item 165). Burns jump the work queue per spec section
+/// 7, so this runs as an immediate conversion — no pop is ever sent to
+/// stand on a hazard tile to light the fire. The designation is consumed;
+/// `quarantine_burn_system` does the scorching itself.
+pub fn process_burn_designations_system(
+    mut commands: Commands,
+    designations: Query<(
+        Entity,
+        &crate::layer1::designation::Designation,
+        &GridPosition,
+    )>,
+) {
+    for (entity, designation, pos) in designations.iter() {
+        if designation.designation_type == crate::layer1::designation::DesignationType::Burn {
+            commands.spawn(BurnOrder { position: *pos });
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 /// Quarantine burns resolve immediately at high priority: every spore on
 /// the designated tile is destroyed and the ground is scorched to Ash.
 pub fn quarantine_burn_system(
@@ -282,6 +307,7 @@ pub fn quarantine_burn_system(
     mut terrain: ResMut<TerrainGrid>,
     burns: Query<(Entity, &BurnOrder)>,
     spores: Query<(Entity, &Spore)>,
+    hazards: Query<(Entity, &GridPosition), With<crate::layer1::environment::geomes::GeomeHazard>>,
     mut burn_events: EventWriter<QuarantineBurnEvent>,
     mut chronicle: EventWriter<AddChronicleEvent>,
 ) {
@@ -290,6 +316,14 @@ pub fn quarantine_burn_system(
         for (spore_entity, spore) in spores.iter() {
             if spore.position == order.position {
                 commands.entity(spore_entity).despawn();
+            }
+        }
+        // The tile's geome hazard dies with the burn (item 165): a
+        // scorched tile must stop dealing damage this tick, not whenever
+        // hazard diffusion next cleans stale hazards up.
+        for (hazard_entity, hazard_pos) in hazards.iter() {
+            if *hazard_pos == order.position {
+                commands.entity(hazard_entity).despawn();
             }
         }
         // Scorch bloom or infectable ground to Ash.
@@ -562,6 +596,73 @@ mod tests {
             terrain.get(5, 5),
             Some(TerrainType::SporeBloom),
             "Terrain stays SporeBloom after senescence."
+        );
+    }
+
+    #[test]
+    fn test_burn_designation_scorches_spore_bloom() {
+        // Item 165 (RED first): a player Burn designation must reach the
+        // burn system — before this, nothing outside these tests ever
+        // spawned a BurnOrder, so the counterplay was dead code.
+        let mut app = setup_test_app();
+        app.add_systems(Update, process_burn_designations_system);
+        app.world_mut()
+            .resource_mut::<TerrainGrid>()
+            .set(5, 5, TerrainType::SporeBloom);
+        assert!(crate::layer1::designation::try_designate(
+            app.world_mut(),
+            5,
+            5,
+            crate::layer1::designation::DesignationType::Burn,
+        ));
+        // One update converts designation -> BurnOrder; the burn system
+        // (registered in setup_test_app) may need a second pass depending
+        // on scheduling, so run a few.
+        for _ in 0..3 {
+            app.update();
+        }
+        let terrain = app.world().resource::<TerrainGrid>();
+        assert_eq!(
+            terrain.get(5, 5),
+            Some(TerrainType::Ash),
+            "A Burn designation must scorch SporeBloom to Ash"
+        );
+        let designations = app
+            .world_mut()
+            .query::<&crate::layer1::designation::Designation>()
+            .iter(app.world())
+            .count();
+        assert_eq!(designations, 0, "the designation is consumed");
+    }
+
+    #[test]
+    fn test_burn_removes_geome_hazard() {
+        // Item 165: burning a tile must remove its GeomeHazard the same
+        // tick — hazard_tiles stayed 114 -> 114 in the balance trials
+        // because nothing ever despawned one.
+        let mut app = setup_test_app();
+        app.world_mut()
+            .resource_mut::<TerrainGrid>()
+            .set(5, 5, TerrainType::SporeBloom);
+        app.world_mut().spawn((
+            crate::layer1::environment::geomes::GeomeHazard {
+                damage_per_tick: 5.0,
+            },
+            GridPosition { x: 5, y: 5 },
+        ));
+        app.world_mut().spawn(BurnOrder {
+            position: GridPosition { x: 5, y: 5 },
+        });
+        app.update();
+        let hazards = app
+            .world_mut()
+            .query::<&crate::layer1::environment::geomes::GeomeHazard>()
+            .iter(app.world())
+            .count();
+        assert_eq!(hazards, 0, "the burn must despawn the tile's hazard");
+        assert_eq!(
+            app.world().resource::<TerrainGrid>().get(5, 5),
+            Some(TerrainType::Ash)
         );
     }
 

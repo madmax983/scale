@@ -71,6 +71,7 @@ pub fn produce_manual_system(
                 DesignationType::Tame => Some(SkillType::Husbandry),
                 DesignationType::Cannibalize
                 | DesignationType::Consume
+                | DesignationType::Burn
                 | DesignationType::Douse => None,
             });
 
@@ -167,6 +168,7 @@ pub fn manual_aura_system(
                     DesignationType::Tame => Some(SkillType::Husbandry),
                     DesignationType::Cannibalize
                     | DesignationType::Consume
+                    | DesignationType::Burn
                     | DesignationType::Douse => None,
                 };
                 skill_opt == Some(manual.skill_type)

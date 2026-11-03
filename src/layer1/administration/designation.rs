@@ -50,6 +50,10 @@ pub enum DesignationType {
     ExcavateDust,
     /// Designate a burning tile for dousing (Item 77 Phase 2 fire response).
     Douse,
+    /// Designate a spore-infested tile for a quarantine burn (Spec 326 /
+    /// item 165). Processed immediately into a `BurnOrder` — burns jump
+    /// the work queue rather than waiting for a pop to walk to the tile.
+    Burn,
 }
 
 impl DesignationType {
@@ -79,6 +83,7 @@ impl DesignationType {
             Self::CollectSample => 'S',
             Self::ExcavateDust => 'U',
             Self::Douse => '~',
+            Self::Burn => 'B',
         }
     }
 
@@ -108,6 +113,7 @@ impl DesignationType {
             Self::CollectSample => "S",
             Self::ExcavateDust => "U",
             Self::Douse => "~",
+            Self::Burn => "B",
         }
     }
 
@@ -137,6 +143,7 @@ impl DesignationType {
             Self::CollectSample => "Collect Sample",
             Self::ExcavateDust => "Excavate Dust",
             Self::Douse => "Douse Fire",
+            Self::Burn => "Quarantine Burn",
         }
     }
 }
@@ -311,6 +318,16 @@ pub fn can_designate(world: &World, x: i32, y: i32, designation_type: Designatio
             .is_some_and(|dust| dust.amount_at(x, y) > 0.0),
         DesignationType::Douse => {
             has_component_at::<crate::layer1::fire::Fire>(world, x, y)
+        }
+        DesignationType::Burn => {
+            // Burnable ground is exactly what quarantine_burn_system can
+            // scorch: SporeBloom, or infectable soil it could take root in.
+            let terrain = world.resource::<TerrainGrid>();
+            matches!(
+                terrain.get(x as usize, y as usize),
+                Some(t) if t == TerrainType::SporeBloom
+                    || crate::layer1::biology::invasive::is_infectable(t)
+            )
         }
     }
 }
@@ -557,8 +574,8 @@ pub fn try_designate_area(
                     DesignationType::Destroy => {
                         occupied_tiles.is_some_and(|o| o.0.contains(&(x, y)))
                     }
-                    // Single-tile tool: area designation does not apply.
-                    DesignationType::ExcavateDust => false,
+                    // Single-tile tools: area designation does not apply.
+                    DesignationType::ExcavateDust | DesignationType::Burn => false,
                 };
 
                 if is_valid {
@@ -1040,4 +1057,30 @@ fn test_douse_designation_requires_fire() {
     // Area designation targets exactly the burning tiles.
     let count = try_designate_area(&mut world, 0, 0, 9, 9, DesignationType::Douse);
     assert_eq!(count, 1, "only the burning tile is designated");
+}
+
+#[test]
+fn test_burn_designation_requires_burnable_ground() {
+    // Item 165: a quarantine burn can be designated on SporeBloom (and on
+    // infectable soil as a preventive scorch), never on inert ground.
+    let mut world = World::new();
+    let mut tiles = vec![TerrainType::Rock; 100];
+    tiles[33] = TerrainType::SporeBloom; // (3,3)
+    tiles[44] = TerrainType::Grass; // (4,4) infectable
+    world.insert_resource(TerrainGrid {
+        width: 10,
+        height: 10,
+        tiles,
+    });
+    world.insert_resource(OccupiedTiles::default());
+
+    assert!(can_designate(&world, 3, 3, DesignationType::Burn));
+    assert!(can_designate(&world, 4, 4, DesignationType::Burn));
+    assert!(
+        !can_designate(&world, 5, 5, DesignationType::Burn),
+        "Rock cannot be quarantine-burned"
+    );
+    assert_eq!(DesignationType::Burn.char(), 'B');
+    assert_eq!(DesignationType::Burn.label(), "Quarantine Burn");
+    assert!(try_designate(&mut world, 3, 3, DesignationType::Burn));
 }

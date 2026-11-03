@@ -340,6 +340,7 @@ fn handle_designate_command(world: &mut World, parts: &[&str], designation_type:
             DesignationType::Chop => "chop",
             DesignationType::ExcavateDust => "excavate",
             DesignationType::Douse => "douse",
+            DesignationType::Burn => "burn",
             _ => "designate", // Fallback, though we only call this for destroy, mine, chop
         };
         let msg = format!("Usage: {name} <x> <y>");
@@ -617,6 +618,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "chop" => handle_designate_command(world, &parts, DesignationType::Chop),
         "excavate" => handle_designate_command(world, &parts, DesignationType::ExcavateDust),
         "douse" => handle_designate_command(world, &parts, DesignationType::Douse),
+        "burn" => handle_designate_command(world, &parts, DesignationType::Burn),
         "shelter" => handle_shelter_command(world, &parts),
         "dust" => print_dust_report(world),
         "launch_sat" => handle_launch_sat_command(world),
@@ -3230,6 +3232,11 @@ fn print_stats(world: &mut World) {
     };
     // Spec 390: eureka breakthrough census for STATS (full panel: `eureka`).
     let eureka_label = scale::layer1::eureka::eureka_stats_label(world);
+    // Item 165: live GeomeHazard census for STATS (burn counterplay evidence).
+    let geohazards = world
+        .query::<&scale::layer1::environment::geomes::GeomeHazard>()
+        .iter(world)
+        .count();
     // Spec 376: schism census for STATS (full panel: `schism`).
     let schism_claimed = {
         use scale::layer1::social::schism::seceded_territory_count;
@@ -3503,7 +3510,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={}",
         tick,
         scenario,
         pops,
@@ -3664,6 +3671,7 @@ fn print_stats(world: &mut World) {
         friction_label,
         strat_label,
         eureka_label,
+        geohazards,
     );
 }
 
@@ -5155,6 +5163,7 @@ fn print_map(world: &mut World, center_x: i32, center_y: i32) {
                     DesignationType::Consume => 'E',
                     DesignationType::ExcavateDust => 'U',
                     DesignationType::Douse => '~',
+                    DesignationType::Burn => 'B',
                 };
                 map_content.push_str(&format!("{c}").magenta().to_string());
                 continue;
@@ -5302,6 +5311,9 @@ fn designate_at(world: &mut World, designation_type: DesignationType, x: i32, y:
         }
         DesignationType::Douse => {
             format!("Failed: no fire at ({x}, {y})")
+        }
+        DesignationType::Burn => {
+            format!("Failed: ({x}, {y}) is {tile_name}, need SporeBloom or infectable ground for a quarantine burn")
         }
     };
 
@@ -5636,6 +5648,7 @@ fn print_designations(world: &mut World) {
             DesignationType::Consume => Cell::new(type_str).fg(Color::Red),
             DesignationType::ExcavateDust => Cell::new(type_str).fg(Color::Yellow),
             DesignationType::Douse => Cell::new(type_str).fg(Color::Cyan),
+            DesignationType::Burn => Cell::new(type_str).fg(Color::Red),
         };
 
         table.add_row(vec![type_cell, Cell::new(format!("{},{}", pos.x, pos.y))]);
@@ -5827,6 +5840,7 @@ fn scan_terrain(world: &mut World, center_x: i32, center_y: i32, radius: ScanRad
                 DesignationType::CollectSample => "collect_sample",
                 DesignationType::Consume => "consume",
                 DesignationType::Douse => "douse",
+                DesignationType::Burn => "burn",
             };
             (p.x, p.y, dt.to_string())
         })
