@@ -837,16 +837,22 @@ pub fn celestial_cemeteries_trade_bridge_system(
 
 pub fn dead_protocol_chronicle_bridge(
     mut events: bevy_ecs::event::EventReader<crate::layer2::dead_protocols::ViolationEvent>,
+    bodies: Query<&OrbitalBody>,
     mut chronicle_events: bevy_ecs::event::EventWriter<
         crate::layer1::core::chronicle::AddChronicleEvent,
     >,
 ) {
     for event in events.read() {
+        // Item 162 audit: `event.target` is an Entity — name the
+        // orbital body it guards, never its Debug rendering.
+        let target_label = bodies.get(event.target).map_or_else(
+            |_| "a guarded world".to_string(),
+            |body| body.name.clone(),
+        );
         chronicle_events.send(crate::layer1::core::chronicle::AddChronicleEvent {
             importance: crate::layer1::core::chronicle::EventImportance::Major,
             text: format!(
-                "A dead protocol was violated at {:?}! Ancient Enforcers have awakened.",
-                event.target
+                "A dead protocol was violated at {target_label}! Ancient Enforcers have awakened."
             ),
         });
     }

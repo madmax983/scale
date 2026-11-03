@@ -3119,13 +3119,13 @@ pub fn dead_hand_chronicle_bridge(
     mut events: EventReader<DoomsdayTriggeredEvent>,
     mut chronicle_events: EventWriter<AddChronicleEvent>,
 ) {
-    for event in events.read() {
+    for _event in events.read() {
         chronicle_events.send(AddChronicleEvent {
             importance: EventImportance::Legendary,
-            text: format!(
-                "The Dead Hand was triggered by device {:?}! A doomsday scenario is unfolding.",
-                event.device
-            ),
+            // Item 162 audit: `event.device` is an Entity with no
+            // human label anywhere in the game — do not leak its
+            // Debug rendering into the chronicle.
+            text: "The Dead Hand was triggered! A doomsday scenario is unfolding.".to_string(),
         });
     }
 }

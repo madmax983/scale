@@ -2,6 +2,7 @@ use crate::layer1::resources::ResourceType;
 use crate::layer2::events::ShipDestroyedEvent;
 use crate::layer2::fleet::{FleetComposition, FleetFaction, InOrbit};
 use crate::layer2::ship::ShipType;
+use crate::layer2::system::OrbitalBody;
 use crate::shared::log::{Message, MessageLog};
 use bevy_ecs::prelude::*;
 use ratatui::style::Color;
@@ -100,6 +101,14 @@ pub fn resolve_combat(
     }
 }
 
+/// Player-facing label for a combat location (item 162): the
+/// orbital body's name when it has one, else the `body <index>`
+/// label used by the launch ledger. Never an Entity Debug rendering.
+#[must_use]
+pub fn combat_location_label(body_name: Option<&str>, location: Entity) -> String {
+    body_name.map_or_else(|| format!("body {}", location.index()), ToString::to_string)
+}
+
 /// System to resolve combat between fleets at the same orbital location.
 ///
 /// ⚡ Bolt Optimization:
@@ -116,6 +125,7 @@ pub fn fleet_combat_system(
         &FleetComposition,
         Option<&AvoidCombat>,
     )>,
+    bodies: Query<&OrbitalBody>,
     mut event_writer: EventWriter<ShipDestroyedEvent>,
     mut message_log: Option<ResMut<MessageLog>>,
 ) {
@@ -198,10 +208,20 @@ pub fn fleet_combat_system(
             }
 
             if let Some(log) = message_log.as_mut() {
+                // Item 162 audit: `location` is an Entity — its Debug
+                // rendering (`34v1#4294967330`) is not player-facing
+                // text. Name the orbital body instead, falling back to
+                // the `body <index>` label used by the launch ledger.
+                // `result.winner` is a FleetFaction: its Debug is the
+                // plain variant name, which is fine.
+                let location_label = combat_location_label(
+                    bodies.get(location).ok().map(|body| body.name.as_str()),
+                    location,
+                );
                 log.messages.push_back(Message {
                     text: format!(
-                        "Combat at {:?}! Winner: {:?}, Loser Survivors: {}",
-                        location, result.winner, loser_survivor_count
+                        "Combat at {location_label}! Winner: {:?}, Loser Survivors: {}",
+                        result.winner, loser_survivor_count
                     ),
                     color: Color::Red,
                 });
@@ -212,9 +232,13 @@ pub fn fleet_combat_system(
 
 #[cfg(test)]
 mod tests {
-    use crate::layer2::combat::resolve_combat;
-    use crate::layer2::fleet::{FleetComposition, FleetFaction};
+    use crate::layer2::combat::{combat_location_label, fleet_combat_system, resolve_combat};
+    use crate::layer2::events::ShipDestroyedEvent;
+    use crate::layer2::fleet::{FleetComposition, FleetFaction, InOrbit};
     use crate::layer2::ship::{Ship, ShipType};
+    use crate::layer2::system::OrbitalBody;
+    use crate::shared::log::MessageLog;
+    use bevy_ecs::prelude::*;
 
     // Helper to create a test fleet
     fn create_fleet(_faction: FleetFaction, ships: Vec<ShipType>) -> FleetComposition {
@@ -284,6 +308,61 @@ mod tests {
             total_survivors < 10,
             "Casualties should occur in even fight"
         );
+    }
+
+    #[test]
+    fn test_combat_location_label_names_body_not_entity() {
+        // Item 162 regression: the label is the body's name, and the
+        // fallback is a plain index — never `34v1#4294967330`.
+        let mut world = World::new();
+        let planet = world.spawn_empty().id();
+        assert_eq!(
+            combat_location_label(Some("Test Prime"), planet),
+            "Test Prime"
+        );
+        let fallback = combat_location_label(None, planet);
+        assert_eq!(fallback, format!("body {}", planet.index()));
+        assert!(!fallback.contains('#'), "label leaked Entity Debug: {fallback}");
+    }
+
+    #[test]
+    fn test_fleet_combat_log_names_orbital_body_not_entity() {
+        // Item 162 regression, through the real system + MessageLog.
+        let mut world = World::new();
+        world.init_resource::<Events<ShipDestroyedEvent>>();
+        world.insert_resource(MessageLog::default());
+        let planet = world
+            .spawn(OrbitalBody {
+                name: "Test Prime".to_string(),
+                ..Default::default()
+            })
+            .id();
+        world.spawn((
+            FleetFaction::Player,
+            InOrbit { parent: planet },
+            create_fleet(FleetFaction::Player, vec![ShipType::Frigate; 10]),
+        ));
+        world.spawn((
+            FleetFaction::Pirate,
+            InOrbit { parent: planet },
+            create_fleet(FleetFaction::Pirate, vec![ShipType::Scout; 1]),
+        ));
+        let mut schedule = Schedule::default();
+        schedule.add_systems(fleet_combat_system);
+        schedule.run(&mut world);
+        let log = world.resource::<MessageLog>();
+        let texts: Vec<&str> = log.messages.iter().map(|m| m.text.as_str()).collect();
+        assert!(
+            texts.iter().any(|t| t.contains("Combat at Test Prime!")),
+            "combat log should name the body, got: {texts:?}"
+        );
+        for text in &texts {
+            assert!(!text.contains('#'), "combat log leaked Entity Debug: {text}");
+            assert!(
+                !text.contains(&format!("{planet:?}")),
+                "combat log leaked Entity Debug: {text}"
+            );
+        }
     }
 
     #[test]

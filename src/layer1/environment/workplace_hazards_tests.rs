@@ -5,11 +5,12 @@ mod tests {
     };
     use crate::layer1::architecture::building::{Building, BuildingType};
     use crate::layer1::chronicle::AddChronicleEvent;
-    use crate::layer1::environment::hazards::AmputationEvent;
+    use crate::layer1::environment::hazards::{AccidentSeverity, AmputationEvent};
     use crate::layer1::environment::workplace_hazards::{
         building_accident_risk, process_workplace_hazards_system, safety_risk_multiplier,
-        should_trigger_accident, workplace_accident_injury_system, AccidentLedger,
-        AccidentRiskOverride, WorkplaceAccidentEvent, SAFETY_PROTOCOLS_RISK_MULTIPLIER,
+        should_trigger_accident, workplace_accident_injury_system, workplace_accident_text,
+        workplace_label, AccidentLedger, AccidentRiskOverride, WorkplaceAccidentEvent,
+        SAFETY_PROTOCOLS_RISK_MULTIPLIER,
     };
     use crate::layer1::gastronomy::WorkSpeedBuff;
     use crate::layer1::health::Health;
@@ -223,6 +224,121 @@ mod tests {
         let amps = world.resource::<Events<AmputationEvent>>();
         let mut reader = amps.get_cursor();
         assert_eq!(reader.read(amps).count(), 1);
+    }
+
+    #[test]
+    fn test_workplace_label_variants() {
+        // Item 162: pure label rules — type label alone when unique,
+        // coordinates only as a disambiguator, generic when unknown.
+        assert_eq!(
+            workplace_label(Some((BuildingType::Smelter, GridPosition { x: 7, y: 9 })), 1),
+            "the Smelter"
+        );
+        assert_eq!(
+            workplace_label(Some((BuildingType::Smelter, GridPosition { x: 7, y: 9 })), 2),
+            "the Smelter at (7, 9)"
+        );
+        assert_eq!(workplace_label(None, 0), "a workplace");
+        assert_eq!(
+            workplace_accident_text("the Smelter", AccidentSeverity::Major, 40.0),
+            "Workplace accident at the Smelter: a worker was injured (Major, -40 HP)."
+        );
+    }
+
+    fn chronicle_texts(world: &World) -> Vec<String> {
+        let chron = world.resource::<Events<AddChronicleEvent>>();
+        let mut reader = chron.get_cursor();
+        reader.read(chron).map(|e| e.text.clone()).collect()
+    }
+
+    #[test]
+    fn test_chronicle_names_building_type_not_entity() {
+        // Item 162 regression (Mark's playtest report): the chronicle
+        // read `building 34v1#4294967330`. It must name the building.
+        let (mut world, worker) = setup_injury_world();
+        let workplace = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::Smelter,
+                },
+                GridPosition { x: 7, y: 9 },
+            ))
+            .id();
+        world.send_event(WorkplaceAccidentEvent {
+            worker,
+            workplace,
+            severity_roll: 0.85, // Major band, -40 HP (Mark's example)
+        });
+        run_injury(&mut world);
+        let texts = chronicle_texts(&world);
+        assert_eq!(texts.len(), 1);
+        let text = &texts[0];
+        assert_eq!(
+            text,
+            "Workplace accident at the Smelter: a worker was injured (Major, -40 HP)."
+        );
+        assert!(text.contains("Smelter"), "chronicle must name the type: {text}");
+        assert!(!text.contains('#'), "chronicle leaked Entity Debug: {text}");
+        assert!(
+            !text.contains(&format!("{workplace:?}")),
+            "chronicle leaked Entity Debug: {text}"
+        );
+    }
+
+    #[test]
+    fn test_chronicle_disambiguates_duplicate_building_types() {
+        // Two Smelters: the accident site gets its coordinates.
+        let (mut world, worker) = setup_injury_world();
+        let workplace = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::Smelter,
+                },
+                GridPosition { x: 7, y: 9 },
+            ))
+            .id();
+        world.spawn((
+            Building {
+                building_type: BuildingType::Smelter,
+            },
+            GridPosition { x: 12, y: 3 },
+        ));
+        world.send_event(WorkplaceAccidentEvent {
+            worker,
+            workplace,
+            severity_roll: 0.85,
+        });
+        run_injury(&mut world);
+        let texts = chronicle_texts(&world);
+        assert_eq!(texts.len(), 1);
+        assert!(
+            texts[0].contains("the Smelter at (7, 9)"),
+            "duplicate types need coordinates: {}",
+            texts[0]
+        );
+        assert!(!texts[0].contains('#'), "chronicle leaked Entity Debug: {}", texts[0]);
+    }
+
+    #[test]
+    fn test_chronicle_unknown_workplace_stays_generic() {
+        // A bare workplace entity (the pre-fix test shape) must still
+        // chronicle — generically, with no entity dump.
+        let (mut world, worker) = setup_injury_world();
+        let workplace = world.spawn_empty().id();
+        world.send_event(WorkplaceAccidentEvent {
+            worker,
+            workplace,
+            severity_roll: 0.5,
+        });
+        run_injury(&mut world);
+        let texts = chronicle_texts(&world);
+        assert_eq!(texts.len(), 1);
+        assert!(
+            texts[0].contains("Workplace accident at a workplace:"),
+            "unknown workplace should be generic: {}",
+            texts[0]
+        );
+        assert!(!texts[0].contains('#'), "chronicle leaked Entity Debug: {}", texts[0]);
     }
 
     #[test]

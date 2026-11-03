@@ -1,7 +1,7 @@
 use crate::layer1::building::Building;
 use crate::layer1::map::GridPosition;
 use crate::layer1::needs::Needs;
-use crate::layer1::pop::Pop;
+use crate::layer1::pop::{Pop, PopName};
 use crate::layer1::structure::Structure;
 use crate::layer1::terrain::{TerrainGrid, TerrainType};
 use crate::layer1::utility_types::{ActionType, PopAction};
@@ -152,10 +152,13 @@ pub fn update_void_exposure_system(
 
 /// System to handle manifestations of high void exposure.
 pub fn void_manifestation_system(
-    mut pops: Query<(Entity, &mut VoidExposure, &mut PopAction), With<Pop>>,
+    mut pops: Query<
+        (Entity, &mut VoidExposure, &mut PopAction, Option<&PopName>),
+        With<Pop>,
+    >,
     mut log: Option<ResMut<MessageLog>>,
 ) {
-    for (entity, mut exposure, mut action) in &mut pops {
+    for (_entity, mut exposure, mut action, pop_name) in &mut pops {
         // Decrease timer
         if exposure.check_timer > 0 {
             exposure.check_timer -= 1;
@@ -172,7 +175,12 @@ pub fn void_manifestation_system(
                 // Rate limit logs
                 if exposure.check_timer == 100 {
                     // Only once per check cycle
-                    log.add(format!("Pop {:?} stares into the abyss...", entity));
+                    // Item 162 audit: name the pop, never its Entity Debug.
+                    let label = pop_name.map_or_else(
+                        || "A colonist".to_string(),
+                        |name| name.0.clone(),
+                    );
+                    log.add(format!("{label} stares into the abyss..."));
                 }
             }
         }

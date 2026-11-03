@@ -409,7 +409,9 @@ pub fn pirate_republic_diplomacy_bridge(
     for entity in query.iter() {
         commands.entity(entity).insert((
             crate::layer3::diplomacy_reflection::Civilization {
-                id: format!("PirateRepublic_{:?}", entity),
+                // Item 162 audit: identifiers use the plain index,
+                // never the Entity Debug rendering (`34v1#...`).
+                id: format!("PirateRepublic_{}", entity.index()),
             },
             crate::layer3::diplomacy_reflection::DiplomaticTraits {
                 is_barbarian: true,

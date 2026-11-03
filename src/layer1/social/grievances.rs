@@ -78,6 +78,7 @@ pub fn post_grievance_system(
     mut commands: Commands,
     mut boards: Query<&mut BulletinBoard>,
     mut pops: Query<GrievancePopQuery>,
+    names: Query<&crate::layer1::pop::PopName>,
     time: Option<Res<SimulationTime>>,
 ) {
     let timestamp = time.map_or(0, |t| t.tick);
@@ -139,10 +140,16 @@ pub fn post_grievance_system(
 
                 if matches_sentiment {
                     target = Some(*t_entity);
+                    // Item 162 audit: board notes are player-facing —
+                    // name the pop, never the Entity Debug rendering.
+                    let target_label = names.get(*t_entity).map_or_else(
+                        |_| "someone".to_string(),
+                        |name| name.0.clone(),
+                    );
                     content = match s {
-                        Sentiment::Positive => format!("I appreciate {:?}!", t_entity),
-                        Sentiment::Negative => format!("I blame {:?}!", t_entity),
-                        Sentiment::Neutral => format!("Thinking about {:?}.", t_entity),
+                        Sentiment::Positive => format!("I appreciate {target_label}!"),
+                        Sentiment::Negative => format!("I blame {target_label}!"),
+                        Sentiment::Neutral => format!("Thinking about {target_label}."),
                     };
                 }
             }

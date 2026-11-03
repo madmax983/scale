@@ -226,6 +226,7 @@ pub fn process_living_harvest_system(
     mut events: EventReader<HarvestLivingEvent>,
     inmates: Query<&Inmate>,
     pops: Query<Entity>,
+    names: Query<&crate::layer1::pop::PopName>,
     resources: Option<ResMut<ColonyResources>>,
     mut harvest_events: EventWriter<OrganHarvestEvent>,
     mut chronicle: EventWriter<AddChronicleEvent>,
@@ -246,7 +247,12 @@ pub fn process_living_harvest_system(
         stock.add_resource(&ResourceType::Organs, 1.0);
         commands.entity(ev.target).despawn();
         harvest_events.send(OrganHarvestEvent {
-            donor: format!("inmate {:?}", ev.target),
+            // Item 162 audit: the donor field is a display name —
+            // resolve the pop's name, never the Entity Debug.
+            donor: names.get(ev.target).map_or_else(
+                |_| "a detained prisoner".to_string(),
+                |name| name.0.clone(),
+            ),
             living: true,
         });
         chronicle.send(AddChronicleEvent {

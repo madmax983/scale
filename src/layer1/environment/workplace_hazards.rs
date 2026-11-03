@@ -253,6 +253,45 @@ pub fn process_workplace_hazards_system(
     }
 }
 
+/// Human-readable label for the workplace in chronicle text.
+///
+/// Chronicle prose must never carry a raw `Entity` debug rendering
+/// (`34v1#4294967330` — Bevy's index/generation/packed-bits format,
+/// item 162): resolve the building's type label instead, adding its
+/// tile coordinates only when more than one building of that type
+/// exists, so the coordinates actually disambiguate. A workplace
+/// entity with no [`Building`] (despawned, or a bare test entity)
+/// degrades to a generic label rather than an entity dump.
+#[must_use]
+pub fn workplace_label(
+    building: Option<(BuildingType, GridPosition)>,
+    same_type_count: usize,
+) -> String {
+    match building {
+        Some((building_type, pos)) => {
+            if same_type_count > 1 {
+                format!(
+                    "the {} at ({}, {})",
+                    building_type.label(),
+                    pos.x,
+                    pos.y
+                )
+            } else {
+                format!("the {}", building_type.label())
+            }
+        }
+        None => "a workplace".to_string(),
+    }
+}
+
+/// Chronicle text for a workplace accident at a resolved `label`
+/// (see [`workplace_label`]). Kept as a pure formatter so tests can
+/// pin the exact player-facing wording.
+#[must_use]
+pub fn workplace_accident_text(label: &str, severity: AccidentSeverity, damage: f32) -> String {
+    format!("Workplace accident at {label}: a worker was injured ({severity:?}, -{damage:.0} HP).")
+}
+
 /// Separate injury system (spec 387 §5/§7): listens for
 /// [`WorkplaceAccidentEvent`] and applies consequences through the
 /// existing severity machinery — the same damage bands as
@@ -263,11 +302,22 @@ pub fn process_workplace_hazards_system(
 pub fn workplace_accident_injury_system(
     mut events: EventReader<WorkplaceAccidentEvent>,
     mut health_query: Query<&mut Health>,
+    buildings: Query<(Entity, &Building, &GridPosition)>,
     mut commands: Commands,
     mut amputations: EventWriter<AmputationEvent>,
     mut chronicle: EventWriter<AddChronicleEvent>,
     mut ledger: Option<ResMut<AccidentLedger>>,
 ) {
+    // Snapshot building identity once per run: the chronicle names
+    // the building a human would point at, never its Entity (item 162).
+    let mut building_info: std::collections::HashMap<Entity, (BuildingType, GridPosition)> =
+        std::collections::HashMap::new();
+    let mut type_counts: std::collections::HashMap<BuildingType, usize> =
+        std::collections::HashMap::new();
+    for (entity, building, pos) in &buildings {
+        building_info.insert(entity, (building.building_type, *pos));
+        *type_counts.entry(building.building_type).or_insert(0) += 1;
+    }
     for event in events.read() {
         let severity = determine_severity(event.severity_roll);
         let (damage, speed_multiplier, debuff_ticks) = match severity {
@@ -295,16 +345,20 @@ pub fn workplace_accident_injury_system(
                 AccidentSeverity::Critical => ledger.critical += 1,
             }
         }
+        let label = match building_info.get(&event.workplace) {
+            Some(&(building_type, pos)) => workplace_label(
+                Some((building_type, pos)),
+                type_counts.get(&building_type).copied().unwrap_or(1),
+            ),
+            None => workplace_label(None, 0),
+        };
         chronicle.send(AddChronicleEvent {
             importance: if severity == AccidentSeverity::Critical {
                 EventImportance::Major
             } else {
                 EventImportance::Standard
             },
-            text: format!(
-                "Workplace accident at building {:?}: a worker was injured ({severity:?}, -{damage:.0} HP).",
-                event.workplace
-            ),
+            text: workplace_accident_text(&label, severity, damage),
         });
     }
 }

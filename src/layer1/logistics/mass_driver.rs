@@ -85,9 +85,11 @@ pub fn mass_driver_chronicle_bridge(
 ) {
     for event in bomb_events.read() {
         chronicle_events.send(crate::layer1::core::chronicle::AddChronicleEvent {
+            // Item 162 audit: `event.target` is an Entity — the
+            // sentence names the colony in words, not by Debug dump.
             text: format!(
-                "Kinetic Bombardment! Mass driver payload struck colony {:?} with {} energy.",
-                event.target, event.kinetic_energy
+                "Kinetic Bombardment! Mass driver payload struck the colony with {} energy.",
+                event.kinetic_energy
             ),
             importance: crate::layer1::core::chronicle::EventImportance::Major,
         });

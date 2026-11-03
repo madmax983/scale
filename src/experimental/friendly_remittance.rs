@@ -1,6 +1,7 @@
 use crate::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
 use crate::layer1::economy::Wallet;
 use crate::layer1::map::GridPosition;
+use crate::layer1::pop::PopName;
 use crate::layer1::social::Relationships;
 use crate::layer1::utility_types::manhattan_distance;
 use bevy_ecs::prelude::*;
@@ -8,6 +9,7 @@ use bevy_ecs::prelude::*;
 pub fn friendly_remittance_system(
     mut wallets: Query<&mut Wallet>,
     pops: Query<(Entity, &Relationships, &GridPosition)>,
+    names: Query<&PopName>,
     mut chronicle_events: EventWriter<AddChronicleEvent>,
 ) {
     let mut transactions = Vec::new();
@@ -42,7 +44,14 @@ pub fn friendly_remittance_system(
                 w_rich.credits -= amount;
                 w_poor.credits += amount;
 
-                let text = format!("Entity {:?} generously transferred {:.1} credits to their good friend Entity {:?} to help them through hard times.", rich, amount, poor);
+                // Item 162 audit: name the pops, never Entity Debug.
+                let rich_label = names
+                    .get(rich)
+                    .map_or_else(|_| "A colonist".to_string(), |name| name.0.clone());
+                let poor_label = names
+                    .get(poor)
+                    .map_or_else(|_| "a friend".to_string(), |name| name.0.clone());
+                let text = format!("{rich_label} generously transferred {:.1} credits to their good friend {poor_label} to help them through hard times.", amount);
                 chronicle_events.send(AddChronicleEvent {
                     text,
                     importance: EventImportance::Minor,
