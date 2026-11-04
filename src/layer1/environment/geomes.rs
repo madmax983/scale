@@ -83,6 +83,15 @@ pub fn environmental_damage_system(
             // The phased Chronostalker walks between moments: nothing
             // in the stream can touch it.
             Without<crate::layer1::culture::chronostalker::Phased>,
+            // Item 167: dormant origin pops are in stasis at their
+            // sites (see pressure_damage_system / thermal_damage_system,
+            // items 100/101) — they are excluded from utility AI and
+            // tethered in place, so they can never step off a hazard
+            // tile; environmental damage cannot touch them until they
+            // wake and the dormant marker is removed.
+            Without<crate::layer1::culture::lawbound::DormantAutomaton>,
+            Without<crate::layer1::culture::bloomtouched::DormantTouched>,
+            Without<crate::layer1::culture::chronostalker::DormantStalker>,
         ),
     >,
     hazard_query: Query<(&GridPosition, &GeomeHazard)>,
@@ -252,5 +261,170 @@ mod tests {
             hurt,
             "a scorched tile must deal no further environmental damage"
         );
+    }
+
+    fn dormant_world_with_hazard() -> World {
+        let mut world = World::new();
+        world.spawn((
+            GridPosition { x: 5, y: 5 },
+            GeomeHazard {
+                damage_per_tick: 5.0,
+            },
+        ));
+        world
+    }
+
+    fn run_environmental_damage(world: &mut World) {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(environmental_damage_system);
+        schedule.run(world);
+    }
+
+    fn mk_health() -> Health {
+        Health {
+            current: 100.0,
+            max: 100.0,
+            has_rust_lung: false,
+        }
+    }
+
+    #[test]
+    fn test_dormant_origin_pops_take_no_environmental_damage() {
+        // Item 167 (item 160 sub-item 4): dormant origin pops are in
+        // stasis at their sites — the same exemption items 100/101 added
+        // to pressure and thermal damage must cover environmental
+        // (geome hazard) damage. Proof case: Quill, the dormant
+        // Bloom-Touched scout, died standing on a hazard tile.
+        // Uses the diffuse-from-terrain path: SporeBloom tiles seep a
+        // GeomeHazard, then environmental_damage_system applies it.
+        let mut world = World::new();
+        let mut grid = TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Rock; 100],
+        };
+        for x in 1..=4 {
+            grid.set(x, 5, TerrainType::SporeBloom);
+        }
+        world.insert_resource(grid);
+
+        let vigil = world
+            .spawn((
+                mk_health(),
+                GridPosition { x: 1, y: 5 },
+                crate::layer1::culture::lawbound::DormantAutomaton,
+            ))
+            .id();
+        let quill = world
+            .spawn((
+                mk_health(),
+                GridPosition { x: 2, y: 5 },
+                crate::layer1::culture::bloomtouched::DormantTouched,
+            ))
+            .id();
+        let tock = world
+            .spawn((
+                mk_health(),
+                GridPosition { x: 3, y: 5 },
+                crate::layer1::culture::chronostalker::DormantStalker,
+            ))
+            .id();
+        let control = world
+            .spawn((mk_health(), GridPosition { x: 4, y: 5 }))
+            .id();
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((
+            diffuse_geome_hazards_system,
+            environmental_damage_system.after(diffuse_geome_hazards_system),
+        ));
+        schedule.run(&mut world);
+
+        for dormant in [vigil, quill, tock] {
+            assert_eq!(
+                world.get::<Health>(dormant).unwrap().current,
+                100.0,
+                "dormant origin pops are in stasis — hazard damage cannot touch them"
+            );
+        }
+        assert!(
+            world.get::<Health>(control).unwrap().current < 100.0,
+            "a non-dormant pop on the same hazard terrain still takes damage"
+        );
+    }
+
+    #[test]
+    fn test_dormant_environmental_damage_resumes_after_waking() {
+        // Item 167: the exemption is tied to the dormant marker — once
+        // the marker is removed (the pop wakes / takes its path),
+        // hazard damage applies like anyone else. Uses directly
+        // spawned GeomeHazards, following the chronostalker
+        // red_phased_cannot_be_hurt test pattern.
+        // DormantAutomaton
+        {
+            let mut world = dormant_world_with_hazard();
+            let e = world
+                .spawn((
+                    mk_health(),
+                    GridPosition { x: 5, y: 5 },
+                    crate::layer1::culture::lawbound::DormantAutomaton,
+                ))
+                .id();
+            run_environmental_damage(&mut world);
+            assert_eq!(world.get::<Health>(e).unwrap().current, 100.0);
+            world
+                .entity_mut(e)
+                .remove::<crate::layer1::culture::lawbound::DormantAutomaton>();
+            run_environmental_damage(&mut world);
+            assert_eq!(
+                world.get::<Health>(e).unwrap().current,
+                95.0,
+                "awakened automaton takes hazard damage again"
+            );
+        }
+        // DormantTouched
+        {
+            let mut world = dormant_world_with_hazard();
+            let e = world
+                .spawn((
+                    mk_health(),
+                    GridPosition { x: 5, y: 5 },
+                    crate::layer1::culture::bloomtouched::DormantTouched,
+                ))
+                .id();
+            run_environmental_damage(&mut world);
+            assert_eq!(world.get::<Health>(e).unwrap().current, 100.0);
+            world
+                .entity_mut(e)
+                .remove::<crate::layer1::culture::bloomtouched::DormantTouched>();
+            run_environmental_damage(&mut world);
+            assert_eq!(
+                world.get::<Health>(e).unwrap().current,
+                95.0,
+                "awakened touched takes hazard damage again"
+            );
+        }
+        // DormantStalker
+        {
+            let mut world = dormant_world_with_hazard();
+            let e = world
+                .spawn((
+                    mk_health(),
+                    GridPosition { x: 5, y: 5 },
+                    crate::layer1::culture::chronostalker::DormantStalker,
+                ))
+                .id();
+            run_environmental_damage(&mut world);
+            assert_eq!(world.get::<Health>(e).unwrap().current, 100.0);
+            world
+                .entity_mut(e)
+                .remove::<crate::layer1::culture::chronostalker::DormantStalker>();
+            run_environmental_damage(&mut world);
+            assert_eq!(
+                world.get::<Health>(e).unwrap().current,
+                95.0,
+                "awakened stalker takes hazard damage again"
+            );
+        }
     }
 }
