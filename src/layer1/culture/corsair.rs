@@ -1069,6 +1069,75 @@ pub fn add_heat(world: &mut World, amount: f32) {
     }
 }
 
+/// One tether step from `pos` toward `skiff`, chosen from the neighbouring
+/// tiles that strictly close the distance (item 169).
+///
+/// Candidates are tried in the legacy order — the diagonal first, then the
+/// x-axis step, then the y-axis step — so a step over clear ground is
+/// unchanged. When the approach is axis-aligned, the two offset diagonals
+/// that close along that axis are tried last: they let a crew pop sidestep
+/// a hazard sitting on its direct line home instead of freezing in front
+/// of it. The first candidate `walkable` accepts wins; when every closing
+/// step is unwalkable the tether refuses the step (`None`) rather than
+/// landing the pop on a hazard tile. Pure and unit-testable: the caller
+/// supplies the walkability oracle.
+pub fn tether_step(
+    pos: GridPosition,
+    skiff: GridPosition,
+    mut walkable: impl FnMut(i32, i32) -> bool,
+) -> Option<GridPosition> {
+    let dx = (skiff.x - pos.x).signum();
+    let dy = (skiff.y - pos.y).signum();
+    if dx == 0 && dy == 0 {
+        return None;
+    }
+    let mut candidates: Vec<GridPosition> = Vec::new();
+    let mut push = |x: i32, y: i32| {
+        let c = GridPosition { x, y };
+        if c != pos && !candidates.contains(&c) {
+            candidates.push(c);
+        }
+    };
+    if dx != 0 && dy != 0 {
+        push(pos.x + dx, pos.y + dy);
+    }
+    if dx != 0 {
+        push(pos.x + dx, pos.y);
+    }
+    if dy != 0 {
+        push(pos.x, pos.y + dy);
+    }
+    if dx == 0 {
+        // Axis-aligned approach: offset diagonals still close the gap.
+        push(pos.x + 1, pos.y + dy);
+        push(pos.x - 1, pos.y + dy);
+    }
+    if dy == 0 {
+        push(pos.x + dx, pos.y + 1);
+        push(pos.x + dx, pos.y - 1);
+    }
+    candidates.into_iter().find(|c| walkable(c.x, c.y))
+}
+
+/// [`tether_step`] against the live world: terrain, buildings, and access
+/// control via the canonical [`crate::layer1::defense::is_walkable`].
+///
+/// Worlds without a [`TerrainGrid`] (unit-test worlds that never inserted
+/// one) keep the legacy behaviour — every closing step counts as walkable,
+/// so the plain diagonal is taken exactly as before.
+fn tether_step_in_world(
+    world: &mut World,
+    pos: GridPosition,
+    skiff: GridPosition,
+) -> Option<GridPosition> {
+    if world.get_resource::<TerrainGrid>().is_none() {
+        return tether_step(pos, skiff, |_, _| true);
+    }
+    tether_step(pos, skiff, |x, y| {
+        crate::layer1::defense::is_walkable(world, x, y)
+    })
+}
+
 /// Per-tick origin system: heat decay (with band re-arming), loyalty drift,
 /// mutiny, purse upkeep, and hull neglect.
 pub fn corsair_tick(world: &mut World) {
@@ -1180,7 +1249,13 @@ pub fn corsair_tick(world: &mut World) {
                     }
                 }
             }
-            // Tether.
+            // Tether. The step must respect walkability (item 169): the
+            // old unconditional diagonal step landed crew on unwalkable
+            // hazard tiles (SporeBloom / MagmaRock) sitting between them
+            // and the skiff, and the utility AI re-issuing their errand
+            // every tick turned that into a 5 HP-per-touch stairway to
+            // death. `tether_step_in_world` reroutes around a blocked
+            // step or refuses it — never onto the hazard.
             for (e, pos, possessed) in aboard {
                 if possessed {
                     continue;
@@ -1188,9 +1263,10 @@ pub fn corsair_tick(world: &mut World) {
                 let dx = spos.x - pos.x;
                 let dy = spos.y - pos.y;
                 if dx.abs().max(dy.abs()) > CREW_TETHER_RADIUS {
-                    if let Some(mut p) = world.get_mut::<GridPosition>(e) {
-                        p.x += dx.signum();
-                        p.y += dy.signum();
+                    if let Some(step) = tether_step_in_world(world, pos, spos) {
+                        if let Some(mut p) = world.get_mut::<GridPosition>(e) {
+                            *p = step;
+                        }
                     }
                 }
             }
@@ -1770,6 +1846,181 @@ mod tests {
         corsair_tick(&mut world);
         let pos = world.get::<GridPosition>(homebody).unwrap();
         assert_eq!((pos.x, pos.y), (11, 10));
+    }
+
+    // --- item 169: the tether step must respect walkable / hazard tiles -----
+
+    fn insert_grass_terrain(world: &mut World, width: usize, height: usize) {
+        world.insert_resource(TerrainGrid {
+            width,
+            height,
+            tiles: vec![TerrainType::Grass; width * height],
+        });
+    }
+
+    fn set_terrain(world: &mut World, x: usize, y: usize, tile: TerrainType) {
+        world
+            .get_resource_mut::<TerrainGrid>()
+            .expect("terrain inserted")
+            .set(x, y, tile);
+    }
+
+    fn terrain_at(world: &mut World, x: i32, y: i32) -> TerrainType {
+        world
+            .get_resource::<TerrainGrid>()
+            .expect("terrain inserted")
+            .get(x as usize, y as usize)
+            .expect("in bounds")
+    }
+
+    fn spawn_tethered_crew(world: &mut World, x: i32, y: i32) -> Entity {
+        let e = spawn_pop(world, "tethered", x, y);
+        world.entity_mut(e).insert(CorsairCrew {
+            loyalty: STARTING_LOYALTY,
+        });
+        e
+    }
+
+    #[test]
+    fn test_corsair_tether_does_not_step_onto_spore_bloom() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        let (_captain, _skiff) = make_captain(&mut world, 10, 10);
+        // The diagonal tether step from (14, 14) toward the skiff at
+        // (10, 10) would land on (13, 13) — make that tile SporeBloom.
+        set_terrain(&mut world, 13, 13, TerrainType::SporeBloom);
+        let crew = spawn_tethered_crew(&mut world, 14, 14);
+        corsair_tick(&mut world);
+        let pos = *world.get::<GridPosition>(crew).unwrap();
+        assert_ne!(
+            (pos.x, pos.y),
+            (13, 13),
+            "crew must not land on the SporeBloom tile"
+        );
+        assert!(
+            terrain_at(&mut world, pos.x, pos.y).is_walkable(),
+            "crew ended on unwalkable terrain"
+        );
+        // Rerouted along the x axis instead of freezing in place.
+        assert_eq!((pos.x, pos.y), (13, 14));
+    }
+
+    #[test]
+    fn test_corsair_tether_does_not_step_onto_magma_rock() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        let (_captain, _skiff) = make_captain(&mut world, 10, 10);
+        // Diagonal step (13, 13) is MagmaRock and the x-axis step
+        // (13, 14) is solid Rock — only the y-axis step is walkable.
+        set_terrain(&mut world, 13, 13, TerrainType::MagmaRock);
+        set_terrain(&mut world, 13, 14, TerrainType::Rock);
+        let crew = spawn_tethered_crew(&mut world, 14, 14);
+        corsair_tick(&mut world);
+        let pos = *world.get::<GridPosition>(crew).unwrap();
+        assert_eq!((pos.x, pos.y), (14, 13));
+        assert!(terrain_at(&mut world, pos.x, pos.y).is_walkable());
+    }
+
+    #[test]
+    fn test_corsair_tether_aligned_step_reroutes_around_hazard() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        let (_captain, _skiff) = make_captain(&mut world, 10, 10);
+        // Crew due south of the skiff: the direct step north lands on
+        // SporeBloom at (10, 14). An offset diagonal must reroute them
+        // around it — not onto it, and not frozen in place.
+        set_terrain(&mut world, 10, 14, TerrainType::SporeBloom);
+        let crew = spawn_tethered_crew(&mut world, 10, 15);
+        corsair_tick(&mut world);
+        let pos = *world.get::<GridPosition>(crew).unwrap();
+        assert_ne!((pos.x, pos.y), (10, 14));
+        assert!(terrain_at(&mut world, pos.x, pos.y).is_walkable());
+        assert_eq!((pos.x, pos.y), (11, 14));
+    }
+
+    #[test]
+    fn test_corsair_tether_refuses_when_every_progress_step_is_unwalkable() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        let (_captain, _skiff) = make_captain(&mut world, 10, 10);
+        // Every step that would close on the skiff is unwalkable: the
+        // tether must refuse the step rather than land the crew on a
+        // hazard tile.
+        set_terrain(&mut world, 13, 13, TerrainType::SporeBloom);
+        set_terrain(&mut world, 13, 14, TerrainType::MagmaRock);
+        set_terrain(&mut world, 14, 13, TerrainType::Rock);
+        let crew = spawn_tethered_crew(&mut world, 14, 14);
+        corsair_tick(&mut world);
+        let pos = *world.get::<GridPosition>(crew).unwrap();
+        assert_eq!((pos.x, pos.y), (14, 14));
+    }
+
+    #[test]
+    fn test_corsair_tether_still_reaches_skiff_around_hazard() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        let (_captain, _skiff) = make_captain(&mut world, 10, 10);
+        set_terrain(&mut world, 14, 14, TerrainType::SporeBloom);
+        let crew = spawn_tethered_crew(&mut world, 15, 15);
+        for _ in 0..12 {
+            corsair_tick(&mut world);
+            let pos = *world.get::<GridPosition>(crew).unwrap();
+            assert_ne!(
+                (pos.x, pos.y),
+                (14, 14),
+                "crew landed on the SporeBloom tile"
+            );
+            assert!(
+                terrain_at(&mut world, pos.x, pos.y).is_walkable(),
+                "crew on unwalkable terrain at ({}, {})",
+                pos.x,
+                pos.y
+            );
+        }
+        let pos = *world.get::<GridPosition>(crew).unwrap();
+        let chebyshev = (pos.x - 10).abs().max((pos.y - 10).abs());
+        assert!(
+            chebyshev <= CREW_TETHER_RADIUS,
+            "crew should be tethered home, ended at ({}, {})",
+            pos.x,
+            pos.y
+        );
+    }
+
+    #[test]
+    fn test_corsair_tether_ordinary_step_unchanged_on_clear_ground() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        let (_captain, _skiff) = make_captain(&mut world, 10, 10);
+        let crew = spawn_tethered_crew(&mut world, 20, 20);
+        corsair_tick(&mut world);
+        let pos = *world.get::<GridPosition>(crew).unwrap();
+        assert_eq!((pos.x, pos.y), (19, 19));
+    }
+
+    #[test]
+    fn test_tether_step_prefers_diagonal_then_axes() {
+        let pos = GridPosition { x: 14, y: 14 };
+        let skiff = GridPosition { x: 10, y: 10 };
+        // Clear ground: the legacy diagonal.
+        assert_eq!(
+            tether_step(pos, skiff, |_, _| true),
+            Some(GridPosition { x: 13, y: 13 })
+        );
+        // Diagonal blocked: the x-axis step.
+        assert_eq!(
+            tether_step(pos, skiff, |x, y| !(x == 13 && y == 13)),
+            Some(GridPosition { x: 13, y: 14 })
+        );
+        // Diagonal and x-axis blocked: the y-axis step.
+        assert_eq!(
+            tether_step(pos, skiff, |x, _| x != 13),
+            Some(GridPosition { x: 14, y: 13 })
+        );
+        // Every closing step blocked: refuse.
+        assert_eq!(tether_step(pos, skiff, |_, _| false), None);
+        // Already home: no step.
+        assert_eq!(tether_step(skiff, skiff, |_, _| true), None);
     }
 
     #[test]
