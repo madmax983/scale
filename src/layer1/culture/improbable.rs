@@ -31,7 +31,7 @@ use crate::layer1::pressure::PressureGrid;
 use crate::layer1::temperature::TemperatureGrid;
 use crate::layer1::psychology::needs::Needs;
 use crate::layer1::social::morale::{MoodModifier, Morale};
-use crate::layer1::terrain::{TerrainGrid, TerrainType};
+use crate::layer1::terrain::{geome_hazard_near, TerrainGrid, TerrainType, GEOME_SITE_CLEARANCE};
 
 // ---------------------------------------------------------------------------
 // Tuning constants
@@ -454,6 +454,17 @@ pub fn spawn_shuttle_once(world: &mut World) {
         (walkable, occupied, buildings)
     };
 
+    // Item 170: snapshot geome hazard tiles (worldgen SporeBloom /
+    // MagmaRock rects) around the lander, with margin past the ring so
+    // the clearance check also sees a rect just outside the scan band.
+    // A candidate whose surroundings touch a rect is rejected and the
+    // scan moves on in its existing order; if no candidate clears, the
+    // spawn keeps its existing fallback — it simply does not spawn.
+    let geome_hazards = world
+        .get_resource::<TerrainGrid>()
+        .map(|terrain| terrain.geome_hazard_tiles(lander.x, lander.y, SHUTTLE_RING_MAX + 5))
+        .unwrap_or_default();
+
     let target: Option<GridPosition> = {
         let mut found = None;
         'search: for radius in SHUTTLE_RING_MIN..=SHUTTLE_RING_MAX {
@@ -476,7 +487,13 @@ pub fn spawn_shuttle_once(world: &mut World) {
                     if !walkable.contains(&(x, y)) {
                         continue;
                     }
-                    found = Some(GridPosition { x, y });
+
+                    // Item 170: reject a site on or beside a geome
+                    // hazard rect — the tile alone being passable is
+                    // not safety when the rect encloses it.
+                    if geome_hazard_near(&geome_hazards, x, y, GEOME_SITE_CLEARANCE) {
+                        continue;
+                    }                    found = Some(GridPosition { x, y });
                     break 'search;
                 }
             }

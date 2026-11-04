@@ -129,6 +129,16 @@ impl TerrainType {
         )
     }
 
+    /// Whether standing on this terrain deals geome hazard damage per
+    /// tick (`SporeBloom` 5.0, `MagmaRock` 10.0 via
+    /// `environmental_damage_system`). Worldgen paints these as solid
+    /// rects (Deep Crust Geomes, `generate_terrain`), so a hazard tile
+    /// is never an isolated curiosity — it marks a lethal field.
+    #[must_use]
+    pub const fn is_geome_hazard(self) -> bool {
+        matches!(self, Self::SporeBloom | Self::MagmaRock)
+    }
+
     /// Returns the thermal retention (0.0 to 1.0) of the terrain (Spec 198).
     /// - 0.5: Rock (Thermal Mass)
     /// - 0.2: Water (Specific Heat)
@@ -209,6 +219,82 @@ impl TerrainGrid {
             }
         }
     }
+}
+
+impl TerrainGrid {
+    /// Whether any geome hazard tile (`SporeBloom` / `MagmaRock`) lies
+    /// within Chebyshev `radius` of (`cx`, `cy`). Out-of-bounds tiles
+    /// count as no hazard. Origin site selection uses this to treat an
+    /// enclosing worldgen geome rect as a hazard: a single walkable
+    /// tile inside or beside the rect is NOT a safe site (item 170).
+    #[must_use]
+    pub fn geome_hazard_within(&self, cx: i32, cy: i32, radius: i32) -> bool {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let (x, y) = (cx + dx, cy + dy);
+                if x < 0 || y < 0 {
+                    continue;
+                }
+                if let Ok(ux) = usize::try_from(x) {
+                    if let Ok(uy) = usize::try_from(y) {
+                        if self.get(ux, uy).is_some_and(TerrainType::is_geome_hazard) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Snapshot of the geome hazard tiles within Chebyshev `radius` of
+    /// (`cx`, `cy`), for callers that must drop the grid borrow before
+    /// searching (the origin spawn scans).
+    #[must_use]
+    pub fn geome_hazard_tiles(
+        &self,
+        cx: i32,
+        cy: i32,
+        radius: i32,
+    ) -> std::collections::HashSet<(i32, i32)> {
+        let mut set = std::collections::HashSet::new();
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let (x, y) = (cx + dx, cy + dy);
+                if x < 0 || y < 0 {
+                    continue;
+                }
+                if let Ok(ux) = usize::try_from(x) {
+                    if let Ok(uy) = usize::try_from(y) {
+                        if self.get(ux, uy).is_some_and(TerrainType::is_geome_hazard) {
+                            set.insert((x, y));
+                        }
+                    }
+                }
+            }
+        }
+        set
+    }
+}
+
+/// Chebyshev clearance (in tiles) an origin site must keep from any
+/// geome hazard tile (`SporeBloom` / `MagmaRock`): the site footprint
+/// plus the tiles its dormant/crew pops stand on or step to first.
+/// Item 170 — placement only; no damage or worldgen constant changes.
+pub const GEOME_SITE_CLEARANCE: i32 = 2;
+
+/// Whether a snapshotted geome-hazard set has a tile within Chebyshev
+/// `radius` of (`cx`, `cy`).
+#[must_use]
+pub fn geome_hazard_near(
+    hazards: &std::collections::HashSet<(i32, i32)>,
+    cx: i32,
+    cy: i32,
+    radius: i32,
+) -> bool {
+    hazards
+        .iter()
+        .any(|&(hx, hy)| (hx - cx).abs() <= radius && (hy - cy).abs() <= radius)
 }
 
 /// Defines the visible area of the map for the player.
@@ -506,6 +592,47 @@ mod tests {
         // multi-death forensics 2026-10-05).
         assert!(!TerrainType::MagmaRock.is_walkable());
         assert!(!TerrainType::SporeBloom.is_walkable());
+    }
+
+    #[test]
+    fn test_geome_hazard_within_detects_worldgen_rects() {
+        // Item 170: worldgen paints SporeBloom / MagmaRock as solid
+        // rects (Deep Crust Geomes). Site selection must see the rect,
+        // not just the single candidate tile.
+        assert!(TerrainType::SporeBloom.is_geome_hazard());
+        assert!(TerrainType::MagmaRock.is_geome_hazard());
+        assert!(!TerrainType::Grass.is_geome_hazard());
+        assert!(!TerrainType::Rock.is_geome_hazard());
+
+        let mut grid = TerrainGrid {
+            width: 20,
+            height: 20,
+            tiles: vec![TerrainType::Grass; 400],
+        };
+        for y in 5..8 {
+            for x in 5..8 {
+                grid.set(x, y, TerrainType::SporeBloom);
+            }
+        }
+        for y in 12..15 {
+            for x in 12..15 {
+                grid.set(x, y, TerrainType::MagmaRock);
+            }
+        }
+        // Inside either rect.
+        assert!(grid.geome_hazard_within(6, 6, 0));
+        assert!(grid.geome_hazard_within(13, 13, 0));
+        // A walkable tile beside the rect is within site clearance.
+        assert!(grid.geome_hazard_within(9, 6, GEOME_SITE_CLEARANCE));
+        assert!(grid.geome_hazard_within(6, 9, GEOME_SITE_CLEARANCE));
+        // Genuinely clear ground stays clear.
+        assert!(!grid.geome_hazard_within(18, 2, GEOME_SITE_CLEARANCE));
+        assert!(!grid.geome_hazard_within(0, 0, GEOME_SITE_CLEARANCE));
+        // The snapshot helper the origin scans use agrees.
+        let tiles = grid.geome_hazard_tiles(10, 10, 10);
+        assert_eq!(tiles.len(), 18);
+        assert!(geome_hazard_near(&tiles, 6, 6, GEOME_SITE_CLEARANCE));
+        assert!(!geome_hazard_near(&tiles, 0, 0, 1));
     }
 
     #[test]

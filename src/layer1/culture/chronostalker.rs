@@ -44,7 +44,7 @@ use crate::layer1::health::Health;
 use crate::layer1::map::GridPosition;
 use crate::layer1::pop::{Pop, PopBundle, PopName};
 use crate::layer1::structure::Structure;
-use crate::layer1::terrain::{TerrainGrid, TerrainType};
+use crate::layer1::terrain::{geome_hazard_near, TerrainGrid, TerrainType, GEOME_SITE_CLEARANCE};
 use crate::layer1::utility_types::StartPlan;
 use crate::layer1::void_weed::PirateRaidEvent;
 use crate::shared::time::SimulationTime;
@@ -303,6 +303,17 @@ pub fn spawn_moment_wound_once(world: &mut World) {
         (walkable, safe, occupied, buildings)
     };
 
+    // Item 170: snapshot geome hazard tiles (worldgen SporeBloom /
+    // MagmaRock rects) around the lander, with margin past the ring so
+    // the clearance check also sees a rect just outside the scan band.
+    // A candidate whose surroundings touch a rect is rejected and the
+    // scan moves on in its existing order; if no candidate clears, the
+    // spawn keeps its existing fallback — it simply does not spawn.
+    let geome_hazards = world
+        .get_resource::<TerrainGrid>()
+        .map(|terrain| terrain.geome_hazard_tiles(lander.x, lander.y, WOUND_RING_MAX + 5))
+        .unwrap_or_default();
+
     let target: Option<GridPosition> = {
         let mut found = None;
         'search: for radius in WOUND_RING_MIN..=WOUND_RING_MAX {
@@ -330,6 +341,20 @@ pub fn spawn_moment_wound_once(world: &mut World) {
                     if !safe.contains(&dormant_tile)
                         || occupied.contains(&dormant_tile)
                         || buildings.contains(&dormant_tile)
+                    {
+                        continue;
+                    }
+                    // Item 170: reject a site whose cradle/wound tile OR
+                    // dormant tile sits on or beside a geome hazard
+                    // rect — a walkable dormant tile enclosed by the
+                    // rect is not safe.
+                    if geome_hazard_near(&geome_hazards, x, y, GEOME_SITE_CLEARANCE)
+                        || geome_hazard_near(
+                            &geome_hazards,
+                            dormant_tile.0,
+                            dormant_tile.1,
+                            GEOME_SITE_CLEARANCE,
+                        )
                     {
                         continue;
                     }

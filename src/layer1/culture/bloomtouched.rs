@@ -45,7 +45,7 @@ use crate::layer1::fauna::Fauna;
 use crate::layer1::map::GridPosition;
 use crate::layer1::pop::{Pop, PopBundle, PopName};
 use crate::layer1::psychology::needs::Needs;
-use crate::layer1::terrain::{TerrainGrid, TerrainType};
+use crate::layer1::terrain::{TerrainGrid, TerrainType, GEOME_SITE_CLEARANCE};
 use crate::layer1::utility_types::StartPlan;
 use crate::shared::time::SimulationTime;
 
@@ -444,6 +444,21 @@ pub fn spawn_bloom_scar_once(world: &mut World) {
                         || buildings.contains(&scout_tile)
                         || !scout_safe
                     {
+                        continue;
+                    }
+                    // Item 170: reject a scar seated on or beside a
+                    // geome hazard rect — the scout tile being walkable
+                    // says nothing about the rect enclosing the scar.
+                    // Both the scar centre (patch reaches 1 tile out)
+                    // and the scout tile keep the site clearance.
+                    if world.get_resource::<TerrainGrid>().is_some_and(|t| {
+                        t.geome_hazard_within(x, y, GEOME_SITE_CLEARANCE)
+                            || t.geome_hazard_within(
+                                scout_tile.0,
+                                scout_tile.1,
+                                GEOME_SITE_CLEARANCE,
+                            )
+                    }) {
                         continue;
                     }
                     found = Some(GridPosition { x, y });
@@ -1351,6 +1366,95 @@ mod tests {
             tile.is_walkable(),
             "dormant scout must not spawn on a hazard tile, got {tile:?} at {pos:?}"
         );
+    }
+
+
+    // --- item 170: the scar site must clear an enclosing geome rect -----
+
+    fn paint_geome_rect_bloom(
+        world: &mut World,
+        x0: usize,
+        y0: usize,
+        x1: usize,
+        y1: usize,
+        tile: TerrainType,
+    ) {
+        let mut terrain = world.resource_mut::<TerrainGrid>();
+        let width = terrain.width;
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                terrain.tiles[y * width + x] = tile;
+            }
+        }
+    }
+
+    fn grid_hazard_within(grid: &TerrainGrid, cx: i32, cy: i32, radius: i32) -> bool {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let (x, y) = (cx + dx, cy + dy);
+                if x < 0 || y < 0 {
+                    continue;
+                }
+                if matches!(
+                    grid.get(x as usize, y as usize),
+                    Some(TerrainType::SporeBloom) | Some(TerrainType::MagmaRock)
+                ) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn red_scar_site_relocates_off_spore_bloom_geome_rect() {
+        // Item 170: the scar's old checks verified the scout tile alone;
+        // a scar seated beside a worldgen SporeBloom rect still placed
+        // Quill one step from lethal tiles. A 7x7 rect covering the
+        // first candidate scar (4,4) must push the spawn to the first
+        // site whose scar AND scout surroundings clear the rect.
+        let mut world = setup();
+        spawn_lander(&mut world, 10, 10);
+        paint_geome_rect_bloom(&mut world, 2, 2, 8, 8, TerrainType::SporeBloom);
+        spawn_bloom_scar_once(&mut world);
+        let dormant = world
+            .query_filtered::<Entity, With<DormantTouched>>()
+            .iter(&world)
+            .next()
+            .expect("the scar still spawns at a safe site nearby");
+        let pos = *world.get::<GridPosition>(dormant).unwrap();
+        let seed = world.resource::<BloomZone>().seed.expect("scar seed");
+        let grid = world.resource::<TerrainGrid>();
+        assert!(
+            !grid_hazard_within(grid, pos.x, pos.y, 2),
+            "dormant scout at {pos:?} must not sit on or beside the SporeBloom rect"
+        );
+        assert!(
+            !grid_hazard_within(grid, seed.0, seed.1, 2),
+            "scar seed at {seed:?} must not sit on or beside the SporeBloom rect"
+        );
+        assert_eq!((pos.x, pos.y), (6, 11));
+        assert_eq!(seed, (4, 11));
+    }
+
+    #[test]
+    fn red_scar_site_relocates_off_magma_rock_geome_rect() {
+        let mut world = setup();
+        spawn_lander(&mut world, 10, 10);
+        paint_geome_rect_bloom(&mut world, 2, 2, 8, 8, TerrainType::MagmaRock);
+        spawn_bloom_scar_once(&mut world);
+        let dormant = world
+            .query_filtered::<Entity, With<DormantTouched>>()
+            .iter(&world)
+            .next()
+            .expect("the scar still spawns at a safe site nearby");
+        let pos = *world.get::<GridPosition>(dormant).unwrap();
+        let grid = world.resource::<TerrainGrid>();
+        assert!(
+            !grid_hazard_within(grid, pos.x, pos.y, 2),
+            "dormant scout at {pos:?} must not sit on or beside the MagmaRock rect"
+        );
+        assert_eq!((pos.x, pos.y), (6, 11));
     }
 
     // --- taking the path ----------------------------------------------------------

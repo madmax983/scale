@@ -37,7 +37,7 @@ use crate::layer1::pop::{Pop, PopBundle, PopName};
 use crate::layer1::pressure::PressureGrid;
 use crate::layer1::psychology::needs::Needs;
 use crate::layer1::temperature::TemperatureGrid;
-use crate::layer1::terrain::{TerrainGrid, TerrainType};
+use crate::layer1::terrain::{geome_hazard_near, TerrainGrid, TerrainType, GEOME_SITE_CLEARANCE};
 
 // ---------------------------------------------------------------------------
 // Tuning constants
@@ -307,6 +307,17 @@ pub fn spawn_raider_skiff_once(world: &mut World) {
         (walkable, occupied, buildings)
     };
 
+    // Item 170: snapshot geome hazard tiles (worldgen SporeBloom /
+    // MagmaRock rects) around the lander, with margin past the ring so
+    // the clearance check also sees a rect just outside the scan band.
+    // A candidate whose surroundings touch a rect is rejected and the
+    // scan moves on in its existing order; if no candidate clears, the
+    // spawn keeps its existing fallback — it simply does not spawn.
+    let geome_hazards = world
+        .get_resource::<TerrainGrid>()
+        .map(|terrain| terrain.geome_hazard_tiles(lander.x, lander.y, 10 + 5))
+        .unwrap_or_default();
+
     let target: Option<GridPosition> = {
         let mut found = None;
         'search: for radius in 6..=10i32 {
@@ -329,7 +340,13 @@ pub fn spawn_raider_skiff_once(world: &mut World) {
                     if !walkable.contains(&(x, y)) {
                         continue;
                     }
-                    found = Some(GridPosition { x, y });
+
+                    // Item 170: reject a site on or beside a geome
+                    // hazard rect — the tile alone being passable is
+                    // not safety when the rect encloses it.
+                    if geome_hazard_near(&geome_hazards, x, y, GEOME_SITE_CLEARANCE) {
+                        continue;
+                    }                    found = Some(GridPosition { x, y });
                     break 'search;
                 }
             }
@@ -1846,6 +1863,129 @@ mod tests {
         corsair_tick(&mut world);
         let pos = world.get::<GridPosition>(homebody).unwrap();
         assert_eq!((pos.x, pos.y), (11, 10));
+    }
+
+
+    // --- item 170: origin site selection treats an enclosing worldgen
+    // geome rect as a hazard, not just the single crew tile -----
+
+    fn spawn_lander(world: &mut World, x: i32, y: i32) {
+        world.spawn((
+            Building {
+                building_type: BuildingType::Lander,
+            },
+            GridPosition { x, y },
+        ));
+    }
+
+    fn paint_geome_rect(
+        world: &mut World,
+        x0: usize,
+        y0: usize,
+        x1: usize,
+        y1: usize,
+        tile: TerrainType,
+    ) {
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                set_terrain(world, x, y, tile);
+            }
+        }
+    }
+
+    fn hazard_within(world: &World, cx: i32, cy: i32, radius: i32) -> bool {
+        let grid = world.resource::<TerrainGrid>();
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let (x, y) = (cx + dx, cy + dy);
+                if x < 0 || y < 0 {
+                    continue;
+                }
+                if matches!(
+                    grid.get(x as usize, y as usize),
+                    Some(TerrainType::SporeBloom) | Some(TerrainType::MagmaRock)
+                ) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn skiff_pos(world: &mut World) -> Option<(i32, i32)> {
+        world
+            .query::<(&RaiderSkiff, &GridPosition)>()
+            .iter(world)
+            .next()
+            .map(|(_, p)| (p.x, p.y))
+    }
+
+    #[test]
+    fn test_skiff_site_relocates_off_spore_bloom_geome_rect() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        spawn_lander(&mut world, 20, 20);
+        // Worldgen-style 7x7 SporeBloom rect covering the first ring
+        // candidate (14,14) and the scan's early candidates.
+        paint_geome_rect(&mut world, 12, 12, 18, 18, TerrainType::SporeBloom);
+        spawn_raider_skiff_once(&mut world);
+        let pos = skiff_pos(&mut world).expect("skiff still spawns at a safe site nearby");
+        assert!(
+            !hazard_within(&world, pos.0, pos.1, 2),
+            "skiff site {pos:?} must not sit on or beside the SporeBloom rect"
+        );
+        // Scan order preserved: ring 6 west edge, first tile whose
+        // surroundings clear the rect.
+        assert_eq!(pos, (14, 21));
+        // Crew spawn on the skiff tile — they inherit its safety.
+        let crew: Vec<(i32, i32)> = world
+            .query::<(&CorsairCrew, &GridPosition)>()
+            .iter(&world)
+            .map(|(_, p)| (p.x, p.y))
+            .collect();
+        assert_eq!(crew.len(), CREW_SIZE);
+        assert!(crew.iter().all(|&c| c == pos));
+    }
+
+    #[test]
+    fn test_skiff_site_relocates_off_magma_rock_geome_rect() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        spawn_lander(&mut world, 20, 20);
+        paint_geome_rect(&mut world, 12, 12, 18, 18, TerrainType::MagmaRock);
+        spawn_raider_skiff_once(&mut world);
+        let pos = skiff_pos(&mut world).expect("skiff still spawns at a safe site nearby");
+        assert!(
+            !hazard_within(&world, pos.0, pos.1, 2),
+            "skiff site {pos:?} must not sit on or beside the MagmaRock rect"
+        );
+        assert_eq!(pos, (14, 21));
+    }
+
+    #[test]
+    fn test_skiff_site_unchanged_when_no_geome_hazard_nearby() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        spawn_lander(&mut world, 20, 20);
+        spawn_raider_skiff_once(&mut world);
+        // First candidate in the existing scan order, exactly as before.
+        assert_eq!(skiff_pos(&mut world), Some((14, 14)));
+    }
+
+    #[test]
+    fn test_skiff_spawn_skips_when_every_candidate_is_geome_hazard() {
+        let mut world = setup();
+        insert_grass_terrain(&mut world, 40, 40);
+        spawn_lander(&mut world, 20, 20);
+        // The whole map is one SporeBloom field except the lander tile:
+        // no safe site exists, so the spawn falls back to not spawning
+        // (non-lethal skip) instead of placing the crew on the bloom.
+        paint_geome_rect(&mut world, 0, 0, 39, 39, TerrainType::SporeBloom);
+        set_terrain(&mut world, 20, 20, TerrainType::Grass);
+        spawn_raider_skiff_once(&mut world);
+        assert_eq!(skiff_pos(&mut world), None);
+        let crew = world.query::<&CorsairCrew>().iter(&world).count();
+        assert_eq!(crew, 0);
     }
 
     // --- item 169: the tether step must respect walkable / hazard tiles -----
