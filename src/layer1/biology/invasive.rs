@@ -114,6 +114,150 @@ impl Default for InvasiveConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Item 168 telegraphing (item 160 sub-item 5): the invasive lane learns to
+// speak before it kills. Balance report 2026-11-02 found the seeding link
+// passed ([SPORE_OUTBREAK]) but spread/approach telegraphing FAILED: no
+// tile milestones, no frontier warning, no first-damage warning (the
+// damage half lives in `environment::geomes`). This is a legibility pass
+// ONLY — zero spread/damage balance constants change here.
+// ---------------------------------------------------------------------------
+
+/// Chebyshev range at which the invasive frontier counts as "closing on
+/// the colony". Grounded in the existing colony-visibility constant
+/// `martyrdom::MARTYRDOM_VISIBILITY_RADIUS` (12 tiles around the colony
+/// heart); the balance report flagged frontiers reaching within
+/// Chebyshev 12 of the centre as the dangerous approaches.
+pub const FRONTIER_WARNING_RANGE: u32 = 12;
+/// The frontier must retreat beyond this Chebyshev range before the
+/// warning re-arms (hysteresis band: FRONTIER_WARNING_RANGE..=this).
+/// Without the band, a frontier flickering at the edge would spam.
+pub const FRONTIER_REARM_RANGE: u32 = 16;
+
+/// Bloom-tile milestones for the INVASIVE lane, mirroring the BloomZone
+/// lane's thresholds and one-shot pattern (culture::bloomtouched
+/// TILE_MILESTONES / check_tile_milestones). The count here is tiles the
+/// invasive lane itself converted (infectable -> SporeBloom in
+/// `spore_spread_system`); worldgen SporeBloom rects are NOT counted —
+/// they were never converted by this lane, and counting them would fire
+/// every milestone at tick 0 on bloom-heavy maps.
+const INVASIVE_TILE_MILESTONES: [(usize, &str); 4] = [
+    (25, SPORE_SPREAD_25_CHRONICLE),
+    (50, SPORE_SPREAD_50_CHRONICLE),
+    (100, SPORE_SPREAD_100_CHRONICLE),
+    (200, SPORE_SPREAD_200_CHRONICLE),
+];
+
+/// Chronicle text: invasive bloom converted 25 tiles.
+pub const SPORE_SPREAD_25_CHRONICLE: &str =
+    "[SPORE_SPREAD] The invasive bloom has converted twenty-five tiles. \
+     The purple growth is no longer a curiosity — it is a frontier.";
+/// Chronicle text: invasive bloom converted 50 tiles.
+pub const SPORE_SPREAD_50_CHRONICLE: &str =
+    "[SPORE_SPREAD] Fifty tiles converted by the invasive bloom. \
+     Work crews are rerouting around ground the colony used to own.";
+/// Chronicle text: invasive bloom converted 100 tiles.
+pub const SPORE_SPREAD_100_CHRONICLE: &str =
+    "[SPORE_SPREAD] A hundred tiles converted by the invasive bloom. \
+     The colony is sharing its map with something that wants all of it.";
+/// Chronicle text: invasive bloom converted 200 tiles.
+pub const SPORE_SPREAD_200_CHRONICLE: &str =
+    "[SPORE_SPREAD] Two hundred tiles converted by the invasive bloom. \
+     Quarantine burns are no longer tidiness; they are survival.";
+/// Chronicle text prefix: the invasive frontier is closing on the colony.
+/// The firing system appends the nearest growth's coordinates and range.
+pub const SPORE_FRONTIER_WARNING: &str =
+    "[SPORE_FRONTIER] The invasive bloom is closing on the colony.";
+
+/// Formats the full frontier-warning chronicle text for a nearest growth
+/// at (`x`, `y`), `distance` Chebyshev tiles from the colony.
+#[must_use]
+pub fn frontier_warning_text(x: i32, y: i32, distance: u32) -> String {
+    format!(
+        "{SPORE_FRONTIER_WARNING} Nearest growth at ({x}, {y}), {distance} tiles \
+         from the nearest building or colonist. Burn it back before it arrives."
+    )
+}
+
+/// Every public-facing telegraphing string in this module, for the
+/// IP-guard test (original names only, concept-only).
+#[must_use]
+pub fn telegraph_public_strings() -> Vec<String> {
+    vec![
+        SPORE_SPREAD_25_CHRONICLE.to_string(),
+        SPORE_SPREAD_50_CHRONICLE.to_string(),
+        SPORE_SPREAD_100_CHRONICLE.to_string(),
+        SPORE_SPREAD_200_CHRONICLE.to_string(),
+        SPORE_FRONTIER_WARNING.to_string(),
+        frontier_warning_text(1, 2, 3),
+    ]
+}
+
+/// Telegraphing state for the invasive lane (item 168). One-shot flags
+/// and counters only — this resource never feeds back into spread or
+/// damage, so it cannot change balance.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct InvasiveTelegraph {
+    /// Tiles this lane has converted to SporeBloom since the run began
+    /// (worldgen bloom excluded — see INVASIVE_TILE_MILESTONES).
+    pub converted_tiles: usize,
+    /// Index into INVASIVE_TILE_MILESTONES already chronicled.
+    pub milestone_idx: usize,
+    /// True while the frontier warning is latched (inside range or in
+    /// the hysteresis band); cleared only beyond FRONTIER_REARM_RANGE.
+    pub frontier_warned: bool,
+}
+
+/// The nearest frontier point to any colony target, as
+/// (Chebyshev distance, frontier point). None when either set is empty.
+#[must_use]
+pub fn frontier_nearest(
+    frontier: &[(i32, i32)],
+    targets: &HashSet<(i32, i32)>,
+) -> Option<(u32, (i32, i32))> {
+    let mut best: Option<(u32, (i32, i32))> = None;
+    for &(fx, fy) in frontier {
+        let from = GridPosition { x: fx, y: fy };
+        for &(tx, ty) in targets.iter() {
+            let d = from.distance_chebyshev(GridPosition { x: tx, y: ty });
+            if best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, (fx, fy)));
+            }
+        }
+    }
+    best
+}
+
+/// Frontier-warning state machine with hysteresis. Returns
+/// `Some(distance)` exactly when a warning chronicle should fire:
+/// the frontier entered FRONTIER_WARNING_RANGE while unlatched.
+/// Distances inside the hysteresis band hold the latch; distances
+/// beyond FRONTIER_REARM_RANGE (or no frontier at all) re-arm it.
+pub fn frontier_warning_update(
+    state: &mut InvasiveTelegraph,
+    min_distance: Option<u32>,
+) -> Option<u32> {
+    match min_distance {
+        Some(d) if d <= FRONTIER_WARNING_RANGE => {
+            if state.frontier_warned {
+                None
+            } else {
+                state.frontier_warned = true;
+                Some(d)
+            }
+        }
+        Some(d) if d > FRONTIER_REARM_RANGE => {
+            state.frontier_warned = false;
+            None
+        }
+        None => {
+            state.frontier_warned = false;
+            None
+        }
+        _ => None, // Hysteresis band: hold the latch, never flap.
+    }
+}
+
 /// Substrings that mark a trade faction as plausibly xeno-origin.
 const EXOTIC_MARKERS: &[&str] = &[
     "xeno", "void", "outer", "rim", "deep", "alien", "mycel", "spore",
@@ -247,6 +391,7 @@ pub fn spore_hitchhiker_system(
 /// live `Building` entity stands on it. Pop occupancy comes from live
 /// `Pop` + `GridPosition` positions. Both sets are snapshotted once per
 /// run (the flora-spread cache pattern), so the per-spore checks are O(1).
+#[allow(clippy::too_many_arguments)]
 pub fn spore_spread_system(
     mut commands: Commands,
     mut terrain: ResMut<TerrainGrid>,
@@ -256,6 +401,7 @@ pub fn spore_spread_system(
     building_map: Option<Res<BuildingMap>>,
     buildings: Query<&GridPosition, With<Building>>,
     pops: Query<&GridPosition, With<Pop>>,
+    telegraph: Option<ResMut<InvasiveTelegraph>>,
 ) {
     // Snapshot of tiles a spore must never convert.
     let mut building_tiles: HashSet<(i32, i32)> = HashSet::default();
@@ -271,8 +417,15 @@ pub fn spore_spread_system(
         building_tiles.contains(&(x, y)) || pop_tiles.contains(&(x, y))
     };
 
+    // Item 168 telegraphing bookkeeping: conversions this tick and the
+    // live frontier (every spore's home tile, plus daughters spawned
+    // below — commands are deferred, so track them locally).
+    let mut converted_this_tick: usize = 0;
+    let mut frontier_points: Vec<(i32, i32)> = Vec::new();
+
     let mut live = spores.iter().count();
     for (entity, mut spore) in spores.iter_mut() {
+        frontier_points.push((spore.position.x, spore.position.y));
         // Take root: convert the home tile to SporeBloom — unless a
         // building stands there or a pop is standing on it (item 166).
         let (hx, hy) = (spore.position.x, spore.position.y);
@@ -280,6 +433,7 @@ pub fn spore_spread_system(
             let (x, y) = (hx as usize, hy as usize);
             if matches!(terrain.get(x, y), Some(t) if is_infectable(t)) {
                 terrain.set(x, y, TerrainType::SporeBloom);
+                converted_this_tick += 1;
             }
         }
         // SPEC 1388 senescence (§4.6): an aged spore despawns. Terrain
@@ -318,9 +472,68 @@ pub fn spore_spread_system(
                     spread_timer: spore.strain.spread_interval(),
                     age: 0,
                 });
+                frontier_points.push((nx, ny));
                 live += 1;
                 break;
             }
+        }
+    }
+
+    // Item 168 telegraphing: tile milestones + frontier warning. Runs
+    // only when the telegraph state exists (production inits it; bare
+    // test worlds without it simply skip the chronicles). Nothing here
+    // feeds back into spread — legibility only.
+    if let Some(mut telegraph) = telegraph {
+        let prev = telegraph.converted_tiles;
+        telegraph.converted_tiles = telegraph
+            .converted_tiles
+            .saturating_add(converted_this_tick);
+        let new = telegraph.converted_tiles;
+        // Mirror BloomZone's check_tile_milestones: fire each crossed
+        // threshold exactly once, in order.
+        let mut milestone_texts: Vec<&'static str> = Vec::new();
+        for (i, (threshold, text)) in INVASIVE_TILE_MILESTONES
+            .iter()
+            .enumerate()
+            .skip(telegraph.milestone_idx)
+        {
+            if prev < *threshold && new >= *threshold {
+                milestone_texts.push(text);
+                telegraph.milestone_idx = i + 1;
+            }
+        }
+        // Frontier = live spore positions; colony targets = the same
+        // building + pop tile snapshots the spread guard already built.
+        let mut targets: HashSet<(i32, i32)> = HashSet::default();
+        targets.extend(building_tiles.iter().copied());
+        targets.extend(pop_tiles.iter().copied());
+        let nearest = frontier_nearest(&frontier_points, &targets);
+        let frontier_text = match frontier_warning_update(
+            &mut telegraph,
+            nearest.map(|(d, _)| d),
+        ) {
+            Some(d) => nearest.map(|(_, (x, y))| frontier_warning_text(x, y, d)),
+            None => None,
+        };
+        // Deferred sends via commands (not an EventWriter param): this
+        // system also runs on bare Worlds with no chronicle bus, where a
+        // required writer would panic. If the bus exists the chronicles
+        // land (a tick late at worst); if not, they drop quietly.
+        let mut pending: Vec<(String, EventImportance)> = milestone_texts
+            .into_iter()
+            .map(|t| (t.to_string(), EventImportance::Minor))
+            .collect();
+        if let Some(text) = frontier_text {
+            pending.push((text, EventImportance::Major));
+        }
+        for (text, importance) in pending {
+            commands.queue(move |world: &mut World| {
+                if let Some(mut events) =
+                    world.get_resource_mut::<Events<AddChronicleEvent>>()
+                {
+                    events.send(AddChronicleEvent { text, importance });
+                }
+            });
         }
     }
 }
@@ -414,6 +627,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.insert_resource(test_grid());
         app.insert_resource(InvasiveConfig::default());
+        app.insert_resource(InvasiveTelegraph::default());
         // Spec 1388: seeding requires a Director outbreak token. The
         // legacy seeding tests run with a token granted; the dedicated
         // no-token test below revokes it.
@@ -880,5 +1094,294 @@ mod tests {
             Some(TerrainType::Ash),
             "Burns must scorch spore-free bloom too."
         );
+    }
+
+    // --- Item 168: invasive-lane telegraphing (item 160 sub-item 5) ---
+    // Balance report 2026-11-02, Telegraphing verdict: the invasive lane
+    // had NO tile-milestone chronicles (the BloomZone lane has
+    // 25/50/100/200), NO frontier-near-colony warning, and the lethal
+    // conversions were chronicled nowhere. These tests are the RED
+    // contract for the telegraphing pass. ZERO balance constants change.
+
+    fn setup_telegraph_app(width: usize, height: usize) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(TerrainGrid {
+            width,
+            height,
+            tiles: vec![TerrainType::Grass; width * height],
+        });
+        app.insert_resource(InvasiveConfig::default());
+        app.insert_resource(InvasiveTelegraph::default());
+        app.insert_resource(DirectorState {
+            outbreak_token: true,
+            ..DirectorState::default()
+        });
+        app.init_resource::<Events<TradeShipArrivalEvent>>();
+        app.init_resource::<Events<SporeBloomEvent>>();
+        app.init_resource::<Events<QuarantineBurnEvent>>();
+        app.init_resource::<Events<AddChronicleEvent>>();
+        app.add_systems(
+            Update,
+            (
+                spore_hitchhiker_system,
+                spore_spread_system,
+                quarantine_burn_system,
+            ),
+        );
+        app
+    }
+
+    fn chronicle_texts(app: &App) -> Vec<String> {
+        let events = app.world().resource::<Events<AddChronicleEvent>>();
+        events
+            .get_reader()
+            .read(events)
+            .map(|e| e.text.clone())
+            .collect()
+    }
+
+    fn spawn_rooted_spore(app: &mut App, x: i32, y: i32) {
+        app.world_mut().spawn(Spore {
+            position: GridPosition { x, y },
+            strain: SporeStrain::TerranKudzu,
+            spread_timer: 999,
+            age: 0,
+        });
+    }
+
+    fn despawn_all_spores(app: &mut App) {
+        let entities: Vec<Entity> = app
+            .world_mut()
+            .query::<(Entity, &Spore)>()
+            .iter(app.world())
+            .map(|(e, _)| e)
+            .collect();
+        for e in entities {
+            app.world_mut().despawn(e);
+        }
+    }
+
+    #[test]
+    fn test_invasive_milestone_fires_once_at_25_conversions() {
+        let mut app = setup_telegraph_app(10, 10);
+        for i in 0..25 {
+            spawn_rooted_spore(&mut app, (i % 10) as i32, (i / 10) as i32);
+        }
+        app.update();
+        let texts = chronicle_texts(&app);
+        let milestones: Vec<&String> = texts
+            .iter()
+            .filter(|t| t.contains("[SPORE_SPREAD]"))
+            .collect();
+        assert_eq!(
+            milestones.len(),
+            1,
+            "crossing 25 conversions must fire exactly one milestone chronicle, got: {texts:?}"
+        );
+        assert_eq!(
+            app.world().resource::<InvasiveTelegraph>().converted_tiles,
+            25
+        );
+        app.update();
+        let texts = chronicle_texts(&app);
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("[SPORE_SPREAD]")).count(),
+            1,
+            "the 25-tile milestone must not repeat on later ticks"
+        );
+    }
+
+    #[test]
+    fn test_invasive_milestone_silent_below_threshold() {
+        let mut app = setup_telegraph_app(10, 10);
+        for i in 0..24 {
+            spawn_rooted_spore(&mut app, (i % 10) as i32, (i / 10) as i32);
+        }
+        app.update();
+        let texts = chronicle_texts(&app);
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("[SPORE_SPREAD]")).count(),
+            0,
+            "24 conversions must stay silent (first milestone is 25)"
+        );
+    }
+
+    #[test]
+    fn test_invasive_milestones_25_and_50_each_fire_once() {
+        let mut app = setup_telegraph_app(10, 10);
+        for i in 0..50 {
+            spawn_rooted_spore(&mut app, (i % 10) as i32, (i / 10) as i32);
+        }
+        app.update();
+        let texts = chronicle_texts(&app);
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("[SPORE_SPREAD]")).count(),
+            2,
+            "crossing 25 and 50 in one tick fires each milestone exactly once, got: {texts:?}"
+        );
+        assert_eq!(
+            app.world().resource::<InvasiveTelegraph>().milestone_idx,
+            2
+        );
+        app.update();
+        assert_eq!(
+            chronicle_texts(&app)
+                .iter()
+                .filter(|t| t.contains("[SPORE_SPREAD]"))
+                .count(),
+            2,
+            "milestones must not repeat"
+        );
+    }
+
+    #[test]
+    fn test_frontier_warning_fires_near_building_and_does_not_repeat() {
+        let mut app = setup_telegraph_app(40, 40);
+        place_test_building(&mut app, 20, 20);
+        // Chebyshev 11 from the building — inside FRONTIER_WARNING_RANGE (12).
+        spawn_rooted_spore(&mut app, 20, 9);
+        app.update();
+        let texts = chronicle_texts(&app);
+        assert_eq!(
+            texts.iter().filter(|t| t.contains("[SPORE_FRONTIER]")).count(),
+            1,
+            "a frontier entering warning range of a building must warn once, got: {texts:?}"
+        );
+        assert!(app.world().resource::<InvasiveTelegraph>().frontier_warned);
+        app.update();
+        assert_eq!(
+            chronicle_texts(&app)
+                .iter()
+                .filter(|t| t.contains("[SPORE_FRONTIER]"))
+                .count(),
+            1,
+            "the frontier warning must not repeat while the frontier stays in range"
+        );
+    }
+
+    #[test]
+    fn test_frontier_warning_silent_when_far() {
+        let mut app = setup_telegraph_app(40, 40);
+        place_test_building(&mut app, 20, 20);
+        // Chebyshev 20 from the building — outside even the re-arm range.
+        spawn_rooted_spore(&mut app, 0, 0);
+        app.update();
+        assert_eq!(
+            chronicle_texts(&app)
+                .iter()
+                .filter(|t| t.contains("[SPORE_FRONTIER]"))
+                .count(),
+            0,
+            "a distant frontier must stay silent"
+        );
+        assert!(!app.world().resource::<InvasiveTelegraph>().frontier_warned);
+    }
+
+    #[test]
+    fn test_frontier_warning_fires_near_pop_without_building() {
+        let mut app = setup_telegraph_app(40, 40);
+        app.world_mut().spawn((
+            crate::layer1::pop::Pop,
+            GridPosition { x: 20, y: 20 },
+        ));
+        spawn_rooted_spore(&mut app, 23, 20);
+        app.update();
+        assert_eq!(
+            chronicle_texts(&app)
+                .iter()
+                .filter(|t| t.contains("[SPORE_FRONTIER]"))
+                .count(),
+            1,
+            "pops are colony targets too: a near frontier must warn"
+        );
+    }
+
+    #[test]
+    fn test_frontier_warning_rearms_after_retreat_beyond_hysteresis() {
+        let mut app = setup_telegraph_app(40, 40);
+        place_test_building(&mut app, 20, 20);
+        spawn_rooted_spore(&mut app, 20, 9);
+        app.update();
+        assert_eq!(
+            chronicle_texts(&app)
+                .iter()
+                .filter(|t| t.contains("[SPORE_FRONTIER]"))
+                .count(),
+            1
+        );
+        // Frontier retreats beyond the re-arm range (16): warning re-arms.
+        despawn_all_spores(&mut app);
+        spawn_rooted_spore(&mut app, 0, 0);
+        app.update();
+        assert!(
+            !app.world().resource::<InvasiveTelegraph>().frontier_warned,
+            "retreat beyond the hysteresis band must re-arm the warning"
+        );
+        assert_eq!(
+            chronicle_texts(&app)
+                .iter()
+                .filter(|t| t.contains("[SPORE_FRONTIER]"))
+                .count(),
+            1,
+            "re-arming itself must not chronicle"
+        );
+        // A new approach fires again.
+        despawn_all_spores(&mut app);
+        spawn_rooted_spore(&mut app, 20, 10);
+        app.update();
+        assert_eq!(
+            chronicle_texts(&app)
+                .iter()
+                .filter(|t| t.contains("[SPORE_FRONTIER]"))
+                .count(),
+            2,
+            "a re-armed warning must fire on the next approach"
+        );
+    }
+
+    #[test]
+    fn test_frontier_warning_update_hysteresis_band() {
+        let mut state = InvasiveTelegraph::default();
+        assert_eq!(frontier_warning_update(&mut state, Some(11)), Some(11));
+        assert_eq!(frontier_warning_update(&mut state, Some(11)), None);
+        // Inside the hysteresis band (13..=16): state holds, no flap.
+        assert_eq!(frontier_warning_update(&mut state, Some(14)), None);
+        assert!(state.frontier_warned);
+        // Beyond the band: re-arm.
+        assert_eq!(frontier_warning_update(&mut state, Some(17)), None);
+        assert!(!state.frontier_warned);
+        assert_eq!(
+            frontier_warning_update(&mut state, Some(FRONTIER_WARNING_RANGE)),
+            Some(FRONTIER_WARNING_RANGE)
+        );
+        // No live frontier at all also re-arms.
+        assert_eq!(frontier_warning_update(&mut state, None), None);
+        assert!(!state.frontier_warned);
+    }
+
+    #[test]
+    fn test_telegraph_ip_guard_no_banned_terms() {
+        let banned = [
+            "annihilation",
+            "area x",
+            "southern reach",
+            "biologist",
+            "surveyor",
+            "psychologist",
+            "anthropologist",
+            "linguist",
+            "crawler",
+            "vandermeer",
+        ];
+        for s in telegraph_public_strings() {
+            let lower = s.to_lowercase();
+            for b in banned {
+                assert!(
+                    !lower.contains(b),
+                    "banned term '{b}' in public string: {s}"
+                );
+            }
+        }
     }
 }

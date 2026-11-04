@@ -152,6 +152,14 @@ pub fn trigger_symbiont_sabotage_system(
 /// the mind-spore infection on their own, shrinking the symbiont faction.
 /// Transmission still outpaces clearance in a crowded colony, so the crisis
 /// keeps its teeth — but the faction can now ebb as well as flow.
+///
+/// Item 168 wording: the clearance chronicle says "symbiont-dream", not
+/// "spore-dream". This Minor line fires 53–171 times per run (balance
+/// report 2026-11-02) and drowned Chronicle searches for "spore" — the
+/// word now belongs to the lethal terrain lane ([SPORE_OUTBREAK] /
+/// [SPORE_SPREAD] / [SPORE_FRONTIER] / [SPORE_DAMAGE]). This was the only
+/// chronicle literal using "spore-dream" (grep-verified), and no test or
+/// parser keys on the old wording, so the rename is clean.
 pub fn fight_off_spore_infection_system(
     mut commands: Commands,
     mut faction: ResMut<SymbiontFaction>,
@@ -184,7 +192,7 @@ pub fn fight_off_spore_infection_system(
                 .unwrap_or_else(|| "A colonist".to_string());
             chronicle.send(crate::layer1::core::chronicle::AddChronicleEvent {
                 text: format!(
-                    "{} shakes off the spore-dream; the symbiont's hold weakens.",
+                    "{} shakes off the symbiont-dream; the symbiont's hold weakens.",
                     who
                 ),
                 importance: EventImportance::Minor,

@@ -946,6 +946,10 @@ fn init_simulation_resources(world: &mut World) {
 
     // Spec 326 Invasive Biology: spore hitchhiker tuning.
     world.init_resource::<crate::layer1::biology::invasive::InvasiveConfig>();
+    // Item 168: invasive-lane telegraph state (milestones / frontier
+    // warning) + first-bloom-damage telegraph state.
+    world.init_resource::<crate::layer1::biology::invasive::InvasiveTelegraph>();
+    world.init_resource::<crate::layer1::environment::geomes::BloomDamageTelegraph>();
     // Spec 327 The Stowaway: hidden-pop agenda tuning.
     world.init_resource::<crate::layer1::social::ship_stowaway::StowawayConfig>();
     // Spec 328 Technological Regression: practical knowledge levels.

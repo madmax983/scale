@@ -1,3 +1,4 @@
+use crate::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
 use crate::layer1::map::GridPosition;
 use crate::layer1::nature::terrain::{TerrainGrid, TerrainType};
 use bevy::utils::{HashMap, HashSet};
@@ -7,6 +8,27 @@ use bevy_ecs::prelude::*;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct GeomeHazard {
     pub damage_per_tick: f32,
+}
+
+/// Chronicle text for the FIRST spore-bloom damage of a run (item 168).
+/// Tagged `[SPORE_DAMAGE]` so a Chronicle search for the lethal terrain
+/// lane never drowns in the mind-spore symbiont's Minor lines (that lane
+/// now writes "symbiont-dream" — see symbiotic_insurgency.rs).
+pub const FIRST_SPORE_BLOOM_DAMAGE_CHRONICLE: &str =
+    "[SPORE_DAMAGE] A colonist has taken spore-bloom damage — the invasive \
+     bloom is hurting people. Keep pops off the purple bloom tiles and \
+     burn it back with quarantine burns.";
+
+/// First-bloom-damage telegraph state (item 168, item 160 sub-item 5).
+/// One-shot per run: the natural seam is the run-scoped resource
+/// lifecycle (a fresh world starts un-warned; there is no per-outbreak
+/// ledger for terrain damage to key on, and senescence/re-seeding does
+/// not make a second "first contact" meaningful to the player).
+/// Flag only — it never feeds back into damage, so balance is untouched.
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct BloomDamageTelegraph {
+    /// True once the first-damage warning has fired this run.
+    pub warned: bool,
 }
 
 /// Diffuses hazards from breached geome tiles into adjacent empty/walkable tiles.
@@ -97,6 +119,7 @@ pub fn environmental_damage_system(
     hazard_query: Query<(&GridPosition, &GeomeHazard)>,
     terrain: Option<Res<TerrainGrid>>,
     time: Option<Res<crate::shared::time::SimulationTime>>,
+    mut bloom_telegraph: Option<ResMut<BloomDamageTelegraph>>,
 ) {
     let tick = time.map_or(0, |t| t.tick);
     let mut hazard_map = HashMap::new();
@@ -128,6 +151,35 @@ pub fn environmental_damage_system(
                 cause,
                 tick,
             );
+            // Item 168: the first SporeBloom damage of the run fires
+            // exactly one warning chronicle. Only the SporeBloom cause
+            // counts (MagmaRock / generic hazard damage stays silent),
+            // and dormant-exempt pops never reach this loop, so stasis
+            // cannot trigger it. The flag latches before the send, so a
+            // whole stack taking its first damage on the same tick
+            // still produces a single warning.
+            if cause == crate::layer1::biology::death_attribution::CAUSE_SPORE_BLOOM {
+                if let Some(telegraph) = bloom_telegraph.as_deref_mut() {
+                    if !telegraph.warned {
+                        telegraph.warned = true;
+                        // Deferred send: this system runs on bare
+                        // Worlds with no chronicle bus (unit tests,
+                        // origin suites), where a required EventWriter
+                        // param would panic. If the bus exists, the
+                        // warning lands; if not, it is dropped quietly.
+                        commands.queue(|world: &mut World| {
+                            if let Some(mut events) = world
+                                .get_resource_mut::<bevy_ecs::event::Events<AddChronicleEvent>>()
+                            {
+                                events.send(AddChronicleEvent {
+                                    text: FIRST_SPORE_BLOOM_DAMAGE_CHRONICLE.to_string(),
+                                    importance: EventImportance::Major,
+                                });
+                            }
+                        });
+                    }
+                }
+            }
         }
     }
 }
@@ -426,5 +478,101 @@ mod tests {
                 "awakened stalker takes hazard damage again"
             );
         }
+    }
+
+    // --- Item 168: first-bloom-damage warning (item 160 sub-item 5) ---
+    // Balance report 2026-11-02: the invasive lane had NO first-damage
+    // warning — a conversion that killed seven resting pops was
+    // chronicled nowhere. The first SporeBloom environmental damage of
+    // a run must fire exactly one warning chronicle.
+
+    fn bloom_damage_world(terrain: TerrainType) -> (World, Entity) {
+        let mut world = World::new();
+        let mut grid = TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Rock; 100],
+        };
+        grid.set(6, 5, terrain);
+        world.insert_resource(grid);
+        world.insert_resource(
+            bevy_ecs::event::Events::<crate::layer1::core::chronicle::AddChronicleEvent>::default(
+            ),
+        );
+        world.insert_resource(BloomDamageTelegraph::default());
+        let pop = world
+            .spawn((Pop, mk_health(), GridPosition { x: 6, y: 5 }))
+            .id();
+        (world, pop)
+    }
+
+    fn run_damage_pair(world: &mut World) {
+        let mut schedule = Schedule::default();
+        schedule.add_systems((
+            diffuse_geome_hazards_system,
+            environmental_damage_system.after(diffuse_geome_hazards_system),
+        ));
+        schedule.run(world);
+    }
+
+    fn spore_damage_warnings(world: &World) -> usize {
+        let events =
+            world.resource::<bevy_ecs::event::Events<crate::layer1::core::chronicle::AddChronicleEvent>>();
+        events
+            .get_reader()
+            .read(events)
+            .filter(|e| e.text.contains("[SPORE_DAMAGE]"))
+            .count()
+    }
+
+    #[test]
+    fn test_first_spore_bloom_damage_fires_warning_exactly_once() {
+        let (mut world, pop) = bloom_damage_world(TerrainType::SporeBloom);
+        run_damage_pair(&mut world);
+        assert_eq!(
+            world.get::<Health>(pop).unwrap().current,
+            95.0,
+            "baseline: bloom damage still 5.0/tick (no balance change)"
+        );
+        assert_eq!(
+            spore_damage_warnings(&world),
+            1,
+            "the first bloom damage of the run must warn"
+        );
+        assert!(world.resource::<BloomDamageTelegraph>().warned);
+        run_damage_pair(&mut world);
+        assert_eq!(world.get::<Health>(pop).unwrap().current, 90.0);
+        assert_eq!(
+            spore_damage_warnings(&world),
+            1,
+            "the first-damage warning is one-shot per run"
+        );
+    }
+
+    #[test]
+    fn test_magma_damage_does_not_fire_spore_damage_warning() {
+        let (mut world, pop) = bloom_damage_world(TerrainType::MagmaRock);
+        run_damage_pair(&mut world);
+        assert_eq!(
+            world.get::<Health>(pop).unwrap().current,
+            90.0,
+            "magma control: 10.0/tick damage still applies"
+        );
+        assert_eq!(
+            spore_damage_warnings(&world),
+            0,
+            "non-bloom hazard damage must stay silent in the spore lane"
+        );
+        assert!(!world.resource::<BloomDamageTelegraph>().warned);
+    }
+
+    #[test]
+    fn test_no_warning_when_pop_takes_no_damage() {
+        let (mut world, pop) = bloom_damage_world(TerrainType::Rock);
+        // Move the pop off the (non-)hazard tile setup: keep it on Rock.
+        run_damage_pair(&mut world);
+        assert_eq!(world.get::<Health>(pop).unwrap().current, 100.0);
+        assert_eq!(spore_damage_warnings(&world), 0);
+        assert!(!world.resource::<BloomDamageTelegraph>().warned);
     }
 }
