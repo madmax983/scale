@@ -33,7 +33,6 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::psychology::generational_amnesia::apply_amnesia_system,
             crate::layer1::psychology::generational_amnesia::apply_amnesia_to_memories_system,
             crate::layer1::social::emotional_contagion::trigger_emotional_contagion_system,
-            crate::layer1::social::pop_relationships::calculate_relationship_mood_buff_system,
             crate::layer1::culture::cultural_artifacts::cultural_aura_system,
             crate::layer1::stress::assign_generational_traits_system,
             crate::layer1::stress::silent_needs_suppression_system,
@@ -438,6 +437,8 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::social::gossip_economy::spawn_broker_system
                 .after(crate::layer1::social::gossip_economy::intel_decay_system),
             crate::layer1::social::proximity_social_system.after(modify_affinity_system),
+            crate::layer1::social::pop_relationships::decay_affinities_system
+                .after(modify_affinity_system),
             crate::layer1::biology::genetics::splicers_dilemma::evaluate_social_friction_system
                 .after(crate::layer1::social::proximity_social_system),
             crate::layer1::social::pen_pals::update_pen_pals_system.after(modify_affinity_system),

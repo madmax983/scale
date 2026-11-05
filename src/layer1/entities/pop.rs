@@ -46,6 +46,7 @@ use crate::layer1::palette_fatigue::DietaryHistory;
 use crate::layer1::rumor::Knowledge;
 use crate::layer1::skills::Skills;
 use crate::layer1::social::debt::SocialDebt;
+use crate::layer1::social::Relationships;
 use crate::layer1::social::old_guard::Arrival;
 use crate::layer1::social::sartorial_rebellion::Appearance;
 use crate::layer1::terrain::{TerrainGrid, TerrainType};
@@ -337,6 +338,13 @@ pub struct PopBundle {
     pub social_debt: SocialDebt,
     /// Overall morale.
     pub morale: Morale,
+    /// Pairwise affinities toward other pops (Specs 047/391). Bundled
+    /// for the same total-coverage reason as the dissatisfaction
+    /// ledger: every pop-spawn site goes through this bundle, so the
+    /// proximity aura and affinity decay apply to every pop by
+    /// construction instead of only to pops other systems happened to
+    /// insert the component on.
+    pub relationships: Relationships,
     /// Disease cooldown.
     pub contagion: ContagionCooldown,
     /// Personality traits.
@@ -419,6 +427,7 @@ impl PopBundle {
             auras: ActiveAuras::default(),
             social_debt: SocialDebt::default(),
             morale: Morale::default(),
+            relationships: Relationships::default(),
             contagion: ContagionCooldown::default(),
             traits: Traits::random(rng),
             cabin_fever: CabinFever::default(),

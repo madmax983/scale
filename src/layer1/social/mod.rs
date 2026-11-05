@@ -193,14 +193,30 @@ pub struct SocialBuff {
     pub value: f32,
 }
 
-/// System to calculate social proximity buffs/debuffs.
+/// Chebyshev radius of the relationship aura (Spec 391).
+pub const SOCIAL_AURA_RADIUS: i32 = 5;
+
+/// Affinity beyond which a nearby pop counts as a friend (positive) or
+/// rival (negative) for the aura (Specs 047/391).
+pub const SOCIAL_AURA_THRESHOLD: f32 = 20.0;
+
+/// Morale modifier granted per nearby friend / rival (Specs 047/391).
+pub const SOCIAL_AURA_PER_POP: f32 = 0.1;
+
+/// System to calculate social proximity buffs/debuffs (the Spec 391 aura).
 ///
-/// Checks for other pops within 5 tiles.
+/// Checks for other pops within [`SOCIAL_AURA_RADIUS`] tiles (Chebyshev).
 /// *   **Friends (>20 affinity)**: +0.1 morale per friend.
 /// *   **Enemies (<-20 affinity)**: -0.1 morale per enemy.
 ///
-/// Note: This is currently O(N^2) and should be optimized with spatial partitioning
-/// if pop count grows large.
+/// The result is a [`SocialBuff`] component, folded into `Morale.value`
+/// by `update_morale_cache_system` — pops are never buffed by distant
+/// relationships, however strong.
+///
+/// Neighbour lookup uses a spatial hash grid (Spec 391 REFACTOR, the
+/// `rumor.rs` spatial-hash precedent): pops are bucketed by tile and
+/// each pop only scans the cells inside its aura radius — never an
+/// O(N^2) all-pairs scan.
 pub fn proximity_social_system(
     mut commands: Commands,
     pops: Query<(
@@ -217,10 +233,18 @@ pub fn proximity_social_system(
         Option<&crate::layer1::social::informants::SocialDesire>,
     )>,
 ) {
-    // O(N^2) naive implementation for Green phase
-    for (entity, pos, rel, ostracized, desire) in pops.iter() {
-        let mut total_buff: f32 = 0.0;
+    // Spatial hash grid: tile -> (entity, ostracized, socially withdrawn).
+    type AuraGrid = HashMap<(i32, i32), Vec<(Entity, bool, bool)>>;
+    let mut grid: AuraGrid = HashMap::new();
+    for (entity, pos, ostracized, desire) in other_pops.iter() {
+        grid.entry((pos.x, pos.y)).or_default().push((
+            entity,
+            ostracized.is_some(),
+            desire.is_some_and(|d| d.score <= 0.0),
+        ));
+    }
 
+    for (entity, pos, rel, ostracized, desire) in pops.iter() {
         // Ostracized pops get no proximity buff
         if ostracized.is_some() {
             commands.entity(entity).remove::<SocialBuff>();
@@ -229,38 +253,38 @@ pub fn proximity_social_system(
 
         // Spec 323: pops too paranoid to socialize (SocialDesire 0) neither
         // mingle nor count as company — trust has fully broken down.
-        if desire.map_or(false, |d| d.score <= 0.0) {
+        if desire.is_some_and(|d| d.score <= 0.0) {
             commands.entity(entity).remove::<SocialBuff>();
             continue;
         }
 
-        for (other_entity, other_pos, other_ostracized, other_desire) in other_pops.iter() {
-            if entity == other_entity {
-                continue;
-            }
+        let mut total_buff: f32 = 0.0;
+        for dx in -SOCIAL_AURA_RADIUS..=SOCIAL_AURA_RADIUS {
+            for dy in -SOCIAL_AURA_RADIUS..=SOCIAL_AURA_RADIUS {
+                let Some(cell) = grid.get(&(pos.x + dx, pos.y + dy)) else {
+                    continue;
+                };
+                for &(other_entity, other_ostracized, other_withdrawn) in cell {
+                    if entity == other_entity {
+                        continue;
+                    }
 
-            // You don't get buffs from ostracized pops, you pretend they aren't there
-            if other_ostracized.is_some() {
-                continue;
-            }
+                    // You don't get buffs from ostracized pops, you pretend they aren't there
+                    if other_ostracized {
+                        continue;
+                    }
 
-            // Spec 323: withdrawn pops are socially invisible.
-            if other_desire.map_or(false, |d| d.score <= 0.0) {
-                continue;
-            }
+                    // Spec 323: withdrawn pops are socially invisible.
+                    if other_withdrawn {
+                        continue;
+                    }
 
-            // Naive distance check
-            let dx = pos.x.abs_diff(other_pos.x).min(i32::MAX as u32) as i32;
-            let dy = pos.y.abs_diff(other_pos.y).min(i32::MAX as u32) as i32;
-            let distance = dx.max(dy); // Chebyshev
-
-            if distance <= 5 {
-                // 5 tile radius
-                let affinity = rel.get_affinity(other_entity);
-                if affinity > 20.0 {
-                    total_buff += 0.1; // Small boost per friend
-                } else if affinity < -20.0 {
-                    total_buff -= 0.1; // Small penalty per enemy
+                    let affinity = rel.get_affinity(other_entity);
+                    if affinity > SOCIAL_AURA_THRESHOLD {
+                        total_buff += SOCIAL_AURA_PER_POP; // Small boost per friend
+                    } else if affinity < -SOCIAL_AURA_THRESHOLD {
+                        total_buff -= SOCIAL_AURA_PER_POP; // Small penalty per enemy
+                    }
                 }
             }
         }
@@ -459,6 +483,46 @@ mod tests {
         let buff = world.get::<SocialBuff>(pop1);
         assert!(buff.is_some());
         assert!(buff.unwrap().value < 0.0);
+    }
+
+    /// Spec 391 spatial-hash aura: contributions aggregate per nearby
+    /// pop, the radius boundary is exact (Chebyshev 5 counts, 6 does
+    /// not), and a same-tile crowd is found through the hash.
+    #[test]
+    fn test_proximity_aura_aggregates_and_respects_radius() {
+        let mut world = World::new();
+
+        let pop1 = world
+            .spawn((Pop, GridPosition { x: 10, y: 10 }, Relationships::default()))
+            .id();
+        // Friend at the aura corner (dx=5, dy=5).
+        let friend_edge = world.spawn((Pop, GridPosition { x: 15, y: 15 })).id();
+        // Friend just outside the aura (dx=6).
+        let friend_far = world.spawn((Pop, GridPosition { x: 16, y: 10 })).id();
+        // Rival on the same tile.
+        let rival = world.spawn((Pop, GridPosition { x: 10, y: 10 })).id();
+        // Second friend, adjacent.
+        let friend_near = world.spawn((Pop, GridPosition { x: 10, y: 11 })).id();
+
+        {
+            let mut rel = world.get_mut::<Relationships>(pop1).unwrap();
+            rel.set_affinity(friend_edge, 50.0);
+            rel.set_affinity(friend_far, 50.0);
+            rel.set_affinity(rival, -50.0);
+            rel.set_affinity(friend_near, 50.0);
+        }
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(proximity_social_system);
+        schedule.run(&mut world);
+
+        let buff = world.get::<SocialBuff>(pop1);
+        assert!(buff.is_some());
+        assert!(
+            (buff.unwrap().value - 0.1).abs() < f32::EPSILON,
+            "edge friend + near friend - same-tile rival = +0.1; far friend excluded, got {}",
+            buff.unwrap().value
+        );
     }
 
     #[test]

@@ -472,6 +472,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "expel" => handle_expel_command(world, &parts),
         "scare" => handle_scare_command(world, &parts),
         "panics" => print_panics(world),
+        "relationships" => print_relationships(world),
         "vermin" => handle_vermin_command(world, &parts),
         "pillar" => handle_pillar_command(world, &parts),
         "integrity" => print_integrity(world),
@@ -3473,6 +3474,9 @@ fn print_stats(world: &mut World) {
         (count, avg_sanity)
     };
 
+    // Spec 391: relationship-web census for STATS (full panel: `relationships`).
+    let rel_census = scale::layer1::social::pop_relationships::relationship_census(world);
+
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
     let grid_strain = scale::layer1::energy::grid_strain::grid_strain_ticks(world);
@@ -3510,7 +3514,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={}",
         tick,
         scenario,
         pops,
@@ -3672,6 +3676,9 @@ fn print_stats(world: &mut World) {
         strat_label,
         eureka_label,
         geohazards,
+        rel_census.bonds,
+        rel_census.friends,
+        rel_census.rivals,
     );
 }
 
@@ -4464,6 +4471,92 @@ fn print_panics(world: &mut World) {
             "PANIC STATUS",
             &format!("{} panicking:\n{}", rows.len(), rows.join("\n")),
             Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+}
+
+/// Show the relationship web (headless `relationships` command, Spec 391).
+///
+/// Census first (the same numbers STATS reports as `bonds=`/`friends=`/
+/// `rivals=`), then one line per pop that feels anything about anyone:
+/// strongest friend, strongest rival, and the live proximity aura
+/// (`SocialBuff`) those bonds are currently producing.
+fn print_relationships(world: &mut World) {
+    use scale::layer1::social::pop_relationships::relationship_census;
+    use scale::layer1::social::{Relationships, SocialBuff};
+
+    let census = relationship_census(world);
+
+    // Resolve names up front so affinity targets can be labelled.
+    let mut names: std::collections::HashMap<Entity, String> = std::collections::HashMap::new();
+    {
+        let mut q = world.query::<(Entity, &PopName)>();
+        for (entity, name) in q.iter(world) {
+            names.insert(entity, name.0.clone());
+        }
+    }
+    let label = |entity: Entity| -> String {
+        names
+            .get(&entity)
+            .cloned()
+            .unwrap_or_else(|| format!("#{}", entity.index()))
+    };
+
+    let mut rows: Vec<String> = Vec::new();
+    let mut q = world.query::<(Entity, Option<&PopName>, &Relationships, Option<&SocialBuff>)>();
+    for (entity, name, rels, buff) in q.iter(world) {
+        if rels.affinities.is_empty() {
+            continue;
+        }
+        let name = name.map_or_else(|| format!("#{}", entity.index()), |n| n.0.clone());
+        let mut friend: Option<(Entity, f32)> = None;
+        let mut rival: Option<(Entity, f32)> = None;
+        for (&other, &value) in rels.affinities.iter() {
+            if value > 0.0 && friend.is_none_or(|(_, v)| value > v) {
+                friend = Some((other, value));
+            }
+            if value < 0.0 && rival.is_none_or(|(_, v)| value < v) {
+                rival = Some((other, value));
+            }
+        }
+        let friend_s = friend.map_or_else(
+            || "friend: none".to_string(),
+            |(e, v)| format!("friend: {} ({v:+.0})", label(e)),
+        );
+        let rival_s = rival.map_or_else(
+            || "rival: none".to_string(),
+            |(e, v)| format!("rival: {} ({v:+.0})", label(e)),
+        );
+        let aura_s = buff.map_or_else(
+            || "aura: none".to_string(),
+            |b| format!("aura: {:+.2}", b.value),
+        );
+        rows.push(format!(
+            "#{id} {name} — {friend_s}; {rival_s}; {aura_s}",
+            id = entity.index()
+        ));
+    }
+    rows.sort();
+
+    if rows.is_empty() {
+        print_dashboard_panel(
+            "RELATIONSHIPS",
+            "No bonds yet. Pops grow closer working shared shifts;\nfeelings fade when pops stop meeting.",
+            Some(comfy_table::Color::Green),
+            None,
+        );
+    } else {
+        print_dashboard_panel(
+            "RELATIONSHIPS",
+            &format!(
+                "Bonds: {}  Friends: {}  Rivals: {}\n{}",
+                census.bonds,
+                census.friends,
+                census.rivals,
+                rows.join("\n")
+            ),
+            Some(comfy_table::Color::Cyan),
             Some(comfy_table::Attribute::Bold),
         );
     }
@@ -6889,6 +6982,11 @@ fn print_help() {
                 ("dust", "", "Show Desire Dust and RoadMind status"),
                 ("scare [x] [y]", "", "Debug: spawn a terrifying sighting (Spec 1371)"),
                 ("panics", "", "List panicking pops (Spec 1371)"),
+                (
+                    "relationships",
+                    "",
+                    "Show pop relationships: bonds, friends, rivals, aura (Spec 391)",
+                ),
                 (
                     "vermin",
                     "",
