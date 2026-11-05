@@ -39,7 +39,7 @@ use crate::shared::log::MessageLog;
 const WORK_PER_TICK: f32 = 10.0;
 
 /// Durability loss per tick when working.
-const TOOL_DURABILITY_LOSS: f32 = 0.1;
+const TOOL_DURABILITY_LOSS: f32 = crate::layer1::tool_economy::TOOL_WEAR_PER_WORK_TICK;
 
 struct WorkerData {
     entity: Entity,
@@ -449,6 +449,18 @@ pub fn calculate_work_amount(
         improvised_efficiency
     };
 
+    // Spec 392: tool-requiring work with a broken or missing required
+    // tool runs at 0.1x, overriding the improvised/bare-hands fallback.
+    if let Some(required) =
+        crate::layer1::tool_economy::required_tool_for_designation(designation_type)
+    {
+        let equipped = tool_entity
+            .and_then(|e| world.get::<Tool>(e))
+            .map(|t| (t.tool_type, t.durability));
+        tool_efficiency =
+            crate::layer1::tool_economy::tool_speed_factor(Some(required), equipped);
+    }
+
     // Apply Heirloom bonus
     if let Some(entity) = tool_entity {
         if let Some(heirloom) = world.get::<Heirloom>(entity) {
@@ -700,14 +712,31 @@ fn handle_post_work_effects(
 
 fn handle_tool_durability(world: &mut World, pop_entity: Entity, tool_entity: Entity) {
     let mut broke = false;
+    let mut broken_type = None;
     if let Some(mut tool) = world.get_mut::<Tool>(tool_entity) {
-        tool.durability -= TOOL_DURABILITY_LOSS;
-        if tool.durability <= 0.0 {
+        let (new_durability, did_break) =
+            crate::layer1::tool_economy::wear_tool(tool.durability, TOOL_DURABILITY_LOSS);
+        tool.durability = new_durability;
+        if did_break {
             broke = true;
+            broken_type = Some(tool.tool_type);
         }
     }
 
     if broke {
+        // Spec 392: dedicated breakage event. Guarded because some test
+        // worlds never init this event resource.
+        if let Some(tool_type) = broken_type {
+            if let Some(mut events) = world.get_resource_mut::<
+                Events<crate::layer1::tool_economy::ToolBrokenEvent>,
+            >() {
+                events.send(crate::layer1::tool_economy::ToolBrokenEvent {
+                    pop: pop_entity,
+                    tool: tool_entity,
+                    tool_type,
+                });
+            }
+        }
         // Emit UnequipEvent
         world.send_event(UnequipEvent {
             actor: pop_entity,
@@ -725,7 +754,7 @@ fn handle_tool_durability(world: &mut World, pop_entity: Entity, tool_entity: En
 
         // Log breakage
         if let Some(mut log) = world.get_resource_mut::<MessageLog>() {
-            log.add("CRACK! A tool has broken.");
+            log.add(crate::layer1::tool_economy::TOOL_BROKEN_MESSAGE);
         }
     }
 }

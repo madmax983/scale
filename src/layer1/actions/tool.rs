@@ -24,5 +24,13 @@ pub(crate) fn evaluate_fetch_tool(
     }
 
     let weights = UtilityWeights::default();
-    evaluate_candidates(pop_pos, &weights, stockpiles, 0.9)
+    // Spec 392: a pop with no tool (in production a broken tool has
+    // already been removed, so missing == broken) strongly prioritizes
+    // fetching a replacement from the Smithy-fed stockpile pool.
+    evaluate_candidates(
+        pop_pos,
+        &weights,
+        stockpiles,
+        crate::layer1::tool_economy::REPLACEMENT_TOOL_UTILITY,
+    )
 }

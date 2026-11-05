@@ -473,6 +473,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "scare" => handle_scare_command(world, &parts),
         "panics" => print_panics(world),
         "relationships" => print_relationships(world),
+        "tools" => print_tools(world),
         "vermin" => handle_vermin_command(world, &parts),
         "pillar" => handle_pillar_command(world, &parts),
         "integrity" => print_integrity(world),
@@ -3477,6 +3478,9 @@ fn print_stats(world: &mut World) {
     // Spec 391: relationship-web census for STATS (full panel: `relationships`).
     let rel_census = scale::layer1::social::pop_relationships::relationship_census(world);
 
+    // Spec 392: tool-economy census for STATS (full panel: `tools`).
+    let tool_census = scale::layer1::tool_economy::tool_census(world);
+
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
     let grid_strain = scale::layer1::energy::grid_strain::grid_strain_ticks(world);
@@ -3514,7 +3518,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2}",
         tick,
         scenario,
         pops,
@@ -3679,6 +3683,9 @@ fn print_stats(world: &mut World) {
         rel_census.bonds,
         rel_census.friends,
         rel_census.rivals,
+        tool_census.toolless,
+        tool_census.worn,
+        tool_census.avg_durability,
     );
 }
 
@@ -4560,6 +4567,30 @@ fn print_relationships(world: &mut World) {
             Some(comfy_table::Attribute::Bold),
         );
     }
+}
+
+/// Show the tool economy (headless `tools` command, Spec 392).
+///
+/// Census first (the same numbers STATS reports as `toolless=` /
+/// `worn_tools=` / `tool_dur=`), plus the Smithy-fed stockpile pool that
+/// `FetchTool` draws replacements from.
+fn print_tools(world: &mut World) {
+    let census = scale::layer1::tool_economy::tool_census(world);
+    let pool = world
+        .get_resource::<scale::layer1::resources::ColonyResources>()
+        .map_or(0.0, |r| r.tools);
+    print_dashboard_panel(
+        "TOOL ECONOMY",
+        &format!(
+            "Equipped: {}  Toolless: {}  Worn: {}\nAvg durability: {:.0}%  Stockpile pool: {pool:.1}\n\nTools wear 0.1 per work tick and break at zero (ToolBrokenEvent).\nTool-requiring work without a working tool runs at 0.1x speed;\nFetchTool (0.95) rushes a Smithy-made replacement.",
+            census.equipped,
+            census.toolless,
+            census.worn,
+            census.avg_durability * 100.0,
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
 }
 
 /// Show Founder/Veteran/NewBlood seniority counts (Spec 333).
@@ -6986,6 +7017,11 @@ fn print_help() {
                     "relationships",
                     "",
                     "Show pop relationships: bonds, friends, rivals, aura (Spec 391)",
+                ),
+                (
+                    "tools",
+                    "",
+                    "Show tool economy: equipped, toolless, worn, durability (Spec 392)",
                 ),
                 (
                     "vermin",

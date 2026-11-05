@@ -102,6 +102,8 @@ pub mod institutional_memory;
 pub mod law;
 pub use law::orphaned_edict::*;
 pub mod improvised_tools;
+/// Tool durability, breakage, and replacement economy (Spec 392).
+pub mod tool_economy;
 /// Colony Mascot system (Spec 129).
 /// Medical care and hospital logic.
 pub mod jobs;

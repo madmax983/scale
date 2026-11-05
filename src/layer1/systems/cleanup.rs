@@ -40,6 +40,7 @@ pub fn register(schedule: &mut Schedule) {
     schedule.add_systems(
         (
             update_event_buffer::<crate::layer1::unrest::DenounceEvent>,
+            update_event_buffer::<crate::layer1::tool_economy::ToolBrokenEvent>,
             update_event_buffer::<crate::layer1::environment::volatile::ExplosionEvent>,
             update_event_buffer::<PossessEntityEvent>,
             update_event_buffer::<UnpossessEvent>,
