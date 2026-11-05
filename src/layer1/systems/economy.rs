@@ -161,9 +161,23 @@ pub fn register(schedule: &mut Schedule) {
             update_morale_cache_system
                 .after(apply_catharsis_morale_bonus_system)
                 .after(crate::layer1::graffiti::graffiti_observation_system)
+                .after(crate::layer1::administration::edicts::apply_edict_modifiers)
                 .after(mascot_buff_system),
             morale_decay_system.after(update_morale_cache_system),
             crate::layer1::social::hedonic_treadmill::decay_standard_of_living,
+        )
+            .in_set(Layer1SystemSet::Economy),
+    );
+    // Spec 393: colony edicts — separate add_systems because the tuple
+    // above is at Bevy's 20-system cap. Ensure Liberty coverage, then
+    // refresh derived edict effects (Morale modifiers + Liberty)
+    // before the morale cache reads modifiers for this tick.
+    schedule.add_systems(
+        (
+            crate::layer1::administration::edicts::ensure_liberty_system,
+            crate::layer1::administration::edicts::apply_edict_modifiers
+                .after(crate::layer1::administration::edicts::ensure_liberty_system)
+                .before(update_morale_cache_system),
         )
             .in_set(Layer1SystemSet::Economy),
     );

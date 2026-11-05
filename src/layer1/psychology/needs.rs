@@ -35,7 +35,7 @@
 //! "Morale" is the aggregate score of all needs. High morale grants efficiency bonuses, while low morale
 //! leads to mental breaks (tantrums, depression).
 
-use crate::layer1::edicts::{get_hunger_decay_modifier, ColonyPolicies};
+use crate::layer1::edicts::{get_hunger_decay_modifier, get_rest_decay_modifier, ColonyPolicies};
 use crate::layer1::health::Health;
 use crate::layer1::memory::{Memories, MemoryType};
 use crate::layer1::traits::{
@@ -253,8 +253,12 @@ pub fn decay_needs_system(
     chambers: Query<&crate::layer1::temporal_chamber::TemporalChamber>,
     policies: Option<Res<ColonyPolicies>>,
 ) {
-    let hunger_mod = policies.map_or(1.0, |p| get_hunger_decay_modifier(&p));
+    let hunger_mod = policies.as_ref().map_or(1.0, |p| get_hunger_decay_modifier(p));
     let base_hunger_decay = HUNGER_DECAY_PER_TICK * hunger_mod;
+    // Spec 393: Night Shifts edict burns rest faster (pull-based,
+    // recomputed from the base rate every tick — never accumulates).
+    let rest_mod = policies.as_ref().map_or(1.0, |p| get_rest_decay_modifier(p));
+    let base_rest_decay = REST_DECAY_PER_TICK * rest_mod;
 
     query
         .par_iter_mut()
@@ -265,7 +269,7 @@ pub fn decay_needs_system(
             let leisure_trait_mod = traits.map_or(1.0, get_trait_leisure_decay_modifier);
             let mut leisure_decay = LEISURE_DECAY_PER_TICK * leisure_trait_mod;
 
-            let mut rest_decay = REST_DECAY_PER_TICK;
+            let mut rest_decay = base_rest_decay;
 
             if traits.is_some_and(|t| t.has(crate::layer1::traits::Trait::InsomniaDrive)) {
                 rest_decay = 0.0;

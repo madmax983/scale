@@ -122,8 +122,14 @@ pub struct ColonyPolicies {
 pub enum Policy {
     /// Reduces hunger decay but lowers morale.
     Rationing,
+    /// Spec 393: Double Rations — boosts morale but doubles food
+    /// consumption (hunger decay x2). The generous mirror of Rationing.
+    DoubleRations,
     /// Increases work speed but lowers morale.
     DoubleShifts,
+    /// Spec 393: Night Shifts — work speed up, rest burns faster,
+    /// morale slightly down. The colony keeps the lights on all night.
+    NightShifts,
     /// Reduces vermin growth but lowers work speed.
     PestControl,
     /// Bans a specific resource, making it contraband.
@@ -225,6 +231,256 @@ impl ColonyPolicies {
     #[must_use]
     pub fn is_active(&self, policy: Policy) -> bool {
         self.active_policies.contains(&policy)
+    }
+
+    /// Spec 393: idempotently enact a policy (no-op if already active).
+    /// The spec's sketch API (`ActiveEdicts::enable`) on the real
+    /// 054 resource — see the `ActiveEdicts`/`EdictType` aliases below.
+    pub fn enable(&mut self, policy: Policy) {
+        if !self.is_active(policy) {
+            self.toggle(policy);
+        }
+    }
+
+    /// Spec 393: idempotently repeal a policy (no-op if not active).
+    pub fn disable(&mut self, policy: Policy) {
+        if self.is_active(policy) {
+            self.toggle(policy);
+        }
+    }
+}
+
+/// Spec 393 name for the policy enum. The spec sketch introduced
+/// `EdictType` as a new enum; in this codebase the 054 `Policy` enum
+/// already plays that role, so this is an alias, not a parallel type.
+pub type EdictType = Policy;
+
+/// Spec 393 name for the active-edicts resource. Aliases the real
+/// 054 `ColonyPolicies` resource — there is exactly one edict
+/// resource in the simulation.
+pub type ActiveEdicts = ColonyPolicies;
+
+/// The three edicts spec 393 names, in menu order.
+pub const SPEC_393_EDICTS: [Policy; 3] = [
+    Policy::DoubleRations,
+    Policy::MartialLaw,
+    Policy::NightShifts,
+];
+
+/// Morale-modifier label for Double Rations (refresh-never-stack lane).
+pub const DOUBLE_RATIONS_LABEL: &str = "Edict: Double Rations";
+/// Morale-modifier label for Night Shifts (refresh-never-stack lane).
+pub const NIGHT_SHIFTS_LABEL: &str = "Edict: Night Shifts";
+/// Double Rations morale bonus (0.0..=1.0 morale scale; the spec
+/// sketch's +10 on its mock 0..100 Mood scale).
+pub const DOUBLE_RATIONS_MORALE_BONUS: f32 = 0.10;
+/// Double Rations hunger-decay multiplier: pops eat twice as fast.
+pub const DOUBLE_RATIONS_HUNGER_MULTIPLIER: f32 = 2.0;
+/// Martial Law liberty penalty, subtracted from a pop's liberty base
+/// (0..100 scale) for as long as the edict is active.
+pub const MARTIAL_LAW_LIBERTY_PENALTY: f32 = 20.0;
+/// Night Shifts work-speed bonus (additive, like DoubleShifts' +0.2).
+pub const NIGHT_SHIFTS_WORK_SPEED_BONUS: f32 = 0.15;
+/// Night Shifts rest-decay multiplier: night work burns rest faster.
+pub const NIGHT_SHIFTS_REST_MULTIPLIER: f32 = 1.5;
+/// Night Shifts flat morale modifier (0.0..=1.0 scale).
+pub const NIGHT_SHIFTS_MORALE_MODIFIER: f32 = -0.05;
+/// Duration of refreshed edict mood modifiers (matches the Spec 359
+/// night-shift bridge's refresh pattern).
+pub const EDICT_MODIFIER_DURATION: u32 = 100;
+
+/// Per-pop liberty (Spec 393). The spec sketch had a bare
+/// `Liberty(pub f32)` that its GREEN code decremented every tick —
+/// permanent accumulation. This component instead stores the pop's
+/// `base` alongside the derived `current`: `apply_edict_modifiers`
+/// recomputes `current` from `base` every tick, so repealing Martial
+/// Law restores liberty in full on the next tick.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct Liberty {
+    /// The pop's liberty with no edicts in force (0..100).
+    pub base: f32,
+    /// Effective liberty after active edicts (derived, 0..=base).
+    pub current: f32,
+}
+
+impl Default for Liberty {
+    fn default() -> Self {
+        Self {
+            base: 100.0,
+            current: 100.0,
+        }
+    }
+}
+
+/// Parses a console/menu edict name into a spec-393 edict, if it is
+/// one. Accepts snake_case and concatenated spellings.
+#[must_use]
+pub fn parse_edict(name: &str) -> Option<Policy> {
+    match name
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+        .as_str()
+    {
+        "double_rations" | "doublerations" => Some(Policy::DoubleRations),
+        "martial_law" | "martiallaw" | "martial" => Some(Policy::MartialLaw),
+        "night_shifts" | "nightshifts" | "night_shift" | "nightshift" => {
+            Some(Policy::NightShifts)
+        }
+        _ => None,
+    }
+}
+
+/// Short snake_case name for a spec-393 edict (`"other"` for the
+/// older 054-era policies, which predate this naming lane).
+#[must_use]
+pub fn edict_short_name(policy: Policy) -> &'static str {
+    match policy {
+        Policy::DoubleRations => "double_rations",
+        Policy::MartialLaw => "martial_law",
+        Policy::NightShifts => "night_shifts",
+        _ => "other",
+    }
+}
+
+/// Whether active edicts suppress colony unrest (Spec 393: Martial Law).
+#[must_use]
+pub fn is_unrest_suppressed(policies: &ColonyPolicies) -> bool {
+    policies.is_active(Policy::MartialLaw)
+}
+
+/// Rest-decay multiplier from active policies (Spec 393: Night Shifts
+/// burn rest at 1.5x). Pull-based: `decay_needs_system` recomputes
+/// from the base rate every tick.
+#[must_use]
+pub fn get_rest_decay_modifier(policies: &ColonyPolicies) -> f32 {
+    if policies.is_active(Policy::NightShifts) {
+        NIGHT_SHIFTS_REST_MULTIPLIER
+    } else {
+        1.0
+    }
+}
+
+fn refresh_edict_modifier(
+    morale: &mut crate::layer1::social::morale::Morale,
+    label: &str,
+    value: f32,
+    active: bool,
+) {
+    if !active {
+        morale.modifiers.retain(|m| m.label != label);
+        return;
+    }
+    if let Some(existing) = morale.modifiers.iter_mut().find(|m| m.label == label) {
+        existing.value = value;
+        existing.duration = EDICT_MODIFIER_DURATION;
+    } else {
+        morale.add_modifier(crate::layer1::social::morale::MoodModifier {
+            label: label.to_string(),
+            value,
+            duration: EDICT_MODIFIER_DURATION,
+        });
+    }
+}
+
+/// Spec 393's `apply_edict_modifiers`, adapted to real types.
+///
+/// Non-accumulation contract (the spec's §7 guidance): every effect
+/// here is *derived* — Morale effects ride the refresh-never-stack
+/// MoodModifier lane (exactly one modifier per edict, removed the
+/// tick the edict repeals), Liberty is recomputed from its stored
+/// base, and the global Unrest level is forced to 0 only for as long
+/// as Martial Law is active (the authoritative suppression also
+/// lives in `calculate_unrest_system`, which recomputes the level
+/// from scratch each tick). Hunger/rest/work-speed effects are
+/// pull-based modifier functions consumed by their own systems and
+/// never touch per-pop state at all.
+pub fn apply_edict_modifiers(
+    policies: Res<ColonyPolicies>,
+    unrest: Option<ResMut<crate::layer1::social::unrest::Unrest>>,
+    mut query: Query<(
+        &mut crate::layer1::social::morale::Morale,
+        Option<&mut Liberty>,
+    )>,
+) {
+    if let Some(mut unrest) = unrest {
+        if is_unrest_suppressed(&policies) {
+            unrest.level = 0.0;
+        }
+    }
+    let double_rations = policies.is_active(Policy::DoubleRations);
+    let night_shifts = policies.is_active(Policy::NightShifts);
+    let martial_law = policies.is_active(Policy::MartialLaw);
+    for (mut morale, liberty) in query.iter_mut() {
+        refresh_edict_modifier(
+            &mut morale,
+            DOUBLE_RATIONS_LABEL,
+            DOUBLE_RATIONS_MORALE_BONUS,
+            double_rations,
+        );
+        refresh_edict_modifier(
+            &mut morale,
+            NIGHT_SHIFTS_LABEL,
+            NIGHT_SHIFTS_MORALE_MODIFIER,
+            night_shifts,
+        );
+        if let Some(mut liberty) = liberty {
+            let penalty = if martial_law {
+                MARTIAL_LAW_LIBERTY_PENALTY
+            } else {
+                0.0
+            };
+            liberty.current = (liberty.base - penalty).clamp(0.0, liberty.base);
+        }
+    }
+}
+
+/// Inserts a [`Liberty`] tracker on any pop missing one (the
+/// total-coverage ensure pattern used by Spec 359's night-shift
+/// adaptation), so the derived-liberty lane covers pops spawned by
+/// any path, not just `PopBundle`.
+pub fn ensure_liberty_system(
+    mut commands: Commands,
+    query: Query<Entity, (With<crate::layer1::pop::Pop>, Without<Liberty>)>,
+) {
+    for entity in query.iter() {
+        commands.entity(entity).insert(Liberty::default());
+    }
+}
+
+/// Mean effective liberty across pops carrying a [`Liberty`]
+/// tracker (100.0 when no pop carries one yet). Headless/STATS lane.
+#[must_use]
+pub fn average_liberty(world: &mut World) -> f32 {
+    let mut query = world.query::<&Liberty>();
+    let (mut sum, mut count) = (0.0f32, 0u32);
+    for liberty in query.iter(world) {
+        sum += liberty.current;
+        count += 1;
+    }
+    if count == 0 {
+        100.0
+    } else {
+        sum / count as f32
+    }
+}
+
+/// STATS label for the spec-393 edicts: active short names joined
+/// with `+`, or `"none"`. Headless/STATS lane.
+#[must_use]
+pub fn edicts_stats_label(world: &mut World) -> String {
+    let Some(policies) = world.get_resource::<ColonyPolicies>() else {
+        return "none".to_string();
+    };
+    let active: Vec<&str> = SPEC_393_EDICTS
+        .iter()
+        .filter(|p| policies.is_active(**p))
+        .map(|p| edict_short_name(*p))
+        .collect();
+    if active.is_empty() {
+        "none".to_string()
+    } else {
+        active.join("+")
     }
 }
 
@@ -655,11 +911,16 @@ pub fn hack_hub_chronicle_bridge(
 ///
 #[must_use]
 pub fn get_hunger_decay_modifier(policies: &ColonyPolicies) -> f32 {
+    // Spec 393: multiplicative composition — Rationing (x0.5) and
+    // Double Rations (x2.0) cancel out when both are somehow active.
+    let mut modifier = 1.0;
     if policies.is_active(Policy::Rationing) {
-        0.5
-    } else {
-        1.0
+        modifier *= 0.5;
     }
+    if policies.is_active(Policy::DoubleRations) {
+        modifier *= DOUBLE_RATIONS_HUNGER_MULTIPLIER;
+    }
+    modifier
 }
 
 /// Calculates the global work speed modifier based on active policies.
@@ -694,6 +955,9 @@ pub fn get_work_speed_modifier(policies: &ColonyPolicies) -> f32 {
     if policies.is_active(Policy::DoubleShifts) {
         modifier += 0.2;
     }
+    if policies.is_active(Policy::NightShifts) {
+        modifier += NIGHT_SHIFTS_WORK_SPEED_BONUS;
+    }
     if policies.is_active(Policy::PestControl) {
         modifier -= 0.05;
     }
@@ -707,6 +971,8 @@ pub fn get_work_speed_modifier(policies: &ColonyPolicies) -> f32 {
 ///
 /// * `Rationing`: -0.1 Morale.
 /// * `DoubleShifts`: -0.15 Morale.
+/// * `DoubleRations` (Spec 393): +0.1 Morale (well-fed pops).
+/// * `NightShifts` (Spec 393): -0.05 Morale.
 #[must_use]
 pub fn get_morale_modifier(policies: &ColonyPolicies) -> f32 {
     let mut modifier = 0.0;
@@ -715,6 +981,12 @@ pub fn get_morale_modifier(policies: &ColonyPolicies) -> f32 {
     }
     if policies.is_active(Policy::DoubleShifts) {
         modifier -= 0.15;
+    }
+    if policies.is_active(Policy::DoubleRations) {
+        modifier += DOUBLE_RATIONS_MORALE_BONUS;
+    }
+    if policies.is_active(Policy::NightShifts) {
+        modifier += NIGHT_SHIFTS_MORALE_MODIFIER;
     }
     modifier
 }
@@ -970,5 +1242,226 @@ mod tests {
         let policies = app.world().resource::<ColonyPolicies>();
         assert!(!policies.is_active(Policy::ShootInfected));
         assert!(!policies.orphaned_policies.contains(&Policy::ShootInfected));
+    }
+
+    // ---- Spec 393: Colony Edicts (full implementation) ----
+    // Adapted from the spec's mock-style RED sketch to real types:
+    // Mood (0..100) -> Morale component (0.0..=1.0 + MoodModifiers),
+    // Metabolism -> pull-based get_hunger_decay_modifier consumed by
+    // decay_needs_system, per-pop Unrest component -> global Unrest
+    // resource recomputed by calculate_unrest_system, Liberty -> new
+    // derived Liberty component (base/current, recomputed per tick).
+
+    #[test]
+    fn test_393_double_rations_active() {
+        let mut app = bevy_app::App::new();
+
+        let mut edicts = ActiveEdicts::default();
+        edicts.enable(EdictType::DoubleRations);
+        app.insert_resource(edicts);
+        app.insert_resource(crate::layer1::social::unrest::Unrest::default());
+        app.add_systems(bevy_app::Update, apply_edict_modifiers);
+
+        let pop = app
+            .world_mut()
+            .spawn((
+                crate::layer1::needs::Needs::default(),
+                crate::layer1::social::morale::Morale::default(),
+                Liberty::default(),
+            ))
+            .id();
+
+        app.update();
+
+        // Double rations should increase mood (via a refreshed Morale
+        // modifier, the codebase's non-accumulating mood lane)...
+        let morale = app
+            .world()
+            .get::<crate::layer1::social::morale::Morale>(pop)
+            .unwrap();
+        let bonus: f32 = morale
+            .modifiers
+            .iter()
+            .filter(|m| m.label == DOUBLE_RATIONS_LABEL)
+            .map(|m| m.value)
+            .sum();
+        assert!(
+            bonus > 0.0,
+            "Double Rations should boost mood via a Morale modifier"
+        );
+
+        // ...and increase hunger drain (food consumption rate x2).
+        let policies = app.world().resource::<ColonyPolicies>();
+        assert!(
+            get_hunger_decay_modifier(policies) > 1.0,
+            "Double Rations should double food consumption rate"
+        );
+        assert!((get_hunger_decay_modifier(policies) - 2.0).abs() < f32::EPSILON);
+        assert!(get_morale_modifier(policies) > 0.0);
+    }
+
+    #[test]
+    fn test_393_martial_law_suppresses_unrest() {
+        let mut app = bevy_app::App::new();
+
+        let mut edicts = ActiveEdicts::default();
+        edicts.enable(EdictType::MartialLaw);
+        app.insert_resource(edicts);
+        app.insert_resource(crate::layer1::social::unrest::Unrest {
+            level: 0.5,
+            modifiers: Vec::new(),
+        });
+        app.add_systems(
+            bevy_app::Update,
+            (
+                apply_edict_modifiers,
+                crate::layer1::social::unrest::calculate_unrest_system
+                    .after(apply_edict_modifiers),
+            ),
+        );
+
+        let pop = app
+            .world_mut()
+            .spawn((
+                crate::layer1::pop::Pop,
+                crate::layer1::social::morale::Morale {
+                    value: 0.1, // Very low morale, should cause unrest
+                    modifiers: Vec::new(),
+                },
+                Liberty {
+                    base: 100.0,
+                    current: 100.0,
+                },
+            ))
+            .id();
+
+        app.update();
+        app.update();
+
+        // Martial Law suppresses unrest to 0 (even after the unrest
+        // system recomputes it from the low average morale)...
+        let unrest = app.world().resource::<crate::layer1::social::unrest::Unrest>();
+        assert_eq!(unrest.level, 0.0, "Martial Law should reduce Unrest to 0");
+        assert!(is_unrest_suppressed(
+            app.world().resource::<ColonyPolicies>()
+        ));
+
+        // ...but lowers liberty — derived from base, so two ticks of
+        // application still read exactly 80, never 60/40/... (the
+        // spec sketch's per-tick `-20` would accumulate permanently).
+        let liberty = app.world().get::<Liberty>(pop).unwrap();
+        assert!(liberty.current < 100.0, "Martial Law should decrease Liberty");
+        assert!(
+            (liberty.current - 80.0).abs() < f32::EPSILON,
+            "Liberty must be recomputed from base, not accumulated: {}",
+            liberty.current
+        );
+    }
+
+    #[test]
+    fn test_393_modifiers_do_not_accumulate() {
+        let mut app = bevy_app::App::new();
+        let mut edicts = ActiveEdicts::default();
+        edicts.enable(EdictType::DoubleRations);
+        edicts.enable(EdictType::MartialLaw);
+        app.insert_resource(edicts);
+        app.insert_resource(crate::layer1::social::unrest::Unrest::default());
+        app.add_systems(bevy_app::Update, apply_edict_modifiers);
+
+        let pop = app
+            .world_mut()
+            .spawn((
+                crate::layer1::social::morale::Morale::default(),
+                Liberty::default(),
+            ))
+            .id();
+
+        for _ in 0..5 {
+            app.update();
+        }
+
+        let morale = app
+            .world()
+            .get::<crate::layer1::social::morale::Morale>(pop)
+            .unwrap();
+        let ration_mods: Vec<_> = morale
+            .modifiers
+            .iter()
+            .filter(|m| m.label == DOUBLE_RATIONS_LABEL)
+            .collect();
+        assert_eq!(ration_mods.len(), 1, "modifier must refresh, never stack");
+        assert!((ration_mods[0].value - DOUBLE_RATIONS_MORALE_BONUS).abs() < f32::EPSILON);
+
+        let liberty = app.world().get::<Liberty>(pop).unwrap();
+        assert!((liberty.current - 80.0).abs() < f32::EPSILON);
+
+        // Turning the edicts off fully restores base values next tick.
+        app.world_mut()
+            .resource_mut::<ColonyPolicies>()
+            .disable(EdictType::DoubleRations);
+        app.world_mut()
+            .resource_mut::<ColonyPolicies>()
+            .disable(EdictType::MartialLaw);
+        app.update();
+
+        let morale = app
+            .world()
+            .get::<crate::layer1::social::morale::Morale>(pop)
+            .unwrap();
+        assert!(morale
+            .modifiers
+            .iter()
+            .all(|m| m.label != DOUBLE_RATIONS_LABEL));
+        let liberty = app.world().get::<Liberty>(pop).unwrap();
+        assert!((liberty.current - liberty.base).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_393_night_shifts_modifiers() {
+        let mut policies = ColonyPolicies::default();
+        policies.enable(Policy::NightShifts);
+        assert!(get_work_speed_modifier(&policies) > 1.0);
+        assert!(get_rest_decay_modifier(&policies) > 1.0);
+        assert!(get_morale_modifier(&policies) < 0.0);
+    }
+
+    #[test]
+    fn test_393_rationing_and_double_rations_cancel_on_hunger() {
+        let mut policies = ColonyPolicies::default();
+        policies.enable(Policy::Rationing);
+        policies.enable(Policy::DoubleRations);
+        // 0.5 (rationing) x 2.0 (double rations) = 1.0 baseline drain.
+        assert!((get_hunger_decay_modifier(&policies) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_393_enable_disable_idempotent() {
+        let mut policies = ActiveEdicts::default();
+        policies.enable(EdictType::NightShifts);
+        policies.enable(EdictType::NightShifts);
+        assert!(policies.is_active(EdictType::NightShifts));
+        policies.disable(EdictType::NightShifts);
+        policies.disable(EdictType::NightShifts);
+        assert!(!policies.is_active(EdictType::NightShifts));
+    }
+
+    #[test]
+    fn test_393_ensure_liberty_covers_bare_pops() {
+        let mut app = bevy_app::App::new();
+        app.add_systems(bevy_app::Update, ensure_liberty_system);
+        let pop = app.world_mut().spawn(crate::layer1::pop::Pop).id();
+        app.update();
+        assert!(app.world().get::<Liberty>(pop).is_some());
+    }
+
+    #[test]
+    fn test_393_parse_edict_names() {
+        assert_eq!(parse_edict("double_rations"), Some(Policy::DoubleRations));
+        assert_eq!(parse_edict("martial_law"), Some(Policy::MartialLaw));
+        assert_eq!(parse_edict("night_shifts"), Some(Policy::NightShifts));
+        assert_eq!(parse_edict("bogus"), None);
+        for policy in [Policy::DoubleRations, Policy::MartialLaw, Policy::NightShifts] {
+            assert_eq!(parse_edict(edict_short_name(policy)), Some(policy));
+        }
     }
 }

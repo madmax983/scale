@@ -515,6 +515,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "sabotage" => handle_sabotage_command(world, &parts),
         "vetting" => handle_vetting_command(world, &parts),
         "safety" => handle_safety_command(world, &parts),
+        "edict" => handle_edict_command(world, &parts),
         "hazards" => print_hazards(world),
         "hazardize" => handle_hazardize_command(world, &parts),
         "deorbit" => handle_deorbit_command(world, &parts),
@@ -3481,6 +3482,10 @@ fn print_stats(world: &mut World) {
     // Spec 392: tool-economy census for STATS (full panel: `tools`).
     let tool_census = scale::layer1::tool_economy::tool_census(world);
 
+    // Spec 393: colony-edicts label + mean liberty for STATS (panel: `edict`).
+    let edicts_label = scale::layer1::administration::edicts::edicts_stats_label(world);
+    let liberty_avg = scale::layer1::administration::edicts::average_liberty(world);
+
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
     let grid_strain = scale::layer1::energy::grid_strain::grid_strain_ticks(world);
@@ -3518,7 +3523,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0}",
         tick,
         scenario,
         pops,
@@ -3686,6 +3691,8 @@ fn print_stats(world: &mut World) {
         tool_census.toolless,
         tool_census.worn,
         tool_census.avg_durability,
+        edicts_label,
+        liberty_avg,
     );
 }
 
@@ -7152,6 +7159,11 @@ fn print_help() {
                 ),
                 ("organs", "", "Show organ stock, price, and horror (Spec 270)"),
                 (
+                    "edict [name] [on|off]",
+                    "",
+                    "List or toggle colony edicts: double_rations, martial_law, night_shifts (Spec 393)",
+                ),
+                (
                     "waste",
                     "",
                     "Show industrial byproducts: stored, ground, and binned waste (Spec 354)",
@@ -9917,6 +9929,76 @@ fn handle_sabotage_command(world: &mut World, parts: &[&str]) {
     };
     let _ = count;
     print_dashboard_panel("ARCHITECTURAL SABOTAGE", &body, None, None);
+}
+
+/// Spec 393: Colony Edicts. `edict` lists the three edicts and their
+/// state; `edict <double_rations|martial_law|night_shifts> [on|off]`
+/// enacts/repeals one (no third argument toggles). Effects are
+/// derived every tick — repealing restores base values, nothing
+/// accumulates. Full ledger in STATS `edicts=` / `liberty=`.
+fn handle_edict_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::administration::edicts::{
+        average_liberty, edict_short_name, parse_edict, ColonyPolicies, Policy,
+        SPEC_393_EDICTS,
+    };
+
+    if world.get_resource::<ColonyPolicies>().is_none() {
+        world.insert_resource(ColonyPolicies::default());
+    }
+
+    if parts.len() > 1 {
+        let Some(policy) = parse_edict(parts[1]) else {
+            print_dashboard_panel(
+                "COLONY EDICTS",
+                &format!(
+                    "Unknown edict '{}'. Try: double_rations, martial_law, night_shifts.",
+                    parts[1]
+                ),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        };
+        let want = match parts.get(2).map(|s| s.to_lowercase()).as_deref() {
+            Some("on") | Some("enact") => Some(true),
+            Some("off") | Some("repeal") => Some(false),
+            _ => None, // bare `edict <name>` toggles
+        };
+        let mut policies = world.resource_mut::<ColonyPolicies>();
+        let is_on = policies.is_active(policy);
+        match want {
+            Some(true) if !is_on => policies.enable(policy),
+            Some(false) if is_on => policies.disable(policy),
+            None => policies.toggle(policy),
+            _ => {}
+        }
+    }
+
+    let policies = world.resource::<ColonyPolicies>();
+    let mut lines: Vec<String> = SPEC_393_EDICTS
+        .iter()
+        .map(|p| {
+            let state = if policies.is_active(*p) { "ACTIVE" } else { "off" };
+            let effect = match p {
+                Policy::DoubleRations => "morale +0.10, food consumption x2",
+                Policy::MartialLaw => "unrest suppressed to 0, liberty -20",
+                Policy::NightShifts => "work speed +0.15, rest decay x1.5, morale -0.05",
+                _ => "",
+            };
+            format!("{}: {} — {}", edict_short_name(*p), state, effect)
+        })
+        .collect();
+    let unrest = world
+        .get_resource::<scale::layer1::social::unrest::Unrest>()
+        .map_or(0.0, |u| u.level);
+    lines.push(format!(
+        "Unrest: {unrest:.2} | Avg liberty: {:.0}/100",
+        average_liberty(world)
+    ));
+    lines.push(
+        "Usage: edict <double_rations|martial_law|night_shifts> [on|off]".to_string(),
+    );
+    print_dashboard_panel("COLONY EDICTS", &lines.join("\n"), None, None);
 }
 
 /// Spec 387: toggle or inspect the Safety Protocols edict.

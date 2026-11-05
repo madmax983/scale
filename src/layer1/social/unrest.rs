@@ -81,7 +81,30 @@ pub enum MentalBreakType {
 }
 
 /// Calculates global unrest based on average colony morale.
-pub fn calculate_unrest_system(mut unrest: ResMut<Unrest>, query: Query<&Morale, With<Pop>>) {
+///
+/// Spec 393: while the Martial Law edict is active, unrest is
+/// suppressed to 0. The suppression lives here — in the system that
+/// recomputes `level` from scratch every tick — so it can never
+/// accumulate or leave a permanent residue once the edict is repealed.
+pub fn calculate_unrest_system(
+    mut unrest: ResMut<Unrest>,
+    query: Query<&Morale, With<Pop>>,
+    policies: Option<Res<crate::layer1::edicts::ColonyPolicies>>,
+) {
+    if policies.is_some_and(|p| crate::layer1::edicts::is_unrest_suppressed(&p)) {
+        // Still tick down timed modifiers so they expire on schedule
+        // underneath the suppression.
+        unrest.modifiers.retain_mut(|m| {
+            if m.duration > 0 {
+                m.duration -= 1;
+                true
+            } else {
+                false
+            }
+        });
+        unrest.level = 0.0;
+        return;
+    }
     let mut total_morale = 0.0;
     let mut count = 0;
 

@@ -157,3 +157,44 @@ pub fn apply_edict_modifiers(
 
 ## 8. Questions
 *Builder: add questions here if spec is unclear.*
+
+## 9. Builder notes (implementation, 2026-11-05)
+
+Implemented against the existing spec-054 system — no parallel edict
+system was created:
+
+- `ActiveEdicts` / `EdictType` are type aliases for the existing
+  `ColonyPolicies` resource / `Policy` enum in
+  `src/layer1/administration/edicts.rs`. `Policy` gained the two
+  missing variants, `DoubleRations` and `NightShifts` (`MartialLaw`
+  already existed but had no unrest/liberty effect).
+  `ColonyPolicies::enable`/`disable` are the idempotent form of the
+  existing `toggle`.
+- The RED sketch's mock types do not exist in this codebase and were
+  adapted: `Mood` (0..100) → the real `Morale` component (0.0..=1.0)
+  plus the pull-based `get_morale_modifier`; `Metabolism` → the
+  pull-based `get_hunger_decay_modifier` consumed by
+  `decay_needs_system`; per-pop `Unrest` → the global `Unrest`
+  resource recomputed by `calculate_unrest_system`; `Liberty` → a
+  new derived component storing `base` + `current`.
+- Non-accumulation (spec §7) is structural: hunger/rest/work-speed
+  effects are pull-based multipliers recomputed from base constants
+  every tick; morale effects ride refreshed-never-stacking
+  `MoodModifier`s plus the flat policy modifier in raw-morale;
+  Martial Law suppression lives inside `calculate_unrest_system`
+  itself; `Liberty.current` is recomputed from `base` every tick by
+  `apply_edict_modifiers` (wired into the Economy set before
+  `update_morale_cache_system`, with an `ensure_liberty_system`
+  coverage pass). Nothing permanently mutates a base stat.
+- Effects: DoubleRations morale +0.10 / hunger decay x2 (cancels
+  Rationing's x0.5 when both are active); MartialLaw unrest = 0 /
+  liberty -20; NightShifts work speed +0.15 / rest decay x1.5 /
+  morale -0.05 (via new `get_rest_decay_modifier`, wired into
+  `decay_needs_system`).
+- Headless: `edict [name] [on|off]` command (the existing `edicts`
+  command belongs to the Fallen Sovereign melancholy engine and was
+  left alone); STATS gains `edicts=` and `liberty=`.
+- §5 REFACTOR items (generic StatModifiers, edict costs, durations/
+  cooldowns) were left alone: the codebase's established pattern is
+  per-system pull-based modifier functions, and inventing a parallel
+  modifier framework would duplicate it.
