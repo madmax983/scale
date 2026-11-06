@@ -451,12 +451,27 @@ fn try_drop_off_inventory(
     pos: GridPosition,
 ) {
     let container = {
-        let mut query = world.query::<(Entity, &GridPosition, &mut Inventory)>();
+        // Spec 394: prefer the stockpile's own inventory at this
+        // tile — the deposit completes the haul into storage, not
+        // into an unrelated container that happens to share the tile.
         let mut target = None;
-        for (e, p, _) in query.iter(world) {
-            if *p == pos {
-                target = Some(e);
-                break;
+        {
+            let mut stockpile_query =
+                world.query_filtered::<(Entity, &GridPosition, &Inventory), With<Stockpile>>();
+            for (e, p, _) in stockpile_query.iter(world) {
+                if *p == pos {
+                    target = Some(e);
+                    break;
+                }
+            }
+        }
+        if target.is_none() {
+            let mut query = world.query::<(Entity, &GridPosition, &Inventory)>();
+            for (e, p, _) in query.iter(world) {
+                if *p == pos {
+                    target = Some(e);
+                    break;
+                }
             }
         }
         target
@@ -610,11 +625,20 @@ fn try_target_gene_bank(world: &mut World, pop_entity: Entity, pos: GridPosition
 fn try_target_stockpile_for_item(world: &mut World, pop_entity: Entity, pos: GridPosition) -> bool {
     let is_drone = world.get::<Drone>(pop_entity).is_some();
 
-    let mut query = world.query::<(Entity, &GridPosition, &Stockpile)>();
+    let mut query = world.query::<(Entity, &GridPosition, &Stockpile, Option<&Inventory>)>();
     let mut best = None;
     let mut min_dist = i32::MAX;
 
-    for (e, p, _) in query.iter(world) {
+    for (e, p, _, inv) in query.iter(world) {
+        // Spec 394: a stockpile whose item inventory is full cannot
+        // receive the deposit — never target it. Stockpiles without an
+        // inventory (legacy/test spawns) stay targetable; drop-off
+        // then falls back to re-grounding at the tile.
+        if let Some(inv) = inv {
+            if inv.items.len() >= inv.capacity {
+                continue;
+            }
+        }
         if is_drone {
             if let Some(grid) = world.get_resource::<ZoneGrid>() {
                 if grid.get(p.x, p.y) == ZoneType::Sanctuary {
@@ -693,6 +717,30 @@ fn find_and_target_item(world: &mut World, pop_entity: Entity, pos: GridPosition
     if let Some((target_entity, target_pos)) = target {
         set_hauler_target(world, pop_entity, Some((target_entity, target_pos)));
     }
+}
+
+/// Spec 394 census for STATS: generic items still loose on the ground
+/// (an `Item` with a grid position that is not a stockpile tile —
+/// the same "loose" definition haul scoring uses) and generic items
+/// stored inside stockpile inventories. The two ends of the haul
+/// pipeline: work shows up as loose falling and stored rising.
+pub fn hauling_census(world: &mut World) -> (usize, usize) {
+    let stockpile_tiles: bevy::utils::HashSet<GridPosition> = world
+        .query::<(&GridPosition, &Stockpile)>()
+        .iter(world)
+        .map(|(pos, _)| *pos)
+        .collect();
+    let loose = world
+        .query::<(&GridPosition, &Item)>()
+        .iter(world)
+        .filter(|(pos, _)| !stockpile_tiles.contains(*pos))
+        .count();
+    let stored: usize = world
+        .query::<(&Stockpile, &Inventory)>()
+        .iter(world)
+        .map(|(_, inv)| inv.items.len())
+        .sum();
+    (loose, stored)
 }
 
 #[cfg(test)]
@@ -1325,5 +1373,517 @@ mod tests {
             *world.get::<GridPosition>(manual).unwrap(),
             GridPosition { x: 10, y: 0 }
         );
+    }
+}
+
+// ===== Spec 394: Hauling Logistics (grounded in the real seams) =====
+//
+// The spec's sketch types (a per-item loose marker component, a
+// capacity/current stockpile component, a builder component with a
+// has-materials flag, a scores map) do not exist in this codebase.
+// The real architecture:
+//   * ground resources are `ResourceItem` + `GridPosition`; ground
+//     generic items are `Item` + `GridPosition` (an item with no grid
+//     position is carried or stored; one sitting on a stockpile tile
+//     is positionally "stored" only — see the deposit test);
+//   * building costs are deducted from the `ColonyResources` ledger
+//     only (`try_place_building` -> `deduct_building_cost` ->
+//     `try_deduct`), so ground resources were never buildable —
+//     pinned by the first test as a regression guard;
+//   * haul scoring is `evaluate_haul` over `ScorableCandidate`s whose
+//     capacity/usage come from `populate_stockpiles`;
+//   * deposit is `haul_system`: resources credit the ledger, generic
+//     items go into an `Inventory` held at the drop tile.
+// The gaps these tests pin (RED on trunk): generic-item scoring and
+// targeting ignored whether any stockpile inventory had room, and a
+// placed Stockpile building carried no `Inventory` at all, so a
+// generic-item deposit re-grounded the item at the stockpile tile
+// instead of completing into a stockpile inventory.
+#[cfg(test)]
+mod spec394_tests {
+    use super::haul_system;
+    use crate::layer1::actions::evaluate_haul;
+    use crate::layer1::building::{try_place_building, Building, BuildingType};
+    use crate::layer1::inventory::{Inventory, InventoryItem};
+    use crate::layer1::items::{CarryingItem, Item, ItemType};
+    use crate::layer1::resources::{ColonyResources, ResourceItem, ResourceType};
+    use crate::layer1::stockpile::Stockpile;
+    use crate::layer1::terrain::{TerrainGrid, TerrainType};
+    use crate::layer1::utility_ai::{ActionType, PopAction, UtilityWeights};
+    use crate::layer1::utility_eval_types::ScorableCandidate;
+    use crate::layer1::{GridPosition, Pop};
+    use crate::shared::time::SimulationTime;
+    use bevy_ecs::prelude::*;
+
+    fn placement_world(resources: ColonyResources) -> World {
+        let mut world = World::new();
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Grass; 100],
+        });
+        world.insert_resource(crate::layer1::building::OccupiedTiles::default());
+        world.insert_resource(resources);
+        world
+    }
+
+    #[test]
+    fn spec394_builder_cannot_use_ground_resources() {
+        // 100 wood lying on the ground, an empty colony ledger: a
+        // Stockpile costs 50 wood, deducted from the ledger only, so
+        // placement must fail while the wood is unhauled.
+        let mut world = placement_world(ColonyResources::zeroed());
+        world.spawn((
+            ResourceItem {
+                resource_type: ResourceType::Wood,
+                amount: 100.0,
+            },
+            GridPosition { x: 2, y: 2 },
+        ));
+
+        let placed = try_place_building(&mut world, 5, 5, BuildingType::Stockpile);
+        assert!(
+            !placed,
+            "builder must not build from loose ground resources"
+        );
+        assert_eq!(
+            world.query::<&Building>().iter(&world).count(),
+            0,
+            "no building may appear while materials are only on the ground"
+        );
+    }
+
+    #[test]
+    fn spec394_full_loop_ground_wood_becomes_buildable_after_haul() {
+        // The whole spec in one loop: ground wood is unusable, a
+        // hauler deposits it into the ledger at a stockpile, and only
+        // then can the builder spend it. (The ledger starts empty but
+        // with real caps — a zeroed ledger has zero caps too, and a
+        // deposit into it would correctly spill back onto the ground.)
+        let mut world = placement_world(ColonyResources {
+            max_wood: 500.0,
+            ..ColonyResources::zeroed()
+        });
+        world.insert_resource(SimulationTime::default());
+
+        let stockpile = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::Stockpile,
+                },
+                Stockpile::default(),
+                GridPosition { x: 4, y: 0 },
+            ))
+            .id();
+        let _ = stockpile;
+
+        let item = world
+            .spawn((
+                ResourceItem {
+                    resource_type: ResourceType::Wood,
+                    amount: 60.0,
+                },
+                GridPosition { x: 2, y: 0 },
+            ))
+            .id();
+
+        let pop = world
+            .spawn((
+                Pop,
+                GridPosition { x: 0, y: 0 },
+                PopAction {
+                    current: ActionType::Haul,
+                    ..Default::default()
+                },
+            ))
+            .id();
+
+        // Still unbuildable before the haul.
+        assert!(!try_place_building(
+            &mut world,
+            5,
+            5,
+            BuildingType::Stockpile
+        ));
+
+        // Pickup at the item tile.
+        *world.get_mut::<GridPosition>(pop).unwrap() = GridPosition { x: 2, y: 0 };
+        world
+            .entity_mut(pop)
+            .insert(crate::layer1::execution::AtTarget);
+        haul_system(&mut world);
+        assert!(
+            world
+                .get::<crate::layer1::resources::Carrying>(pop)
+                .is_some(),
+            "hauler should be carrying the ground wood"
+        );
+        assert!(world.get_entity(item).is_err(), "ground item consumed");
+
+        // Deposit at the stockpile tile.
+        *world.get_mut::<GridPosition>(pop).unwrap() = GridPosition { x: 4, y: 0 };
+        world
+            .entity_mut(pop)
+            .insert(crate::layer1::execution::AtTarget);
+        haul_system(&mut world);
+        assert!(
+            world
+                .get::<crate::layer1::resources::Carrying>(pop)
+                .is_none(),
+            "hauler should be empty after deposit"
+        );
+        assert!(
+            (world.resource::<ColonyResources>().wood - 60.0).abs() < f32::EPSILON,
+            "deposit must credit the colony ledger"
+        );
+
+        // Now the builder can spend it (Stockpile costs 50 wood).
+        assert!(
+            try_place_building(&mut world, 5, 5, BuildingType::Stockpile),
+            "hauled wood must be buildable"
+        );
+    }
+
+    #[test]
+    fn spec394_scoring_loose_item_needs_stockpile_space() {
+        let mut world = World::new();
+        let pop_pos = GridPosition { x: 0, y: 0 };
+        let weights = UtilityWeights::default();
+        let resources = ColonyResources::default();
+
+        let item_entity = world
+            .spawn((
+                Item {
+                    item_type: ItemType::Manual,
+                },
+                GridPosition { x: 1, y: 0 },
+            ))
+            .id();
+        let stockpile_entity = world.spawn_empty().id();
+
+        let mut item_candidate =
+            ScorableCandidate::new(item_entity, GridPosition { x: 1, y: 0 });
+        item_candidate.item_type = Some(ItemType::Manual);
+
+        // Every stockpile inventory is full: hauling must not score.
+        let full = vec![ScorableCandidate::with_capacity(
+            stockpile_entity,
+            GridPosition { x: 5, y: 0 },
+            2,
+            2,
+        )];
+        let result = evaluate_haul(
+            pop_pos,
+            &weights,
+            &[],
+            std::slice::from_ref(&item_candidate),
+            &full,
+            &[],
+            &resources,
+            None,
+            None,
+            None,
+        );
+        assert!(
+            result.is_none(),
+            "no hauling score when every stockpile is full: {result:?}"
+        );
+
+        // The same loose item with room in a stockpile scores high.
+        let open = vec![ScorableCandidate::with_capacity(
+            stockpile_entity,
+            GridPosition { x: 5, y: 0 },
+            2,
+            1,
+        )];
+        let result = evaluate_haul(
+            pop_pos,
+            &weights,
+            &[],
+            std::slice::from_ref(&item_candidate),
+            &open,
+            &[],
+            &resources,
+            None,
+            None,
+            None,
+        );
+        let (utility, target) = result.expect("hauling should score with space available");
+        assert_eq!(target, item_entity);
+        assert!(
+            utility > 0.5,
+            "hauling a loose item next to an open stockpile should score high, got {utility}"
+        );
+    }
+
+    #[test]
+    fn spec394_scoring_carried_item_needs_stockpile_space() {
+        let mut world = World::new();
+        let pop_pos = GridPosition { x: 0, y: 0 };
+        let weights = UtilityWeights::default();
+        let resources = ColonyResources::default();
+
+        let item_entity = world
+            .spawn(Item {
+                item_type: ItemType::Manual,
+            })
+            .id();
+        let stockpile_entity = world.spawn_empty().id();
+
+        // Carrying a generic item with only full stockpiles: no
+        // deposit target may be scored (the hauler cannot complete).
+        let full = vec![ScorableCandidate::with_capacity(
+            stockpile_entity,
+            GridPosition { x: 5, y: 0 },
+            2,
+            2,
+        )];
+        let result = evaluate_haul(
+            pop_pos,
+            &weights,
+            &[],
+            &[],
+            &full,
+            &[],
+            &resources,
+            None,
+            Some(item_entity),
+            Some(ItemType::Manual),
+        );
+        assert!(
+            result.is_none(),
+            "carried item must not score a full stockpile: {result:?}"
+        );
+
+        // With room, the stockpile is the target at carrying priority.
+        let open = vec![ScorableCandidate::with_capacity(
+            stockpile_entity,
+            GridPosition { x: 5, y: 0 },
+            2,
+            0,
+        )];
+        let result = evaluate_haul(
+            pop_pos,
+            &weights,
+            &[],
+            &[],
+            &open,
+            &[],
+            &resources,
+            None,
+            Some(item_entity),
+            Some(ItemType::Manual),
+        );
+        let (utility, target) = result.expect("open stockpile should be scored");
+        assert_eq!(target, stockpile_entity);
+        assert!(utility > 0.5, "carrying priority should be high: {utility}");
+    }
+
+    #[test]
+    fn spec394_deposit_completes_into_placed_stockpile_inventory() {
+        // A stockpile produced by the REAL placement path must be
+        // able to receive a hauled generic item into its inventory.
+        let mut world = placement_world(ColonyResources {
+            wood: 100.0,
+            ..Default::default()
+        });
+        world.insert_resource(SimulationTime::default());
+
+        assert!(try_place_building(
+            &mut world,
+            5,
+            5,
+            BuildingType::Stockpile
+        ));
+        let stockpile = world
+            .query_filtered::<Entity, With<Stockpile>>()
+            .iter(&world)
+            .next()
+            .expect("placed stockpile exists");
+
+        // A carried generic item (no grid position while carried).
+        let item = world
+            .spawn(Item {
+                item_type: ItemType::Manual,
+            })
+            .id();
+        let pop = world
+            .spawn((
+                Pop,
+                GridPosition { x: 5, y: 5 },
+                PopAction {
+                    current: ActionType::Haul,
+                    ..Default::default()
+                },
+                CarryingItem(item),
+                crate::layer1::execution::AtTarget,
+            ))
+            .id();
+
+        haul_system(&mut world);
+
+        assert!(
+            world.get::<CarryingItem>(pop).is_none(),
+            "carrier must be cleared after deposit"
+        );
+        let inv = world.get::<Inventory>(stockpile).expect(
+            "placed stockpile must hold an item inventory for deposits to complete into",
+        );
+        assert_eq!(
+            inv.items
+                .iter()
+                .filter(|i| i.item_type == ItemType::Manual)
+                .count(),
+            1,
+            "deposited item must be in the stockpile inventory: {:?}",
+            inv.items
+        );
+        assert!(
+            world.get_entity(item).is_err(),
+            "a plain deposited item is consumed into the inventory"
+        );
+    }
+
+    #[test]
+    fn spec394_hauler_targets_stockpile_with_space() {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        world.insert_resource(ColonyResources::default());
+
+        // Near stockpile whose inventory is full.
+        let near = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::Stockpile,
+                },
+                Stockpile::default(),
+                GridPosition { x: 2, y: 0 },
+                Inventory {
+                    capacity: 1,
+                    items: vec![InventoryItem {
+                        item_type: ItemType::Tool,
+                        entity: None,
+                    }],
+                },
+            ))
+            .id();
+        // Far stockpile with room.
+        let far = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::Stockpile,
+                },
+                Stockpile::default(),
+                GridPosition { x: 9, y: 0 },
+                Inventory::default(),
+            ))
+            .id();
+
+        let item = world
+            .spawn(Item {
+                item_type: ItemType::Manual,
+            })
+            .id();
+        let pop = world
+            .spawn((
+                Pop,
+                GridPosition { x: 0, y: 0 },
+                PopAction {
+                    current: ActionType::Haul,
+                    ..Default::default()
+                },
+                CarryingItem(item),
+            ))
+            .id();
+
+        haul_system(&mut world);
+
+        let target = world
+            .get::<crate::layer1::execution::MovementTarget>(pop)
+            .expect("hauler should have a stockpile target");
+        assert_eq!(
+            target.target_entity, far,
+            "hauler must target the stockpile with space, not the full one at {near:?}"
+        );
+        assert_eq!(target.target_position, GridPosition { x: 9, y: 0 });
+    }
+
+    #[test]
+    fn spec394_deposit_prefers_stockpile_inventory_at_tile() {
+        // Two containers share the drop tile; the deposit belongs in
+        // the stockpile's inventory, not an unrelated container's.
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        world.insert_resource(ColonyResources::default());
+
+        let _other_container = world
+            .spawn((Inventory::default(), GridPosition { x: 5, y: 0 }))
+            .id();
+        let stockpile = world
+            .spawn((
+                Building {
+                    building_type: BuildingType::Stockpile,
+                },
+                Stockpile::default(),
+                Inventory::default(),
+                GridPosition { x: 5, y: 0 },
+            ))
+            .id();
+
+        let item = world
+            .spawn(Item {
+                item_type: ItemType::Manual,
+            })
+            .id();
+        let pop = world
+            .spawn((
+                Pop,
+                GridPosition { x: 5, y: 0 },
+                PopAction {
+                    current: ActionType::Haul,
+                    ..Default::default()
+                },
+                CarryingItem(item),
+                crate::layer1::execution::AtTarget,
+            ))
+            .id();
+
+        haul_system(&mut world);
+
+        assert!(world.get::<CarryingItem>(pop).is_none());
+        let inv = world.get::<Inventory>(stockpile).unwrap();
+        assert_eq!(
+            inv.items.len(),
+            1,
+            "deposit must land in the stockpile inventory"
+        );
+        assert_eq!(inv.items[0].item_type, ItemType::Manual);
+    }
+
+    #[test]
+    fn spec394_no_spec_sketch_dead_types_copied() {
+        // The spec's sketch types must not be copied into the live
+        // modules (they would duplicate the real ground-item,
+        // stockpile, and scoring seams). Needles are concat!-built
+        // so this guard does not match its own source text.
+        for src in [
+            include_str!("hauling.rs"),
+            include_str!("stockpile.rs"),
+            include_str!("inventory.rs"),
+            include_str!("../actions/haul.rs"),
+        ] {
+            for dead in [
+                concat!("Loose", "Item"),
+                concat!("Utility", "Scores"),
+                concat!("struct ", "Builder {"),
+                concat!("struct ", "Hauler;"),
+                concat!("has_", "materials"),
+            ] {
+                assert!(
+                    !src.contains(dead),
+                    "spec-sketch dead type '{dead}' must not be copied into the live code"
+                );
+            }
+        }
     }
 }

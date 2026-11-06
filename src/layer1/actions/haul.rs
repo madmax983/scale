@@ -50,8 +50,24 @@ pub(crate) fn evaluate_haul(
     }
 
     // 3. If already carrying, go to stockpile (high priority)
-    if carrying.is_some() || carrying_item.is_some() {
+    if carrying.is_some() {
+        // Resource loads deposit into the colony ledger (capped, with
+        // spillover — spec 360), so any stockpile tile completes them.
         return evaluate_candidates(pop_pos, weights, stockpiles, 0.9);
+    }
+    if carrying_item.is_some() {
+        // Spec 394: a carried generic item deposits into a stockpile's
+        // item inventory — a full stockpile cannot complete the haul,
+        // so only stockpiles with room are scored.
+        let open: Vec<ScorableCandidate> = stockpiles
+            .iter()
+            .filter(|s| s.usage < s.capacity)
+            .cloned()
+            .collect();
+        if open.is_empty() {
+            return None;
+        }
+        return evaluate_candidates(pop_pos, weights, &open, 0.9);
     }
 
     // 3. Find best item to pick up
@@ -83,9 +99,13 @@ pub(crate) fn evaluate_haul(
         consider(item);
     }
 
-    // Check Generic Item Entities
-    for item in item_entities {
-        consider(item);
+    // Check Generic Item Entities — Spec 394: only when at least one
+    // stockpile inventory has room to receive them. (Resource items
+    // above are gated by the colony ledger's room instead.)
+    if stockpiles.iter().any(|s| s.usage < s.capacity) {
+        for item in item_entities {
+            consider(item);
+        }
     }
 
     best

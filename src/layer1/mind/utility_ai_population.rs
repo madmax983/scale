@@ -458,10 +458,25 @@ fn populate_stockpiles(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
     buffer.clear();
     buffer.extend(
         world
-            .query_filtered::<(Entity, &GridPosition), With<Stockpile>>()
+            .query_filtered::<
+                (
+                    Entity,
+                    &GridPosition,
+                    Option<&crate::layer1::inventory::Inventory>,
+                ),
+                With<Stockpile>,
+            >()
             .iter(world)
-            .filter(|(_, pos)| !blocked.contains(*pos))
-            .map(|(e, pos)| ScorableCandidate::new(e, *pos)),
+            .filter(|(_, pos, _)| !blocked.contains(*pos))
+            .map(|(e, pos, inv)| match inv {
+                // Spec 394: haul scoring must know whether this
+                // stockpile's item inventory still has room — report
+                // its real capacity/fill instead of the default 1/0.
+                Some(inv) => {
+                    ScorableCandidate::with_capacity(e, *pos, inv.capacity, inv.items.len())
+                }
+                None => ScorableCandidate::new(e, *pos),
+            }),
     );
 }
 
@@ -1239,6 +1254,66 @@ mod tests {
             (ls_cand.score_bonus - 1.08).abs() < 0.001,
             "Critical LifeSupport should get max urgency, got {}",
             ls_cand.score_bonus
+        );
+    }
+
+    // Spec 394: stockpile candidates fed to haul scoring must report
+    // the space in the stockpile's real item inventory, so the scorer
+    // can tell a full stockpile from an open one.
+    #[test]
+    fn spec394_populate_stockpiles_reports_inventory_space() {
+        use crate::layer1::inventory::{Inventory, InventoryItem};
+        use crate::layer1::stockpile::Stockpile;
+
+        let mut world = World::new();
+        let full = world
+            .spawn((
+                Stockpile::default(),
+                Inventory {
+                    capacity: 2,
+                    items: vec![
+                        InventoryItem {
+                            item_type: ItemType::Tool,
+                            entity: None,
+                        },
+                        InventoryItem {
+                            item_type: ItemType::Tool,
+                            entity: None,
+                        },
+                    ],
+                },
+                GridPosition { x: 3, y: 0 },
+            ))
+            .id();
+        let open = world
+            .spawn((
+                Stockpile::default(),
+                Inventory {
+                    capacity: 20,
+                    items: vec![InventoryItem {
+                        item_type: ItemType::Tool,
+                        entity: None,
+                    }],
+                },
+                GridPosition { x: 8, y: 0 },
+            ))
+            .id();
+
+        let mut buffer = Vec::new();
+        populate_stockpiles(&mut world, &mut buffer);
+
+        assert_eq!(buffer.len(), 2);
+        let full_c = buffer.iter().find(|c| c.entity == full).unwrap();
+        assert_eq!(
+            (full_c.capacity, full_c.usage),
+            (2, 2),
+            "full stockpile candidate must report its inventory fill"
+        );
+        let open_c = buffer.iter().find(|c| c.entity == open).unwrap();
+        assert_eq!(
+            (open_c.capacity, open_c.usage),
+            (20, 1),
+            "open stockpile candidate must report its inventory space"
         );
     }
 }

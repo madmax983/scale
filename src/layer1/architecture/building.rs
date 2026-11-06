@@ -1816,7 +1816,11 @@ fn configure_production(entity: &mut EntityWorldMut, building_type: BuildingType
 fn configure_storage(entity: &mut EntityWorldMut, building_type: BuildingType) {
     match building_type {
         BuildingType::Stockpile => {
-            entity.insert(Stockpile::default());
+            // Spec 394: a stockpile is also a physical item container —
+            // haulers deposit generic items into this Inventory, and
+            // haul scoring reads its fill level. Without it a deposit
+            // could only re-ground the item at the stockpile tile.
+            entity.insert((Stockpile::default(), Inventory::default()));
         }
         BuildingType::Landfill => {
             entity.insert(Stockpile {
@@ -1827,6 +1831,9 @@ fn configure_storage(entity: &mut EntityWorldMut, building_type: BuildingType) {
             });
             // ADDED: Landfills function as tectonic frackers (Spec 1112)
             entity.insert(crate::layer1::geology::fracking::TectonicFracker);
+            // Spec 394: landfills are storage buildings too — give them
+            // an item Inventory so hauls targeted here can complete.
+            entity.insert(Inventory::default());
         }
         _ => {}
     }

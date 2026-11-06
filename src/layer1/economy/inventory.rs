@@ -83,6 +83,12 @@ impl Inventory {
         self.items.iter().any(|i| i.item_type == item_type)
     }
 
+    /// Counts how many items of the given type this inventory holds.
+    #[must_use]
+    pub fn count(&self, item_type: ItemType) -> usize {
+        self.items.iter().filter(|i| i.item_type == item_type).count()
+    }
+
     /// Tries to add an item to the inventory.
     ///
     /// Returns `true` if successfully added, `false` if the inventory is at capacity.
@@ -158,5 +164,32 @@ mod inventory_extra_tests {
 
         assert!(inventory.has_item(ItemType::Potato));
         assert!(!inventory.has_item(ItemType::Meat));
+    }
+}
+
+#[cfg(test)]
+mod inventory_count_tests {
+    use super::*;
+    use crate::layer1::items::ItemType;
+
+    #[test]
+    fn test_inventory_count() {
+        let mut inventory = Inventory::default();
+        assert_eq!(inventory.count(ItemType::Potato), 0);
+        inventory.add(InventoryItem {
+            item_type: ItemType::Potato,
+            entity: None,
+        });
+        inventory.add(InventoryItem {
+            item_type: ItemType::Potato,
+            entity: None,
+        });
+        inventory.add(InventoryItem {
+            item_type: ItemType::Meat,
+            entity: None,
+        });
+        assert_eq!(inventory.count(ItemType::Potato), 2);
+        assert_eq!(inventory.count(ItemType::Meat), 1);
+        assert_eq!(inventory.count(ItemType::Tool), 0);
     }
 }
