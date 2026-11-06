@@ -166,6 +166,23 @@ pub fn build_simulation_schedule() -> Schedule {
         update_event_buffer::<crate::layer3::nomadic_fleets::OfferNomadicBribeEvent>,
         update_event_buffer::<crate::layer3::nomadic_fleets::NomadicDepartedEvent>,
     ));
+    // Spec 398 Planetary Migrations: seasonal spawn -> movement
+    // -> collisions/disruption -> cull -> reroute accounting,
+    // chained so a herd spawned this tick can already be moving
+    // and a cull lands after that tick's collisions.
+    schedule.add_systems(
+        (
+            crate::layer2::migrations::spawn_migration_herd_system,
+            crate::layer2::migrations::update_migration_movement_system,
+            crate::layer2::migrations::check_whale_collisions_system,
+            crate::layer2::migrations::cull_herd_system,
+            crate::layer2::migrations::migration_reroute_system,
+        )
+            .chain(),
+    );
+    schedule.add_systems((update_event_buffer::<
+        crate::layer2::migrations::CullHerdEvent,
+    >,));
     schedule.add_systems((
         crate::layer1::social::bureau_of_regrets::check_penitent_faction_formation_system,
         crate::layer1::core::integration::starvation_atrocity_bridge,
@@ -962,6 +979,13 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer3::nomadic_fleets::NomadicLedger>();
     world.init_resource::<Events<crate::layer3::nomadic_fleets::OfferNomadicBribeEvent>>();
     world.init_resource::<Events<crate::layer3::nomadic_fleets::NomadicDepartedEvent>>();
+    // Spec 398 Planetary Migrations: director + ledger + policy
+    // + cull bus (first-tick pattern — the migration systems
+    // read/write these on tick one).
+    world.init_resource::<crate::layer2::migrations::MigrationDirector>();
+    world.init_resource::<crate::layer2::migrations::MigrationLedger>();
+    world.init_resource::<crate::layer2::migrations::MigrationPolicy>();
+    world.init_resource::<Events<crate::layer2::migrations::CullHerdEvent>>();
     // Spec 380 The Great Filter: ledger + event buses (first-tick Events pattern).
     world.init_resource::<crate::layer3::events::great_filter::GreatFilterLedger>();
     world.init_resource::<Events<crate::layer3::tech::TechAdvanceEvent>>();

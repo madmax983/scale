@@ -508,6 +508,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "fossil" => handle_fossil_command(world, &parts),
         "nomad" => handle_nomad_command(world, &parts),
         "nomadic" => handle_nomadic_command(world, &parts),
+        "migration" | "migrations" => handle_migration_command(world, &parts),
         "psionics" | "psions" => print_psionics(world),
         "awaken" => handle_awaken_command(world, &parts),
         "breakdown" => handle_breakdown_command(world),
@@ -3499,6 +3500,8 @@ fn print_stats(world: &mut World) {
     let contracts_label = scale::layer3::diplomacy::trade_contracts::contracts_stats_label(world);
     // Spec 397: nomadic-fleet census for STATS (full panel: `nomadic`).
     let nomadic_label = scale::layer3::nomadic_fleets::nomadic_stats_label(world);
+    // Spec 398: planetary-migration census for STATS (full panel: `migration`).
+    let migration_label = scale::layer2::migrations::migration_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3538,7 +3541,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={}",
         tick,
         scenario,
         pops,
@@ -3714,6 +3717,7 @@ fn print_stats(world: &mut World) {
         front_weather_label,
         contracts_label,
         nomadic_label,
+        migration_label,
     );
 }
 
@@ -8551,6 +8555,179 @@ fn handle_nomadic_bribe(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Spec 398 Planetary Migrations: `migration` panel plus the
+/// debug/choice subcommands — `migration spawn` (force a herd
+/// now instead of waiting for the seasonal cycle), `migration
+/// convoy [x] [y]` (park a real traffic fleet on the map),
+/// `migration reroute` / `migration resume` (§5 traffic policy),
+/// and `migration cull` (§5 cull, with its diplomacy cost).
+fn handle_migration_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::entities::nomad_fleet::SystemPosition;
+    use scale::layer2::migrations::{
+        cull_herd_system, migration_rows, migration_stats_label, spawn_migration_convoy,
+        spawn_migration_herd, CullHerdEvent, MigrationLedger, MigrationPolicy, TrafficPolicy,
+        CONSERVATIONIST_FACTION_ID,
+    };
+    match parts.get(1).copied() {
+        Some("spawn") => {
+            world.init_resource::<MigrationLedger>();
+            world.init_resource::<scale::layer2::migrations::MigrationDirector>();
+            let entities = spawn_migration_herd(world, 0);
+            print_dashboard_panel(
+                "PLANETARY MIGRATION",
+                &format!(
+                    "A great herd of {} vast drifting creatures has entered the system at the west edge, crossing toward its graze target. Park traffic in its path with `migration convoy`, reroute with `migration reroute`, or cull with `migration cull`. Watch STATS migrations=.",
+                    entities.len()
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("convoy") => {
+            let x: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let y: i32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let entity = spawn_migration_convoy(world, SystemPosition { x, y });
+            print_dashboard_panel(
+                "PLANETARY MIGRATION",
+                &format!(
+                    "Traffic fleet {entity:?} is holding the lane at ({x}, {y}) with 100 hull. If the herd crosses this tile it will take collision damage (once per crossing) — run `tick` and watch its hull via `migration` after an impact, or STATS migrations=."
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("reroute") => {
+            world.init_resource::<MigrationPolicy>();
+            world.resource_mut::<MigrationPolicy>().traffic = TrafficPolicy::Rerouted;
+            print_dashboard_panel(
+                "PLANETARY MIGRATION",
+                "Traffic is REROUTED around the herd: no collision damage while the policy holds, but every tick with a herd in the system is charged as reroute inefficiency (see the `migration` panel). `migration resume` restores normal lanes.",
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("resume") => {
+            world.init_resource::<MigrationPolicy>();
+            world.resource_mut::<MigrationPolicy>().traffic = TrafficPolicy::Normal;
+            print_dashboard_panel(
+                "PLANETARY MIGRATION",
+                "Traffic policy is back to NORMAL lanes: fleets in the herd's path will take collision damage again.",
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("cull") => {
+            world.init_resource::<MigrationLedger>();
+            world.init_resource::<scale::layer2::migrations::MigrationDirector>();
+            world.init_resource::<scale::layer3::diplomacy::system_sovereignty::FactionRelations>();
+            world.init_resource::<bevy_ecs::event::Events<CullHerdEvent>>();
+            world.init_resource::<bevy_ecs::event::Events<scale::layer1::chronicle::AddChronicleEvent>>();
+            let before = migration_rows(world).len();
+            if before == 0 {
+                print_dashboard_panel(
+                    "PLANETARY MIGRATION",
+                    "No herd to cull — `migration spawn` first.",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return;
+            }
+            world.send_event(CullHerdEvent);
+            let mut schedule = bevy_ecs::schedule::Schedule::default();
+            schedule.add_systems(cull_herd_system);
+            schedule.run(world);
+            let relations = world
+                .resource::<scale::layer3::diplomacy::system_sovereignty::FactionRelations>()
+                .scores
+                .get(&CONSERVATIONIST_FACTION_ID)
+                .copied()
+                .unwrap_or(0);
+            print_dashboard_panel(
+                "PLANETARY MIGRATION",
+                &format!(
+                    "The herd has been culled ({before} creatures). The lanes are clear — and xeno-conservationist relations now stand at {relations}. Watch STATS migrations=."
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        _ => {
+            world.init_resource::<MigrationLedger>();
+            world.init_resource::<MigrationPolicy>();
+            let rows = migration_rows(world);
+            let mut lines: Vec<String> = Vec::new();
+            if rows.is_empty() {
+                lines.push(
+                    "No herd in the system — migrations return on a slow seasonal cycle (every 2000 ticks), or force one with `migration spawn`."
+                        .to_string(),
+                );
+            }
+            for (i, (entity, whale, pos, route)) in rows.iter().enumerate() {
+                lines.push(format!(
+                    "#{} {entity:?}: mass {:.0}, hostility {:.1} at ({}, {}), phase {:?}, target ({}, {}), exit ({}, {})",
+                    i + 1,
+                    whale.mass,
+                    whale.hostility,
+                    pos.x,
+                    pos.y,
+                    route.phase,
+                    route.target.x,
+                    route.target.y,
+                    route.exit.x,
+                    route.exit.y,
+                ));
+            }
+            // Live traffic census: convoy fleets and their hull.
+            let mut fleets: Vec<String> = Vec::new();
+            {
+                let mut query = world.query::<(
+                    bevy_ecs::entity::Entity,
+                    &scale::layer2::fleet::FleetHealth,
+                    &SystemPosition,
+                )>();
+                for (entity, health, pos) in query.iter(world) {
+                    fleets.push(format!(
+                        "{entity:?} hull {:.0}/{:.0} at ({}, {})",
+                        health.current, health.max, pos.x, pos.y
+                    ));
+                }
+            }
+            if !fleets.is_empty() {
+                lines.push(format!("Traffic fleets: {}", fleets.join("; ")));
+            }
+            let ledger = *world.resource::<MigrationLedger>();
+            let policy = world.resource::<MigrationPolicy>().traffic;
+            lines.push(format!(
+                "Policy: {policy:?}\nLedger: herds={} spawned={} departures={} collisions={} disruptions={} damage={:.0} culls={} culled={} reroute_ticks={} avoidances={}",
+                ledger.herds,
+                ledger.spawned,
+                ledger.departures,
+                ledger.collisions,
+                ledger.disruptions,
+                ledger.damage_dealt,
+                ledger.culls,
+                ledger.culled,
+                ledger.reroute_ticks,
+                ledger.rerouted_avoidances,
+            ));
+            lines.push(format!(
+                "STATS migrations={} (herd/hits/dmg).",
+                migration_stats_label(world)
+            ));
+            lines.push(
+                "The herd is not hostile and will not turn: reroute traffic (`migration reroute`, safe but inefficient) or cull it (`migration cull`, clear lanes at a diplomacy cost with the xeno-conservationists)."
+                    .to_string(),
+            );
+            print_dashboard_panel(
+                "PLANETARY MIGRATIONS",
+                &lines.join("\n"),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
 }
 
 fn handle_fossil_command(world: &mut World, parts: &[&str]) {
