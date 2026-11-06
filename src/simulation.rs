@@ -149,6 +149,23 @@ pub fn build_simulation_schedule() -> Schedule {
         update_event_buffer::<crate::layer3::diplomacy::trade_contracts::ContractFulfilledEvent>,
         update_event_buffer::<crate::layer3::diplomacy::trade_contracts::ContractFailedEvent>,
     ));
+    // Spec 397 Nomadic Fleets: scheduled arrival -> bribe window ->
+    // strip-mining -> departure, chained so a bribe lands before
+    // that tick's mining and a fleet mined-out this tick departs
+    // in the same pass.
+    schedule.add_systems(
+        (
+            crate::layer3::nomadic_fleets::spawn_nomad_fleets_system,
+            crate::layer3::nomadic_fleets::offer_nomadic_bribe_system,
+            crate::layer3::nomadic_fleets::nomad_mining_system,
+            crate::layer3::nomadic_fleets::evaluate_nomad_departure_system,
+        )
+            .chain(),
+    );
+    schedule.add_systems((
+        update_event_buffer::<crate::layer3::nomadic_fleets::OfferNomadicBribeEvent>,
+        update_event_buffer::<crate::layer3::nomadic_fleets::NomadicDepartedEvent>,
+    ));
     schedule.add_systems((
         crate::layer1::social::bureau_of_regrets::check_penitent_faction_formation_system,
         crate::layer1::core::integration::starvation_atrocity_bridge,
@@ -938,6 +955,13 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer3::diplomacy::trade_contracts::FulfillContractEvent>>();
     world.init_resource::<Events<crate::layer3::diplomacy::trade_contracts::ContractFulfilledEvent>>();
     world.init_resource::<Events<crate::layer3::diplomacy::trade_contracts::ContractFailedEvent>>();
+    // Spec 397 Nomadic Fleets: director + ledger + bribe/departure
+    // buses (first-tick pattern — the nomadic systems read/write
+    // these on tick one).
+    world.init_resource::<crate::layer3::nomadic_fleets::NomadicDirector>();
+    world.init_resource::<crate::layer3::nomadic_fleets::NomadicLedger>();
+    world.init_resource::<Events<crate::layer3::nomadic_fleets::OfferNomadicBribeEvent>>();
+    world.init_resource::<Events<crate::layer3::nomadic_fleets::NomadicDepartedEvent>>();
     // Spec 380 The Great Filter: ledger + event buses (first-tick Events pattern).
     world.init_resource::<crate::layer3::events::great_filter::GreatFilterLedger>();
     world.init_resource::<Events<crate::layer3::tech::TechAdvanceEvent>>();

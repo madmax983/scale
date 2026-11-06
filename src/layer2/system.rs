@@ -24,6 +24,31 @@ use ratatui::style::Color;
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct SystemBody;
 
+/// Aggregate stock of an asteroid belt (Spec 397: Nomadic Fleets).
+///
+/// The spec sketch's `AsteroidBelt { resources_remaining }` at
+/// exactly this path: a belt-wide total that nomadic fleets
+/// permanently deplete (see `layer3::nomadic_fleets`). Amount is
+/// f32, the native unit of the real mining seams
+/// (`MiningTarget::amount`, `NodeResources`) — when a belt entity
+/// also carries a `MiningTarget`, the two are kept in sync by the
+/// nomadic mining system, so this is an aggregate view of the
+/// same stock, not a parallel one.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct AsteroidBelt {
+    /// Total mineable stock remaining in the belt. Never refills:
+    /// depletion is permanent.
+    pub resources_remaining: f32,
+}
+
+impl AsteroidBelt {
+    /// Whether the belt is fully depleted.
+    #[must_use]
+    pub fn is_depleted(&self) -> bool {
+        self.resources_remaining <= 0.0
+    }
+}
+
 /// Represents the visual properties of a celestial body.
 ///
 /// Used by the rendering system to draw the entity on the system map.

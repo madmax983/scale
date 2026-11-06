@@ -55,6 +55,9 @@ pub mod guilt;
 pub mod zoo_hypothesis;
 
 pub mod galaxy;
+/// Nomadic Fleets (Spec 397): Layer 3 ark-fleet lifecycle over
+/// the real Layer 2 system/mining seams.
+pub mod nomadic_fleets;
 pub mod tech;
 pub mod quarantine;
 pub mod sovereign_armada;

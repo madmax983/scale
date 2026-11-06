@@ -507,6 +507,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "neural" => handle_neural_command(world, &parts),
         "fossil" => handle_fossil_command(world, &parts),
         "nomad" => handle_nomad_command(world, &parts),
+        "nomadic" => handle_nomadic_command(world, &parts),
         "psionics" | "psions" => print_psionics(world),
         "awaken" => handle_awaken_command(world, &parts),
         "breakdown" => handle_breakdown_command(world),
@@ -3496,6 +3497,8 @@ fn print_stats(world: &mut World) {
     let fronts_label = scale::layer2::weather_fronts::fronts_stats_label(world);
     // Spec 396: trade-contract census for STATS (full panel: `contracts`).
     let contracts_label = scale::layer3::diplomacy::trade_contracts::contracts_stats_label(world);
+    // Spec 397: nomadic-fleet census for STATS (full panel: `nomadic`).
+    let nomadic_label = scale::layer3::nomadic_fleets::nomadic_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3535,7 +3538,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={}",
         tick,
         scenario,
         pops,
@@ -3710,6 +3713,7 @@ fn print_stats(world: &mut World) {
         fronts_label,
         front_weather_label,
         contracts_label,
+        nomadic_label,
     );
 }
 
@@ -8391,6 +8395,162 @@ fn handle_nomad_command(world: &mut World, parts: &[&str]) {
             );
         }
     }
+}
+
+/// Spec 397: `nomadic` panel; `nomadic arrive` spawns an ark fleet
+/// on the spot (the live director schedules its own at tick 5000);
+/// `nomadic belt [amount]` lays down a real asteroid belt (SystemBody
+/// + AsteroidBelt + paired MiningTarget); `nomadic bribe [resource]
+/// [amount]` offers colony goods so the fleet leaves the belt alone.
+fn handle_nomadic_command(world: &mut World, parts: &[&str]) {
+    use scale::layer3::nomadic_fleets::{
+        belt_remaining, nomadic_rows, nomadic_stats_label, spawn_asteroid_belt,
+        spawn_nomadic_fleet, NomadicLedger,
+    };
+    match parts.get(1).copied() {
+        Some("arrive") => {
+            world.init_resource::<NomadicLedger>();
+            let entity = spawn_nomadic_fleet(world);
+            print_dashboard_panel(
+                "NOMADIC FLEET",
+                &format!(
+                    "Nomadic ark fleet {entity:?} has entered the system, market open. It will trade briefly, then strip-mine the belt — `nomadic belt` to lay one down, `nomadic bribe metal 10` to buy it off, or watch STATS nomadic=."
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("belt") => {
+            let amount: f32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(500.0);
+            let entity = spawn_asteroid_belt(world, amount);
+            print_dashboard_panel(
+                "NOMADIC FLEET",
+                &format!(
+                    "Asteroid belt {entity:?} laid down with {amount:.0} stock (AsteroidBelt + paired MiningTarget). Nomadic fleets will mine this — permanently. STATS nomadic= tracks what is left."
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("bribe") => {
+            handle_nomadic_bribe(world, parts);
+        }
+        _ => {
+            world.init_resource::<NomadicLedger>();
+            let rows = nomadic_rows(world);
+            let mut lines: Vec<String> = Vec::new();
+            if rows.is_empty() {
+                lines.push(
+                    "No nomadic fleets in the system — the scheduled arrival is at tick 5000, or force one with `nomadic arrive`."
+                        .to_string(),
+                );
+            }
+            for (i, (entity, fleet)) in rows.iter().enumerate() {
+                lines.push(format!(
+                    "#{} {entity:?}: {:?} — mining_rate {:.0}, patience {}",
+                    i + 1,
+                    fleet.state,
+                    fleet.mining_rate,
+                    fleet.patience,
+                ));
+            }
+            let ledger = *world.resource::<NomadicLedger>();
+            lines.push(format!(
+                "Belt remaining: {:.0}\nLedger: arrivals={} mined={:.0} departures={} bribes_accepted={} bribes_paid={:.0}",
+                belt_remaining(world),
+                ledger.arrivals,
+                ledger.total_mined,
+                ledger.departures,
+                ledger.bribes_accepted,
+                ledger.bribes_paid,
+            ));
+            lines.push(format!(
+                "STATS nomadic={} (fleets/belt/mined).",
+                nomadic_stats_label(world)
+            ));
+            lines.push(
+                "Ignored fleets strip-mine the belt for good. Buy one off with `nomadic bribe [resource] [amount]` (minimum 10, from the real colony ledger) — or let it eat rock. Its trade market rides the fleet and its escort guns are ancient and overwhelming."
+                    .to_string(),
+            );
+            print_dashboard_panel(
+                "NOMADIC FLEETS",
+                &lines.join("\n"),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// Spec 397 §5: `nomadic bribe [resource] [amount]` — offer goods
+/// from the real colony ledger to the first present fleet.
+fn handle_nomadic_bribe(world: &mut World, parts: &[&str]) {
+    use scale::layer1::resources::ColonyResources;
+    use scale::layer3::diplomacy::trade_contracts::parse_contract_resource;
+    use scale::layer3::nomadic_fleets::{
+        nomadic_rows, offer_nomadic_bribe_system, FleetState, NomadicLedger,
+        OfferNomadicBribeEvent,
+    };
+    world.init_resource::<ColonyResources>();
+    world.init_resource::<NomadicLedger>();
+    world.init_resource::<scale::layer3::diplomacy::system_sovereignty::FactionRelations>();
+    world.init_resource::<bevy_ecs::event::Events<OfferNomadicBribeEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<scale::layer1::chronicle::AddChronicleEvent>>();
+    let resource = parts
+        .get(2)
+        .and_then(|s| parse_contract_resource(s))
+        .unwrap_or(scale::layer1::resources::ResourceType::Metal);
+    if parts.get(2).is_some_and(|s| parse_contract_resource(s).is_none()) {
+        print_dashboard_panel(
+            "NOMADIC FLEET",
+            &format!(
+                "Unknown resource '{}'. Kinds: food, wood, stone, ore, metal, planks, blocks, tools, scrap, fuel, rations, alcohol.",
+                parts[2]
+            ),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let amount: f32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(10.0);
+    let target = nomadic_rows(world)
+        .into_iter()
+        .find(|(_, fleet)| fleet.state != FleetState::Departing);
+    let Some((entity, _)) = target else {
+        print_dashboard_panel(
+            "NOMADIC FLEET",
+            "No nomadic fleet to bribe — `nomadic arrive` first.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    world.send_event(OfferNomadicBribeEvent {
+        fleet: entity,
+        resource,
+        amount,
+    });
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    schedule.add_systems(offer_nomadic_bribe_system);
+    schedule.run(world);
+    let after = world
+        .get::<scale::layer3::nomadic_fleets::NomadicFleet>(entity)
+        .copied();
+    let msg = match after {
+        Some(fleet) if fleet.state == FleetState::Departing => format!(
+            "Bribe accepted: {amount:.0} {resource:?} handed over — fleet {entity:?} is departing and the belt is safe. Watch STATS nomadic=."
+        ),
+        _ => format!(
+            "Bribe refused for fleet {entity:?} — offers need at least {:.0} of a stocked resource. Stock it with `give` first.",
+            scale::layer3::nomadic_fleets::BRIBE_MIN_AMOUNT,
+        ),
+    };
+    print_dashboard_panel(
+        "NOMADIC FLEET",
+        &msg,
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
 }
 
 fn handle_fossil_command(world: &mut World, parts: &[&str]) {
