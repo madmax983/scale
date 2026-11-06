@@ -541,6 +541,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "window" | "windows" => print_launch_windows(world, &parts),
         "synch" => print_synch(world),
         "backlash" => handle_backlash_command(world, &parts),
+        "front" => handle_front_command(world, &parts),
+        "fronts" => print_fronts(world),
         "mimicry" => handle_mimicry_command(world, &parts),
         "prefs" => print_prefs(world),
         "strat" => print_strat(world),
@@ -3487,6 +3489,9 @@ fn print_stats(world: &mut World) {
     let liberty_avg = scale::layer1::administration::edicts::average_liberty(world);
     // Spec 394: haul-pipeline census for STATS.
     let (loose_items, stored_items) = scale::layer1::hauling::hauling_census(world);
+    // Spec 395: weather-front census for STATS (full panel: `fronts`).
+    let fronts_label = scale::layer2::weather_fronts::fronts_stats_label(world);
+    let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
     // (full warnings land in the Chronicle; see `chronicle`).
@@ -3525,7 +3530,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={}",
         tick,
         scenario,
         pops,
@@ -3697,6 +3702,8 @@ fn print_stats(world: &mut World) {
         liberty_avg,
         loose_items,
         stored_items,
+        fronts_label,
+        front_weather_label,
     );
 }
 
@@ -9147,6 +9154,75 @@ fn handle_mimicry_command(world: &mut World, parts: &[&str]) {
     println!(
         "MIMICRY changes={} last_item={:?}",
         stats.changes, stats.last_item
+    );
+}
+
+/// Spec 395: `front <kind> [x] [y] [vx] [vy] [radius]` spawns a
+/// Layer 2 weather front in the colony-centred front plane;
+/// `fronts` lists them and the L2->L1 bridge state.
+fn handle_front_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::weather_fronts::{parse_front_weather, spawn_weather_front};
+    world.init_resource::<scale::layer2::weather_fronts::ColonyFrontAnchor>();
+    world.init_resource::<scale::layer2::weather_fronts::WeatherFrontBridge>();
+    let kind_text = parts.get(1).copied().unwrap_or("storm");
+    let Some(kind) = parse_front_weather(kind_text) else {
+        print_dashboard_panel(
+            "WEATHER FRONT",
+            &format!("Unknown front kind '{kind_text}'. Kinds: storm (dust), heatwave, rain, snow, fog, magnetic, clear."),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    let num = |i: usize, fallback: f32| parts.get(i).and_then(|s| s.parse().ok()).unwrap_or(fallback);
+    let pos = bevy::math::Vec2::new(num(2, -8.0), num(3, 0.0));
+    let vel = bevy::math::Vec2::new(num(4, 1.0), num(5, 0.0));
+    let radius = num(6, 5.0);
+    let id = spawn_weather_front(world, kind, pos, vel, radius);
+    print_dashboard_panel(
+        "WEATHER FRONT",
+        &format!(
+            "A {} front (id {id:?}) enters the front plane at ({:.0}, {:.0}), drifting ({:.1}, {:.1}) per tick, radius {:.0}. Run `tick` and watch STATS fronts= / front= — or `fronts` for the ledger.",
+            kind.name(), pos.x, pos.y, vel.x, vel.y, radius
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn print_fronts(world: &mut World) {
+    use scale::layer2::weather_fronts::{fronts_stats_label, WeatherFront, WeatherFrontBridge};
+    world.init_resource::<scale::layer2::weather_fronts::ColonyFrontAnchor>();
+    world.init_resource::<WeatherFrontBridge>();
+    let mut lines: Vec<String> = Vec::new();
+    let mut query = world.query::<(bevy_ecs::prelude::Entity, &WeatherFront)>();
+    let rows: Vec<_> = query.iter(world).map(|(e, f)| (e, *f)).collect();
+    if rows.is_empty() {
+        lines.push("No weather fronts on the planet right now — Layer 1 weather is purely seasonal.".to_string());
+    }
+    for (entity, front) in &rows {
+        lines.push(format!(
+            "{entity:?}: {} at ({:.1}, {:.1}), velocity ({:.1}, {:.1})/tick, radius {:.1}",
+            front.weather_type.name(), front.position.x, front.position.y,
+            front.velocity.x, front.velocity.y, front.radius
+        ));
+    }
+    let bridge = world.resource::<WeatherFrontBridge>();
+    lines.push(format!(
+        "Bridge: applied={} coverage={:.2} overhead={} passages={} saved_seasonal={}",
+        bridge.applied.map_or("none", |k| k.name()),
+        bridge.coverage,
+        bridge.overhead,
+        bridge.passages,
+        bridge.saved_weather.map_or("none", |k| k.name()),
+    ));
+    lines.push(format!("STATS fronts={} (total/overhead/applied).", fronts_stats_label(world)));
+    lines.push("Spawn one with `front <storm|heatwave|rain|snow|fog|magnetic> [x] [y] [vx] [vy] [radius]`. A front drives colony weather once its core (coverage >= 0.25) is overhead; the seasonal weather it displaced returns when it passes.".to_string());
+    print_dashboard_panel(
+        "PLANETARY WEATHER FRONTS",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
     );
 }
 

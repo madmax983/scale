@@ -93,6 +93,7 @@ pub mod megastructure_decay;
 pub mod rogue_planets;
 pub mod weather;
 pub use weather::*;
+pub mod weather_fronts;
 pub mod bombardment;
 pub mod orbit;
 pub mod orbital_necropolis;

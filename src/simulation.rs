@@ -897,6 +897,9 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer2::logistics::orbital_synch::SynchChangedEvent>>();
     // Spec 385 Terraforming Backlash: tracker + ledger + event bus
     // (first-tick pattern — the check system reads these on tick one).
+    // Spec 395 Planetary Weather Fronts: colony anchor + L2->L1 bridge state.
+    world.init_resource::<crate::layer2::weather_fronts::ColonyFrontAnchor>();
+    world.init_resource::<crate::layer2::weather_fronts::WeatherFrontBridge>();
     world.init_resource::<crate::layer2::terraforming_backlash::BacklashTracker>();
     world.init_resource::<crate::layer2::terraforming_backlash::BacklashLedger>();
     world.init_resource::<Events<crate::layer2::terraforming_backlash::BacklashEvent>>();
@@ -1415,6 +1418,8 @@ fn register_simulation_core_systems(schedule: &mut Schedule) {
     ));
 
     schedule.add_systems((crate::layer2::weather::weather_movement_system,));
+    // Spec 395: fronts move, then the bridge writes the winner into L1 WeatherState.
+    schedule.add_systems((crate::layer2::weather_fronts::update_weather_fronts_l2, crate::layer2::weather_fronts::sync_weather_l2_to_l1).chain());
     schedule.add_systems((
         crate::layer1::nature::long_night::start_long_night,
         crate::layer1::nature::long_night::process_long_night_effects
