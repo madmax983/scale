@@ -133,6 +133,22 @@ pub fn build_simulation_schedule() -> Schedule {
         update_event_buffer::<crate::layer3::diplomacy::diplomatic_marriage::MarriedOffEvent>,
         update_event_buffer::<crate::layer3::diplomacy::diplomatic_marriage::MarriageRefusedEvent>,
     ));
+    // Spec 396 Trade Contracts: offer -> deliver -> deadline, chained
+    // so a contract offered this tick can be delivered next tick and a
+    // delivery on the deadline tick lands before the failure check.
+    schedule.add_systems(
+        (
+            crate::layer3::diplomacy::trade_contracts::generate_contracts_system,
+            crate::layer3::diplomacy::trade_contracts::fulfill_contract_system,
+            crate::layer3::diplomacy::trade_contracts::check_contract_deadlines_system,
+        )
+            .chain(),
+    );
+    schedule.add_systems((
+        update_event_buffer::<crate::layer3::diplomacy::trade_contracts::FulfillContractEvent>,
+        update_event_buffer::<crate::layer3::diplomacy::trade_contracts::ContractFulfilledEvent>,
+        update_event_buffer::<crate::layer3::diplomacy::trade_contracts::ContractFailedEvent>,
+    ));
     schedule.add_systems((
         crate::layer1::social::bureau_of_regrets::check_penitent_faction_formation_system,
         crate::layer1::core::integration::starvation_atrocity_bridge,
@@ -914,6 +930,14 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer3::diplomacy::diplomatic_marriage::MarryOffEvent>>();
     world.init_resource::<Events<crate::layer3::diplomacy::diplomatic_marriage::MarriedOffEvent>>();
     world.init_resource::<Events<crate::layer3::diplomacy::diplomatic_marriage::MarriageRefusedEvent>>();
+    // Spec 396 Trade Contracts: director + ledger + event buses
+    // (first-tick pattern — the contract systems read/write these on
+    // tick one).
+    world.init_resource::<crate::layer3::diplomacy::trade_contracts::ContractDirector>();
+    world.init_resource::<crate::layer3::diplomacy::trade_contracts::ContractLedger>();
+    world.init_resource::<Events<crate::layer3::diplomacy::trade_contracts::FulfillContractEvent>>();
+    world.init_resource::<Events<crate::layer3::diplomacy::trade_contracts::ContractFulfilledEvent>>();
+    world.init_resource::<Events<crate::layer3::diplomacy::trade_contracts::ContractFailedEvent>>();
     // Spec 380 The Great Filter: ledger + event buses (first-tick Events pattern).
     world.init_resource::<crate::layer3::events::great_filter::GreatFilterLedger>();
     world.init_resource::<Events<crate::layer3::tech::TechAdvanceEvent>>();

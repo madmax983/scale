@@ -543,6 +543,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "backlash" => handle_backlash_command(world, &parts),
         "front" => handle_front_command(world, &parts),
         "fronts" => print_fronts(world),
+        "contract" => handle_contract_command(world, &parts),
+        "contracts" => print_contracts(world),
+        "fulfill" => handle_fulfill_command(world, &parts),
         "mimicry" => handle_mimicry_command(world, &parts),
         "prefs" => print_prefs(world),
         "strat" => print_strat(world),
@@ -3491,6 +3494,8 @@ fn print_stats(world: &mut World) {
     let (loose_items, stored_items) = scale::layer1::hauling::hauling_census(world);
     // Spec 395: weather-front census for STATS (full panel: `fronts`).
     let fronts_label = scale::layer2::weather_fronts::fronts_stats_label(world);
+    // Spec 396: trade-contract census for STATS (full panel: `contracts`).
+    let contracts_label = scale::layer3::diplomacy::trade_contracts::contracts_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3530,7 +3535,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={}",
         tick,
         scenario,
         pops,
@@ -3704,6 +3709,7 @@ fn print_stats(world: &mut World) {
         stored_items,
         fronts_label,
         front_weather_label,
+        contracts_label,
     );
 }
 
@@ -9225,6 +9231,162 @@ fn print_fronts(world: &mut World) {
         Some(comfy_table::Attribute::Bold),
     );
 }
+
+/// Spec 396: `contract [resource] [amount] [faction_id] [ticks]`
+/// offers a trade contract on the spot (the live director offers its
+/// own on schedule); `contracts` lists the board and ledger; `fulfill
+/// [n]` delivers against the n-th contract (default: first Active).
+fn handle_contract_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::resources::ColonyResources;
+    use scale::layer3::diplomacy::trade_contracts::{
+        contract_faction_name, parse_contract_resource, spawn_trade_contract, ContractLedger,
+    };
+    world.init_resource::<ColonyResources>();
+    world.init_resource::<ContractLedger>();
+    world.init_resource::<scale::layer3::diplomacy::system_sovereignty::FactionRelations>();
+    let resource = parts
+        .get(1)
+        .and_then(|s| parse_contract_resource(s))
+        .unwrap_or(scale::layer1::resources::ResourceType::Blocks);
+    if parts.get(1).is_some_and(|s| parse_contract_resource(s).is_none()) {
+        print_dashboard_panel(
+            "TRADE CONTRACT",
+            &format!(
+                "Unknown resource '{}'. Kinds: food, wood, stone, ore, metal, planks, blocks, tools, scrap, fuel, rations, alcohol.",
+                parts[1]
+            ),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    let amount: f32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(10.0);
+    let faction_id: u32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(1);
+    let ticks: u64 = parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(2000);
+    let tick = world.resource::<SimulationTime>().tick;
+    let reward = amount * scale::layer3::diplomacy::trade_contracts::REWARD_CREDITS_PER_UNIT;
+    let id = spawn_trade_contract(world, faction_id, resource, amount, tick + ticks, reward);
+    print_dashboard_panel(
+        "TRADE CONTRACT",
+        &format!(
+            "Contract {id:?}: {} wants {amount:.0} {resource:?} by tick {} for {reward:.0} credits. Stock it via `give`, ship it with `fulfill`, watch STATS contracts= — or `contracts` for the board.",
+            contract_faction_name(faction_id),
+            tick + ticks,
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn print_contracts(world: &mut World) {
+    use scale::layer3::diplomacy::trade_contracts::{
+        contract_faction_name, contract_rows, contracts_stats_label, ContractLedger,
+    };
+    world.init_resource::<ContractLedger>();
+    let rows = contract_rows(world);
+    let mut lines: Vec<String> = Vec::new();
+    if rows.is_empty() {
+        lines.push(
+            "No trade contracts yet — the director offers the first at tick 100, or force one with `contract [resource] [amount] [faction] [ticks]`."
+                .to_string(),
+        );
+    }
+    for (i, (entity, c)) in rows.iter().enumerate() {
+        lines.push(format!(
+            "#{} {entity:?}: {:?} — {}/{:.0} {:?} for {} by tick {} (reward {:.0}cr)",
+            i + 1,
+            c.status,
+            c.delivered_amount,
+            c.required_amount,
+            c.required_resource,
+            contract_faction_name(c.faction_id),
+            c.deadline_tick,
+            c.reward_credits,
+        ));
+    }
+    let ledger = world.resource::<ContractLedger>();
+    lines.push(format!(
+        "Ledger: offered={} fulfilled={} failed={} partial_deliveries={} credits_earned={:.0} debt_levied={:.0}",
+        ledger.offered, ledger.fulfilled, ledger.failed, ledger.partial_deliveries,
+        ledger.credits_earned, ledger.debt_levied,
+    ));
+    lines.push(format!(
+        "STATS contracts={} (active/fulfilled/failed).",
+        contracts_stats_label(world)
+    ));
+    lines.push(
+        "Deliver with `fulfill [n]` — goods leave the real colony ledger; completing pays credits and warms relations, missing the deadline levies debt and sours them."
+            .to_string(),
+    );
+    print_dashboard_panel(
+        "TRADE CONTRACTS",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_fulfill_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::economy::insurance::TradeBlockade;
+    use scale::layer3::diplomacy::trade_contracts::{
+        contract_rows, ContractLedger, ContractStatus, FulfillContractEvent,
+    };
+    world.init_resource::<ContractLedger>();
+    world.init_resource::<scale::layer3::diplomacy::system_sovereignty::FactionRelations>();
+    world.init_resource::<TradeBlockade>();
+    world.init_resource::<bevy_ecs::event::Events<FulfillContractEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<scale::layer3::diplomacy::trade_contracts::ContractFulfilledEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<scale::layer3::diplomacy::trade_contracts::ContractFailedEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<scale::layer1::chronicle::AddChronicleEvent>>();
+    let rows = contract_rows(world);
+    let wanted: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+    // `fulfill` with no index targets the first Active contract;
+    // `fulfill <n>` targets the n-th row of the `contracts` board.
+    let target = if wanted == 0 {
+        rows.iter()
+            .find(|(_, c)| c.status == ContractStatus::Active)
+            .map(|(e, c)| (*e, c.clone()))
+    } else {
+        rows.get(wanted - 1).map(|(e, c)| (*e, c.clone()))
+    };
+    let Some((entity, before)) = target else {
+        print_dashboard_panel(
+            "TRADE CONTRACT",
+            "No matching contract to fulfill — see `contracts` for the board.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    };
+    world.send_event(FulfillContractEvent { contract: entity });
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    schedule.add_systems(
+        scale::layer3::diplomacy::trade_contracts::fulfill_contract_system,
+    );
+    schedule.run(world);
+    let after = world.get::<scale::layer3::diplomacy::trade_contracts::TradeContract>(entity).cloned();
+    let msg = match after {
+        Some(c) if c.status == ContractStatus::Fulfilled => format!(
+            "Contract {entity:?} FULFILLED: {:.0} {:?} exported, {:.0} credits paid. Watch STATS contracts=.",
+            c.required_amount, c.required_resource, c.reward_credits,
+        ),
+        Some(c) if c.delivered_amount > before.delivered_amount => format!(
+            "Partial delivery on contract {entity:?}: {:.0}/{:.0} {:?} shipped. Stock more and `fulfill` again before tick {}.",
+            c.delivered_amount, c.required_amount, c.required_resource, c.deadline_tick,
+        ),
+        _ => format!(
+            "Delivery refused for contract {entity:?} — nothing on hand for {:?} (or a trade blockade is active). Stock it with `give` first.",
+            before.required_resource,
+        ),
+    };
+    print_dashboard_panel(
+        "TRADE CONTRACT",
+        &msg,
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 
 /// Spec 385: `backlash` panel - terraforming velocity, generalized
 /// stress, and the Planetary Defense ledger. `backlash trigger

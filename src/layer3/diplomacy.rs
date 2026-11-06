@@ -102,3 +102,7 @@ pub mod xenolinguistics;
 /// Diplomatic Marriage (Spec 383): marry off a high-status / high-skill
 /// pop to a foreign faction to seal an alliance.
 pub mod diplomatic_marriage;
+
+/// Trade Contracts (Spec 396): time-limited Layer 3 faction
+/// production contracts against the real colony ledger.
+pub mod trade_contracts;
