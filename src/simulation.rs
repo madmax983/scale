@@ -123,6 +123,17 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems((update_event_buffer::<
         crate::layer2::trade::merchant_landings::TradeEvent,
     >,));
+    // Spec 400 Lagrange Point Hubs: upkeep rule (both legs) -> pirate
+    // roots in empty points -> hub merchant traffic.
+    schedule.add_systems(
+        (
+            crate::layer2::lagrange::calculate_station_upkeep_system,
+            crate::layer2::lagrange::calculate_real_station_upkeep_system,
+            crate::layer2::lagrange::pirate_l_point_spawn_system,
+            crate::layer2::lagrange::lagrange_merchant_traffic_system,
+        )
+            .chain(),
+    );
     // Spec 383 Diplomatic Marriage: marry off a high-status / high-skill
     // pop to a foreign faction — the pop departs, the faction allies.
     schedule.add_systems(
@@ -957,6 +968,8 @@ fn init_simulation_resources(world: &mut World) {
     // (first-tick pattern — systems read/write these on tick one).
     world.init_resource::<crate::layer2::trade::merchant_landings::MerchantLandingState>();
     world.init_resource::<Events<crate::layer2::trade::merchant_landings::TradeEvent>>();
+    // Spec 400 Lagrange Point Hubs: ledger + seed (first-tick pattern).
+    world.init_resource::<crate::layer2::lagrange::LagrangeState>();
     // Spec 383 Diplomatic Marriage: ledger + event buses (first-tick
     // pattern — the marriage system reads/writes these on tick one).
     world.init_resource::<crate::layer3::diplomacy::system_sovereignty::FactionRelations>();

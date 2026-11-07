@@ -18,6 +18,10 @@
 //!   `penal`            - Show Prison Labor roster / revolt risk (Spec 399)
 //!   `penal detain`     - Debug: detain a pop into a penal zone (Spec 399)
 //!   `revolt`           - Debug: push penal laborers over the revolt threshold
+//!   `lpoint [L1..L5]`  - Spawn a Lagrange point (Spec 400)
+//!   `hub`              - Build a hub station at a free L-point (Spec 400)
+//!   `lpirate`          - Debug: root a pirate base at an empty L-point (Spec 400)
+//!   `lpoints`          - Show Lagrange points / hubs / pirate bases (Spec 400)
 //!   `dust`            - Show Desire Dust / RoadMind status
 //!   `launch_sat`      - Launch a slogan satellite (Spec 1380)
 //!   `constellation`   - Show Propaganda Constellation status
@@ -541,6 +545,10 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "tradepad" => handle_tradepad_command(world, &parts),
         "merchant" | "merchants" => print_merchants(world),
         "land_merchant" => handle_land_merchant_command(world),
+        "lpoint" => handle_lpoint_command(world, &parts),
+        "hub" => handle_hub_command(world),
+        "lpirate" => handle_lpirate_command(world),
+        "lpoints" => print_lpoints(world),
         "trade" => handle_trade_command(world, &parts),
         "roomzones" => print_roomzones(world),
         "assignroom" => handle_assignroom_command(world, &parts),
@@ -3509,6 +3517,8 @@ fn print_stats(world: &mut World) {
     let migration_label = scale::layer2::migrations::migration_stats_label(world);
     // Spec 399: penal-labor census for STATS (full panel: `penal`).
     let penal_label = scale::layer1::law::penal::penal_stats_label(world);
+    // Spec 400: Lagrange hub census for STATS (full panel: `lpoints`).
+    let lagrange_label = scale::layer2::lagrange::lagrange_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3548,7 +3558,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={}",
         tick,
         scenario,
         pops,
@@ -3726,6 +3736,7 @@ fn print_stats(world: &mut World) {
         nomadic_label,
         migration_label,
         penal_label,
+        lagrange_label,
     );
 }
 
@@ -14832,5 +14843,169 @@ fn handle_trade_command(world: &mut World, parts: &[&str]) {
             resource_label(buying),
             resource_label(selling),
         );
+    }
+}
+
+// Spec 400 Lagrange Point Hubs: `lpoint [slot]` spawns an L-point,
+// `hub` builds a hub station at a free L-point, `lpirate` forces a
+// pirate base onto an empty L-point, `lpoints` inspects the layer.
+fn handle_lpoint_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::lagrange::{lagrange_census, spawn_lagrange_point, LagrangeSlot};
+    world.init_resource::<scale::layer2::lagrange::LagrangeState>();
+    if let Some(raw) = parts.get(1) {
+        if LagrangeSlot::parse(raw).is_none() {
+            println!("Unknown slot '{raw}'. Use L1, L2, L3, L4 or L5.");
+            return;
+        }
+    }
+    let slot = parts
+        .get(1)
+        .and_then(|s| LagrangeSlot::parse(s))
+        .unwrap_or(LagrangeSlot::L1);
+    let entity = spawn_lagrange_point(world, slot);
+    let census = lagrange_census(world);
+    println!(
+        "Spawned Lagrange point {} (entity {}). {} L-point(s) on the system map.\nBuild there with `hub` — stations at L-points pay zero station-keeping fuel upkeep, and empty points attract pirates. Watch STATS lagrange=.",
+        slot.label(),
+        entity.index(),
+        census.points
+    );
+}
+
+fn handle_hub_command(world: &mut World) {
+    use scale::layer2::lagrange::{
+        calculate_real_station_upkeep_system, calculate_station_upkeep_system, lagrange_census,
+        spawn_hub_station, LagrangePoint, OrbitalStation, PirateBase, StationFuelUpkeep,
+    };
+    world.init_resource::<scale::layer2::lagrange::LagrangeState>();
+    // First L-point with neither a hub station nor a pirate base.
+    let occupied: Vec<Entity> = {
+        let mut taken = Vec::new();
+        let mut stations = world.query::<&OrbitalStation>();
+        for station in stations.iter(world) {
+            taken.push(station.parent_node);
+        }
+        let mut bases = world.query::<(&PirateBase, &scale::layer2::fleet::InOrbit)>();
+        for (_, orbit) in bases.iter(world) {
+            taken.push(orbit.parent);
+        }
+        taken
+    };
+    let target = {
+        let mut points = world.query::<(Entity, &LagrangePoint)>();
+        points
+            .iter(world)
+            .map(|(entity, _)| entity)
+            .find(|entity| !occupied.contains(entity))
+    };
+    let Some(node) = target else {
+        println!(
+            "No free Lagrange point for a hub — spawn one with `lpoint [L1..L5]` (or clear the pirates squatting there)."
+        );
+        return;
+    };
+    let hub = spawn_hub_station(world, node);
+    // Apply the upkeep rule now so the zero is visible immediately.
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    schedule.add_systems((
+        calculate_station_upkeep_system,
+        calculate_real_station_upkeep_system,
+    ));
+    schedule.run(world);
+    let (base, current) = world
+        .get::<StationFuelUpkeep>(hub)
+        .map_or((0, 0), |u| (u.base_cost, u.current_cost));
+    let census = lagrange_census(world);
+    println!(
+        "Built a hub station at Lagrange point (entity {}): station-keeping fuel upkeep {current} (base {base}) — gravity-neutral anchorage is free.\nThe hub attracts double merchant traffic; empty L-points attract pirates instead. {} hub(s), {} pirate base(s). Watch STATS lagrange=.",
+        node.index(),
+        census.hubs,
+        census.pirate_bases
+    );
+}
+
+fn handle_lpirate_command(world: &mut World) {
+    use scale::layer2::lagrange::{
+        lagrange_census, spawn_pirate_base_at, LagrangePoint, LagrangeState, OrbitalStation,
+        PirateBase,
+    };
+    world.init_resource::<LagrangeState>();
+    let occupied: Vec<Entity> = {
+        let mut taken = Vec::new();
+        let mut stations = world.query::<&OrbitalStation>();
+        for station in stations.iter(world) {
+            taken.push(station.parent_node);
+        }
+        let mut bases = world.query::<(&PirateBase, &scale::layer2::fleet::InOrbit)>();
+        for (_, orbit) in bases.iter(world) {
+            taken.push(orbit.parent);
+        }
+        taken
+    };
+    let target = {
+        let mut points = world.query::<(Entity, &LagrangePoint)>();
+        points
+            .iter(world)
+            .map(|(entity, _)| entity)
+            .find(|entity| !occupied.contains(entity))
+    };
+    let Some(node) = target else {
+        println!("No empty Lagrange point for pirates to take — every point is held or already infested.");
+        return;
+    };
+    let base = spawn_pirate_base_at(world, node);
+    world.resource_mut::<LagrangeState>().pirate_bases_spawned += 1;
+    let census = lagrange_census(world);
+    println!(
+        "Pirates have taken root at the empty Lagrange point (base entity {}, strength {}). {} pirate base(s) now nest in the shallows.\nNeglected L-points become sieges later — hold them with `hub` first next time. Watch STATS lagrange=.",
+        base.index(),
+        scale::layer2::lagrange::PIRATE_BASE_STRENGTH,
+        census.pirate_bases
+    );
+}
+
+fn print_lpoints(world: &mut World) {
+    use scale::layer2::lagrange::{
+        lagrange_census, HubTraffic, LagrangePoint, OrbitalStation, PirateBase, StationFuelUpkeep,
+    };
+    world.init_resource::<scale::layer2::lagrange::LagrangeState>();
+    let census = lagrange_census(world);
+    println!(
+        "Lagrange points: {} | hub stations: {} | pirate bases: {} | merchant visits at hubs: {}",
+        census.points, census.hubs, census.pirate_bases, census.merchant_visits
+    );
+    {
+        let mut points = world.query::<(Entity, &LagrangePoint)>();
+        for (entity, point) in points.iter(world) {
+            println!("  point {} (entity {})", point.slot.label(), entity.index());
+        }
+    }
+    {
+        let mut hubs = world
+            .query::<(Entity, &OrbitalStation, &StationFuelUpkeep, &HubTraffic)>();
+        for (entity, station, upkeep, traffic) in hubs.iter(world) {
+            println!(
+                "  hub entity {} at node {} — upkeep {}/{} fuel, {} merchant visit(s)",
+                entity.index(),
+                station.parent_node.index(),
+                upkeep.current_cost,
+                upkeep.base_cost,
+                traffic.merchant_visits
+            );
+        }
+    }
+    {
+        let mut bases = world.query::<(Entity, &PirateBase, &scale::layer2::fleet::InOrbit)>();
+        for (entity, base, orbit) in bases.iter(world) {
+            println!(
+                "  pirate base entity {} at node {} — strength {}",
+                entity.index(),
+                orbit.parent.index(),
+                base.strength
+            );
+        }
+    }
+    if census.points == 0 {
+        println!("No L-points yet — spawn one with `lpoint [L1..L5]`, hold it with `hub`, or abandon it and wait for pirates (first roots after tick 5000).");
     }
 }

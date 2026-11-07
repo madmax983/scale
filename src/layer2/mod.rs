@@ -107,6 +107,7 @@ pub mod culture;
 pub mod diaspora;
 pub mod sensors;
 pub use diaspora::*;
+pub mod lagrange;
 pub mod piracy;
 pub use piracy::*;
 pub mod fauna;
