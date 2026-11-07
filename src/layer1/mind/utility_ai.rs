@@ -354,18 +354,22 @@ impl<'a> PopDecider<'a> {
         let needs = self.data.needs;
         let weights = self.data.weights;
 
-        // Evaluate VisitSanctuary
-        self.evaluator.evaluate_and_consider(
-            crate::layer1::utility_eval_types::evaluate_visit_sanctuary(
-                pop_pos,
-                &weights,
-                self.data.stress,
-                &self.buffer.sanctuaries,
-            ),
-            ActionType::VisitSanctuary,
-            self.context,
-            0.0,
-        );
+        // Spec 399: penal laborers ignore non-survival need calls
+        // (sanctuary, rest, shower) while they work; hunger and
+        // medical care below still reach them.
+        if !self.is_penal {
+            self.evaluator.evaluate_and_consider(
+                crate::layer1::utility_eval_types::evaluate_visit_sanctuary(
+                    pop_pos,
+                    &weights,
+                    self.data.stress,
+                    &self.buffer.sanctuaries,
+                ),
+                ActionType::VisitSanctuary,
+                self.context,
+                0.0,
+            );
+        }
 
         // Evaluate Hunger
         let urgency = need_response_curve(needs.hunger);
@@ -392,12 +396,14 @@ impl<'a> PopDecider<'a> {
             rest_urgency -= 2.0;
         }
 
-        self.evaluator.evaluate_and_consider(
-            evaluate_simple_action(pop_pos, &weights, &self.buffer.housing, rest_urgency),
-            ActionType::SatisfyRest,
-            self.context,
-            0.0,
-        );
+        if !self.is_penal {
+            self.evaluator.evaluate_and_consider(
+                evaluate_simple_action(pop_pos, &weights, &self.buffer.housing, rest_urgency),
+                ActionType::SatisfyRest,
+                self.context,
+                0.0,
+            );
+        }
 
         // Evaluate SeekMedicalCare
         if let Some(health) = &self.data.health {
@@ -427,19 +433,21 @@ impl<'a> PopDecider<'a> {
             0.0,
         );
 
-        // Evaluate UseShower
-        self.evaluator.evaluate_and_consider(
-            evaluate_shower(
-                pop_pos,
-                &needs,
-                &weights,
-                self.context.resources,
-                &self.buffer.showers,
-            ),
-            ActionType::UseShower,
-            self.context,
-            0.0,
-        );
+        // Evaluate UseShower (Spec 399: skipped for penal laborers)
+        if !self.is_penal {
+            self.evaluator.evaluate_and_consider(
+                evaluate_shower(
+                    pop_pos,
+                    &needs,
+                    &weights,
+                    self.context.resources,
+                    &self.buffer.showers,
+                ),
+                ActionType::UseShower,
+                self.context,
+                0.0,
+            );
+        }
     }
 
     /// **Priority 2: Social & Mental Health**
@@ -1230,6 +1238,65 @@ mod tests {
             action.current_utility > 1.0,
             "Should have high utility bonus"
         );
+    }
+
+    #[test]
+    fn test_penal_labor_ignores_rest_while_working() {
+        use crate::layer1::designation::{Designation, DesignationType};
+        use crate::layer1::housing::Housing;
+        use crate::layer1::law::justice::Inmate;
+        use crate::layer1::law::penal::PenalLabor;
+
+        crate::setup::init_task_pools();
+        let mut world = World::new();
+        world.insert_resource(UtilityConfig::default());
+        world.insert_resource(SimulationTime::default());
+        world.insert_resource(ColonyResources::default());
+        world.insert_resource(crate::layer1::day_night::DayNightCycle::default());
+        world.insert_resource(crate::layer1::taboo::TabooState::default());
+        world.insert_resource(crate::layer1::zone::ZoneGrid::new(10, 10));
+
+        // Exhausted penal laborer: rest need fully drained.
+        let inmate = world
+            .spawn((
+                Pop,
+                GridPosition { x: 0, y: 0 },
+                Needs {
+                    hunger: 0.8,
+                    rest: 0.0,
+                    leisure: 0.8,
+                    hygiene: 0.8,
+                },
+                UtilityWeights::default(),
+                PopAction {
+                    ticks_committed: 10,
+                    ..Default::default()
+                },
+                Inmate {
+                    sentence_ticks: 100,
+                },
+                PenalLabor::default(),
+            ))
+            .id();
+
+        // A bed is right there, and so is work.
+        world.spawn((Housing::default(), GridPosition { x: 1, y: 0 }));
+        world.spawn((
+            Designation {
+                designation_type: DesignationType::Mine,
+            },
+            GridPosition { x: 5, y: 5 },
+        ));
+
+        evaluate_actions_system(&mut world);
+
+        let action = world.get::<PopAction>(inmate).unwrap();
+        assert_eq!(
+            action.current,
+            ActionType::Work,
+            "Penal Labor should ignore the rest call and keep working"
+        );
+        assert_ne!(action.current, ActionType::SatisfyRest);
     }
 }
 

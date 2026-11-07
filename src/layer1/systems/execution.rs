@@ -127,6 +127,21 @@ pub fn register(schedule: &mut Schedule) {
 
     // Spec 353: progressive taming actions resolve alongside husbandry's
     // instant designation-based taming.
+    // Spec 399 Prison Labor: assign penal work, sync the work-speed
+    // buff into the real work pipeline, accrue warden-damped revolt
+    // risk, break out at the threshold, clean up on zone exit.
+    schedule.add_systems(
+        (
+            crate::layer1::law::penal::evaluate_penal_work_system,
+            crate::layer1::law::penal::sync_penal_work_speed_system,
+            crate::layer1::law::penal::update_revolt_risk_system,
+            crate::layer1::law::penal::handle_prison_revolt_system,
+            crate::layer1::law::penal::cleanup_penal_work_system,
+        )
+            .chain()
+            .in_set(Layer1SystemSet::Execution),
+    );
+
     schedule.add_systems(
         crate::layer1::fauna::domestication::execute_tame_action_system
             .after(crate::layer1::husbandry::tame_execution_system)

@@ -15,6 +15,9 @@
 //!   `mine <x> <y>`   - Designate rock for mining
 //!   `chop <x> <y>`   - Designate tree for chopping
 //!   `excavate <x> <y>` - Excavate Desire Dust from a tile (Spec 1379)
+//!   `penal`            - Show Prison Labor roster / revolt risk (Spec 399)
+//!   `penal detain`     - Debug: detain a pop into a penal zone (Spec 399)
+//!   `revolt`           - Debug: push penal laborers over the revolt threshold
 //!   `dust`            - Show Desire Dust / RoadMind status
 //!   `launch_sat`      - Launch a slogan satellite (Spec 1380)
 //!   `constellation`   - Show Propaganda Constellation status
@@ -509,6 +512,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "nomad" => handle_nomad_command(world, &parts),
         "nomadic" => handle_nomadic_command(world, &parts),
         "migration" | "migrations" => handle_migration_command(world, &parts),
+        "penal" => handle_penal_command(world, &parts),
+        "revolt" => handle_revolt_command(world, &parts),
         "psionics" | "psions" => print_psionics(world),
         "awaken" => handle_awaken_command(world, &parts),
         "breakdown" => handle_breakdown_command(world),
@@ -3502,6 +3507,8 @@ fn print_stats(world: &mut World) {
     let nomadic_label = scale::layer3::nomadic_fleets::nomadic_stats_label(world);
     // Spec 398: planetary-migration census for STATS (full panel: `migration`).
     let migration_label = scale::layer2::migrations::migration_stats_label(world);
+    // Spec 399: penal-labor census for STATS (full panel: `penal`).
+    let penal_label = scale::layer1::law::penal::penal_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3541,7 +3548,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={}",
         tick,
         scenario,
         pops,
@@ -3718,6 +3725,7 @@ fn print_stats(world: &mut World) {
         contracts_label,
         nomadic_label,
         migration_label,
+        penal_label,
     );
 }
 
@@ -8555,6 +8563,97 @@ fn handle_nomadic_bribe(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Spec 399 Prison Labor: `penal` panel plus debug subcommands —
+/// `penal detain` (detain the first free pop into a penal zone),
+/// `penal zone <x> <y>` (designate a 3x3 penal zone), and
+/// `penal risk <amount>` (set every penal laborer revolt risk).
+fn handle_penal_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::law::penal::{
+        designate_penal_zone, detain_first_pop_in_penal_zone, force_revolt_risk, penal_panel_lines,
+    };
+    match parts.get(1).copied() {
+        Some("detain") => match detain_first_pop_in_penal_zone(world) {
+            Some((entity, name)) => {
+                print_dashboard_panel(
+                    "PRISON LABOR",
+                    &format!(
+                        "{name} (id {}) has been detained and moved onto a penal tile. Run `tick` — the penal assignment lands, work speed rises, and revolt risk starts accruing. Watch STATS penal= — or `penal` for the roster.",
+                        entity.index()
+                    ),
+                    Some(comfy_table::Color::Yellow),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+            None => {
+                print_dashboard_panel(
+                    "PRISON LABOR",
+                    "No free pop to detain.",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+        },
+        Some("zone") => {
+            let x: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let y: i32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let tiles = designate_penal_zone(world, x, y);
+            print_dashboard_panel(
+                "PRISON LABOR",
+                &format!(
+                    "Designated a penal zone ({tiles} tiles) centred on ({x}, {y}). Inmates standing in it pick up penal labor on the next tick."
+                ),
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("risk") => {
+            let amount: f32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(99.0);
+            let set = force_revolt_risk(world, amount);
+            print_dashboard_panel(
+                "PRISON LABOR",
+                &format!(
+                    "Set revolt risk to {amount:.0} on {set} penal laborer(s). Run `tick` — anyone at or over their threshold revolts. Watch STATS penal= and the chronicle."
+                ),
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        _ => {
+            let lines = penal_panel_lines(world);
+            print_dashboard_panel(
+                "PRISON LABOR",
+                &lines.join("\n"),
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
+}
+
+/// Spec 399 Prison Labor: `revolt` — push every penal laborer over
+/// the revolt threshold so the next tick breaks them out.
+fn handle_revolt_command(world: &mut World, _parts: &[&str]) {
+    use scale::layer1::law::penal::force_revolt_risk;
+    let set = force_revolt_risk(world, 1000.0);
+    if set == 0 {
+        print_dashboard_panel(
+            "PRISON REVOLT",
+            "No penal laborers to revolt — `penal detain` first, then `tick` once so the assignment lands.",
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        print_dashboard_panel(
+            "PRISON REVOLT",
+            &format!(
+                "{set} penal laborer(s) are at the breaking point. Run `tick` — they revolt, break out, and turn hostile (Rioter + Wanted; wardens can re-arrest them). Watch STATS penal= and the chronicle."
+            ),
+            Some(comfy_table::Color::Red),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
 }
 
 /// Spec 398 Planetary Migrations: `migration` panel plus the
