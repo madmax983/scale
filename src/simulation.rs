@@ -146,6 +146,15 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems((update_event_buffer::<
         crate::layer2::asteroid_redirect::RedirectAsteroidEvent,
     >,));
+    // Spec 402 Ideological Pressure: rival pressure erodes home-ethic
+    // stubbornness, then dissent is scored on this tick's conversions.
+    schedule.add_systems(
+        (
+            crate::layer1::social::ideological_pressure::apply_ideological_pressure_system,
+            crate::layer1::social::ideological_pressure::calculate_ideological_dissent_system,
+        )
+            .chain(),
+    );
     // Spec 383 Diplomatic Marriage: marry off a high-status / high-skill
     // pop to a foreign faction — the pop departs, the faction allies.
     schedule.add_systems(
@@ -1146,6 +1155,10 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::geology::tectonic::TectonicStress>();
 
     world.init_resource::<crate::layer1::unrest::Unrest>();
+    // Spec 402 Ideological Pressure: home anchor + rival pressure
+    // (defaults are inert — neighbor strength 0 — until configured).
+    world.init_resource::<crate::layer1::social::ideological_pressure::ColonyEthicAnchor>();
+    world.init_resource::<crate::layer1::social::ideological_pressure::NeighborPressure>();
     world.init_resource::<crate::layer1::atmosphere::CorrosiveAtmosphere>();
 
     // Initialize Thermal Bloom Resource

@@ -651,6 +651,10 @@ pub use cadet::*;
 pub mod indoctrination;
 pub use indoctrination::*;
 
+/// Ideological Pressure (Spec 402).
+pub mod ideological_pressure;
+pub use ideological_pressure::*;
+
 pub mod placebo;
 
 /// Secret Societies system (Spec 147).

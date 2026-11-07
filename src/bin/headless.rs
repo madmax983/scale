@@ -25,6 +25,8 @@
 //!   `asteroid [x y vx vy]` - Spawn a redirectable asteroid (Spec 401)
 //!   `redirect <vx> <vy>` - Redirect the first asteroid to a new velocity (Spec 401)
 //!   `asteroids`        - Show asteroids / captures / impacts (Spec 401)
+//!   `pressure [ethic] [strength]` - Show/set rival ideological pressure (Spec 402)
+//!   `homeethic [ethic] [strength]` - Show/set the home ethic anchor (Spec 402)
 //!   `dust`            - Show Desire Dust / RoadMind status
 //!   `launch_sat`      - Launch a slogan satellite (Spec 1380)
 //!   `constellation`   - Show Propaganda Constellation status
@@ -555,6 +557,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "asteroid" => handle_asteroid_command(world, &parts),
         "redirect" => handle_redirect_command(world, &parts),
         "asteroids" => print_asteroids(world),
+        "pressure" => handle_pressure_command(world, &parts),
+        "homeethic" => handle_homeethic_command(world, &parts),
         "trade" => handle_trade_command(world, &parts),
         "roomzones" => print_roomzones(world),
         "assignroom" => handle_assignroom_command(world, &parts),
@@ -3527,6 +3531,8 @@ fn print_stats(world: &mut World) {
     let lagrange_label = scale::layer2::lagrange::lagrange_stats_label(world);
     // Spec 401: asteroid redirect census for STATS (full panel: `asteroids`).
     let asteroid_label = scale::layer2::asteroid_redirect::asteroid_stats_label(world);
+    // Spec 402: ideological pressure census for STATS (full panel: `pressure`).
+    let pressure_label = scale::layer1::social::ideological_pressure::pressure_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3566,7 +3572,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={}",
         tick,
         scenario,
         pops,
@@ -3746,6 +3752,7 @@ fn print_stats(world: &mut World) {
         penal_label,
         lagrange_label,
         asteroid_label,
+        pressure_label,
     );
 }
 
@@ -14952,6 +14959,113 @@ fn print_asteroids(world: &mut World) {
             if orbit.is_some() { " [in stable orbit]" } else { "" }
         );
     }
+}
+
+// Spec 402 Ideological Pressure: `pressure [ethic] [strength]` shows
+// or sets the rival neighbor's cultural pressure, `homeethic [ethic]
+// [strength]` shows or sets the colony's home ethic anchor. Drift is
+// slow: home-aligned pops lose stubbornness each tick the rival
+// out-pressures the anchor (Media Stations raise the anchor,
+// CensorBroadcasts halves the rival). Watch STATS pressure=.
+fn handle_pressure_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::ideological_pressure::{
+        ethic_label, parse_ethic, ColonyEthicAnchor, NeighborPressure,
+    };
+    world.init_resource::<ColonyEthicAnchor>();
+    world.init_resource::<NeighborPressure>();
+    if parts.len() > 1 {
+        match parse_ethic(parts[1]) {
+            Some(ethic) => {
+                let strength: f32 = parts
+                    .get(2)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(50.0);
+                let mut neighbor = world.resource_mut::<NeighborPressure>();
+                neighbor.ethic = ethic;
+                neighbor.strength = strength;
+                println!(
+                    "Rival neighbor pressure set: {} at strength {:.0}. Home-aligned pops will drift toward it while it out-pressures the anchor.",
+                    ethic_label(ethic),
+                    strength
+                );
+            }
+            None => {
+                println!(
+                    "Unknown ethic '{}'. Options: pacifist, militarist, collectivist, individualist, freethinker, stateloyalist",
+                    parts[1]
+                );
+                return;
+            }
+        }
+    }
+    print_pressure(world);
+}
+
+fn handle_homeethic_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::ideological_pressure::{
+        ethic_label, parse_ethic, ColonyEthicAnchor, NeighborPressure,
+    };
+    world.init_resource::<ColonyEthicAnchor>();
+    world.init_resource::<NeighborPressure>();
+    if parts.len() > 1 {
+        match parse_ethic(parts[1]) {
+            Some(ethic) => {
+                let strength: f32 = parts
+                    .get(2)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(10.0);
+                let mut anchor = world.resource_mut::<ColonyEthicAnchor>();
+                anchor.ethic = ethic;
+                anchor.strength = strength;
+                println!(
+                    "Home ethic anchor set: {} at strength {:.0}.",
+                    ethic_label(ethic),
+                    strength
+                );
+            }
+            None => {
+                println!(
+                    "Unknown ethic '{}'. Options: pacifist, militarist, collectivist, individualist, freethinker, stateloyalist",
+                    parts[1]
+                );
+                return;
+            }
+        }
+    }
+    print_pressure(world);
+}
+
+fn print_pressure(world: &mut World) {
+    use scale::layer1::social::ideological_pressure::{
+        effective_home_strength, ethic_label, pressure_census, ColonyEthicAnchor,
+        NeighborPressure,
+    };
+    world.init_resource::<ColonyEthicAnchor>();
+    world.init_resource::<NeighborPressure>();
+    let anchor = *world.resource::<ColonyEthicAnchor>();
+    let neighbor = *world.resource::<NeighborPressure>();
+    let census = pressure_census(world);
+    // Media Stations raise the effective anchor (spec 402 §5).
+    let stations = {
+        let mut q = world.query::<&scale::layer1::building::Building>();
+        q.iter(world)
+            .filter(|b| {
+                b.building_type == scale::layer1::building::BuildingType::MediaStation
+            })
+            .count()
+    };
+    println!(
+        "Ideological pressure: home anchor {} (strength {:.0}, effective {:.0} with {} media station(s)) | rival {} (strength {:.0}) | pops {} | home-aligned {} | rival-aligned (dissenting) {}",
+        ethic_label(anchor.ethic),
+        anchor.strength,
+        effective_home_strength(&anchor, stations),
+        stations,
+        ethic_label(neighbor.ethic),
+        neighbor.strength,
+        census.pops,
+        census.home_aligned,
+        census.rival_aligned
+    );
 }
 
 // Spec 400 Lagrange Point Hubs: `lpoint [slot]` spawns an L-point,
