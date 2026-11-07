@@ -108,6 +108,7 @@ pub mod diaspora;
 pub mod sensors;
 pub use diaspora::*;
 pub mod lagrange;
+pub mod asteroid_redirect;
 pub mod piracy;
 pub use piracy::*;
 pub mod fauna;

@@ -22,6 +22,9 @@
 //!   `hub`              - Build a hub station at a free L-point (Spec 400)
 //!   `lpirate`          - Debug: root a pirate base at an empty L-point (Spec 400)
 //!   `lpoints`          - Show Lagrange points / hubs / pirate bases (Spec 400)
+//!   `asteroid [x y vx vy]` - Spawn a redirectable asteroid (Spec 401)
+//!   `redirect <vx> <vy>` - Redirect the first asteroid to a new velocity (Spec 401)
+//!   `asteroids`        - Show asteroids / captures / impacts (Spec 401)
 //!   `dust`            - Show Desire Dust / RoadMind status
 //!   `launch_sat`      - Launch a slogan satellite (Spec 1380)
 //!   `constellation`   - Show Propaganda Constellation status
@@ -549,6 +552,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "hub" => handle_hub_command(world),
         "lpirate" => handle_lpirate_command(world),
         "lpoints" => print_lpoints(world),
+        "asteroid" => handle_asteroid_command(world, &parts),
+        "redirect" => handle_redirect_command(world, &parts),
+        "asteroids" => print_asteroids(world),
         "trade" => handle_trade_command(world, &parts),
         "roomzones" => print_roomzones(world),
         "assignroom" => handle_assignroom_command(world, &parts),
@@ -3519,6 +3525,8 @@ fn print_stats(world: &mut World) {
     let penal_label = scale::layer1::law::penal::penal_stats_label(world);
     // Spec 400: Lagrange hub census for STATS (full panel: `lpoints`).
     let lagrange_label = scale::layer2::lagrange::lagrange_stats_label(world);
+    // Spec 401: asteroid redirect census for STATS (full panel: `asteroids`).
+    let asteroid_label = scale::layer2::asteroid_redirect::asteroid_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3558,7 +3566,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={}",
         tick,
         scenario,
         pops,
@@ -3737,6 +3745,7 @@ fn print_stats(world: &mut World) {
         migration_label,
         penal_label,
         lagrange_label,
+        asteroid_label,
     );
 }
 
@@ -14842,6 +14851,105 @@ fn handle_trade_command(world: &mut World, parts: &[&str]) {
             amount * rate,
             resource_label(buying),
             resource_label(selling),
+        );
+    }
+}
+
+
+// Spec 401 Asteroid Redirect: `asteroid [x y vx vy]` spawns a
+// redirectable rock, `redirect <vx> <vy>` sends the first asteroid
+// to a new velocity (spawning a demo target world / rock first if
+// the map has none), `asteroids` inspects the layer.
+fn handle_asteroid_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::asteroid_redirect::{asteroid_census, spawn_asteroid, Position, Velocity};
+    world.init_resource::<scale::layer2::asteroid_redirect::AsteroidRedirectState>();
+    let parse = |i: usize, default: f32| -> f32 {
+        parts.get(i).and_then(|s| s.parse().ok()).unwrap_or(default)
+    };
+    let pos = Position { x: parse(1, 0.0), y: parse(2, 0.0) };
+    let vel = Velocity { x: parse(3, 1.0), y: parse(4, 0.0) };
+    let entity = spawn_asteroid(world, pos, vel);
+    let census = asteroid_census(world);
+    println!(
+        "Spawned asteroid (entity {}) at ({:.0},{:.0}) moving ({:.1},{:.1}). {} asteroid(s) on the system map.\nRedirect it with `redirect <vx> <vy>` — slow near a planet captures it for mining, fast arms it as a kinetic weapon. Watch STATS asteroids=.",
+        entity.index(),
+        pos.x,
+        pos.y,
+        vel.x,
+        vel.y,
+        census.asteroids
+    );
+}
+
+fn handle_redirect_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use scale::layer2::asteroid_redirect::{
+        asteroid_census, first_asteroid, first_planet, spawn_asteroid, spawn_redirect_planet,
+        Position, RedirectAsteroidEvent, Velocity,
+    };
+    world.init_resource::<scale::layer2::asteroid_redirect::AsteroidRedirectState>();
+    world.init_resource::<scale::layer2::asteroid_redirect::AsteroidDirector>();
+    let parse = |i: usize, default: f32| -> f32 {
+        parts.get(i).and_then(|s| s.parse().ok()).unwrap_or(default)
+    };
+    let new_velocity = Velocity { x: parse(1, 0.0), y: parse(2, 5.0) };
+    if first_planet(world).is_none() {
+        spawn_redirect_planet(world, Position { x: 20.0, y: 20.0 }, 1000.0);
+        println!("No target world on the map — charted one at (20,20) with 1000 health.");
+    }
+    let asteroid = first_asteroid(world).unwrap_or_else(|| {
+        spawn_asteroid(
+            world,
+            Position { x: 20.0, y: 10.0 },
+            Velocity { x: 0.0, y: 0.0 },
+        )
+    });
+    world.init_resource::<Events<RedirectAsteroidEvent>>();
+    world
+        .resource_mut::<Events<RedirectAsteroidEvent>>()
+        .send(RedirectAsteroidEvent { target_asteroid: asteroid, new_velocity });
+    let census = asteroid_census(world);
+    println!(
+        "Tugs and mass drivers are redirecting asteroid (entity {}) to velocity ({:.1},{:.1}).\n{} asteroid(s), {} kinetic, {} captured, {} impact(s) so far. Tick to apply the burn — a failed burn can de-orbit the rock into the planet. Watch STATS asteroids=.",
+        asteroid.index(),
+        new_velocity.x,
+        new_velocity.y,
+        census.asteroids,
+        census.kinetic,
+        census.captured,
+        census.impacts
+    );
+}
+
+fn print_asteroids(world: &mut World) {
+    use scale::layer2::asteroid_redirect::{asteroid_census, Planet, Position, Velocity};
+    use scale::layer2::fleet::InOrbit;
+    world.init_resource::<scale::layer2::asteroid_redirect::AsteroidRedirectState>();
+    let census = asteroid_census(world);
+    println!(
+        "Asteroids: {} | kinetic weapons: {} | captured in stable orbit: {} | redirects applied: {} | impacts: {}",
+        census.asteroids, census.kinetic, census.captured, census.redirects, census.impacts
+    );
+    let mut planets = world.query::<(Entity, &Planet, &Position)>();
+    for (entity, planet, pos) in planets.iter(world) {
+        println!(
+            "  planet entity {} at ({:.0},{:.0}): health {:.0}",
+            entity.index(),
+            pos.x,
+            pos.y,
+            planet.health
+        );
+    }
+    let mut rocks = world.query::<(Entity, &Position, &Velocity, Option<&InOrbit>)>();
+    for (entity, pos, vel, orbit) in rocks.iter(world) {
+        println!(
+            "  asteroid entity {} at ({:.1},{:.1}) velocity ({:.1},{:.1}){}",
+            entity.index(),
+            pos.x,
+            pos.y,
+            vel.x,
+            vel.y,
+            if orbit.is_some() { " [in stable orbit]" } else { "" }
         );
     }
 }
