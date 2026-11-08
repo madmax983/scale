@@ -197,6 +197,7 @@ pub fn update_temperature_system(
     season: Option<Res<SeasonState>>,
     quirks: Option<Res<crate::layer1::quirks::PlanetaryTraits>>,
     cycle: Option<Res<DayNightCycle>>,
+    dysonian: Option<Res<crate::layer2::dysonian::DysonianState>>,
     eclipse: Option<Res<crate::layer2::void_leviathan::LeviathanEclipse>>,
     terrain: Res<TerrainGrid>,
     buildings: Query<(&Building, &GridPosition, Option<&PowerConsumer>)>,
@@ -221,6 +222,15 @@ pub fn update_temperature_system(
             crate::layer1::quirks::GlobalModifiers::from_traits(&traits.0).temperature_offset;
     }
 
+    // Spec 403 Dysonian Swarms: the collector swarm's shadow drops
+    // the ambient baseline. Ambient is recomputed from season each
+    // tick above, so this is absolute, not cumulative; shadow 0.0
+    // (or no state) is an exact no-op.
+    let dyson_shadow = dysonian.as_deref().map_or(0.0, |s| s.shadow_factor);
+    if dyson_shadow > 0.0 {
+        grid.ambient -= crate::layer2::dysonian::TEMPERATURE_DROP_PER_SHADOW * dyson_shadow;
+    }
+
     // 2. Solar Heat (Spec 198)
     // Tuned 2026-10-03 (crisis-balance): Day 0.5 -> 0.15. The old value drove
     // open-air tiles ~11C above ambient at equilibrium, so every summer
@@ -235,6 +245,8 @@ pub fn update_temperature_system(
         0.0
     };
 
+    // Spec 403: insolation scales the solar heat that gets through.
+    let solar_heat = solar_heat * (1.0 - dyson_shadow);
     if solar_heat > 0.0 {
         // Apply solar heat to all tiles
         for value in &mut grid.values {

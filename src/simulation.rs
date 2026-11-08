@@ -155,6 +155,16 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 403 Dysonian Swarms: power into the real EnergyGrid
+    // ledger -> shadow/insolation state -> flare attrition.
+    schedule.add_systems(
+        (
+            crate::layer2::dysonian::calculate_swarm_power_system,
+            crate::layer2::dysonian::apply_swarm_shadow_system,
+            crate::layer2::dysonian::swarm_flare_attrition_system,
+        )
+            .chain(),
+    );
     // Spec 383 Diplomatic Marriage: marry off a high-status / high-skill
     // pop to a foreign faction — the pop departs, the faction allies.
     schedule.add_systems(
@@ -991,6 +1001,8 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer2::trade::merchant_landings::TradeEvent>>();
     // Spec 400 Lagrange Point Hubs: ledger + seed (first-tick pattern).
     world.init_resource::<crate::layer2::lagrange::LagrangeState>();
+    // Spec 403 Dysonian Swarms: ledger + seed (first-tick pattern).
+    world.init_resource::<crate::layer2::dysonian::DysonianState>();
     // Spec 401 Asteroid Redirect: ledger + director + event bus
     // (first-tick pattern — the redirect systems read these on tick one).
     world.init_resource::<crate::layer2::asteroid_redirect::AsteroidRedirectState>();

@@ -558,6 +558,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "redirect" => handle_redirect_command(world, &parts),
         "asteroids" => print_asteroids(world),
         "pressure" => handle_pressure_command(world, &parts),
+        "swarm" => handle_swarm_command(world, &parts),
+        "swarms" => print_swarms(world),
         "homeethic" => handle_homeethic_command(world, &parts),
         "trade" => handle_trade_command(world, &parts),
         "roomzones" => print_roomzones(world),
@@ -3533,6 +3535,8 @@ fn print_stats(world: &mut World) {
     let asteroid_label = scale::layer2::asteroid_redirect::asteroid_stats_label(world);
     // Spec 402: ideological pressure census for STATS (full panel: `pressure`).
     let pressure_label = scale::layer1::social::ideological_pressure::pressure_stats_label(world);
+    // Spec 403: dysonian swarm census for STATS (full panel: `swarms`).
+    let dyson_label = scale::layer2::dysonian::dysonian_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3572,7 +3576,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={}",
         tick,
         scenario,
         pops,
@@ -3753,6 +3757,7 @@ fn print_stats(world: &mut World) {
         lagrange_label,
         asteroid_label,
         pressure_label,
+        dyson_label,
     );
 }
 
@@ -15229,5 +15234,64 @@ fn print_lpoints(world: &mut World) {
     }
     if census.points == 0 {
         println!("No L-points yet — spawn one with `lpoint [L1..L5]`, hold it with `hub`, or abandon it and wait for pirates (first roots after tick 5000).");
+    }
+}
+
+// Spec 403 Dysonian Swarms: `swarm [n]` launches n collectors into
+// close stellar orbit (default batch), `swarms` inspects the layer.
+fn handle_swarm_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::dysonian::{
+        dysonian_census, launch_collectors, DysonianState, DEFAULT_LAUNCH_BATCH,
+    };
+    world.init_resource::<DysonianState>();
+    let count: u32 = parts
+        .get(1)
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(DEFAULT_LAUNCH_BATCH);
+    if count == 0 {
+        println!("Launch count must be at least 1 — try `swarm 50`.");
+        return;
+    }
+    let star = launch_collectors(world, count);
+    // Refresh the ledger + shadow now so the effect is visible at once.
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    schedule.add_systems((
+        scale::layer2::dysonian::calculate_swarm_power_system,
+        scale::layer2::dysonian::apply_swarm_shadow_system,
+    ));
+    schedule.run(world);
+    let census = dysonian_census(world);
+    println!(
+        "Launched {count} solar collector(s) into close stellar orbit (star entity {}). Swarm: {} collector(s) generating {:.0} power — shadow {:.2}, insolation {:.2}.\nEvery collector feeds the global energy ledger, and every hundred collectors dim the sun by a tenth: at 1000 the shadow caps at 0.90 and the colony slides toward an artificial ice age. Watch STATS dyson=.",
+        star.index(),
+        census.collectors,
+        census.power,
+        census.shadow,
+        census.insolation
+    );
+}
+
+fn print_swarms(world: &mut World) {
+    use scale::layer2::dysonian::{dysonian_census, DysonianState, DysonianSwarm, Star};
+    world.init_resource::<DysonianState>();
+    let census = dysonian_census(world);
+    let state = world.resource::<DysonianState>();
+    println!(
+        "Collector swarms: {} star(s) | collectors: {} | global power: {:.0} | shadow: {:.2} | insolation: {:.2} | flare losses: {}",
+        census.stars, census.collectors, census.power, census.shadow, census.insolation,
+        census.flare_losses
+    );
+    let _ = state;
+    let mut q = world.query::<(Entity, &Star, &DysonianSwarm)>();
+    for (entity, star, swarm) in q.iter(world) {
+        println!(
+            "  star entity {} — luminosity {:.0}, {} collector(s) active",
+            entity.index(),
+            star.luminosity,
+            swarm.collectors_active
+        );
+    }
+    if census.stars == 0 {
+        println!("No swarm yet — launch collectors with `swarm [n]` (default 50). Power rises 10 per collector; sunlight falls toward the 0.90 shadow cap at 1000 collectors.");
     }
 }
