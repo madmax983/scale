@@ -136,6 +136,18 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Economy),
     );
 
+    // Spec 405: cybernetic maintenance drains first, then the derived
+    // modifiers sync onto the real seams (separate add_systems — the
+    // tuple above is at the Bevy system-tuple arity limit).
+    schedule.add_systems(
+        (
+            crate::layer1::cybernetics::cybernetic_maintenance_system,
+            crate::layer1::cybernetics::apply_cybernetic_modifiers_system,
+        )
+            .chain()
+            .in_set(Layer1SystemSet::Economy),
+    );
+
     schedule.add_systems(
         (
             restore_rest_in_housing_system,

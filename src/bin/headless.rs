@@ -563,6 +563,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "heater" => handle_heater_command(world, &parts),
         "insulate" => handle_insulate_command(world, &parts),
         "thermals" => print_thermals(world),
+        "implant" => handle_implant_command(world, &parts),
+        "recharge" => handle_recharge_command(world, &parts),
+        "cyber" => print_cyber(world),
         "homeethic" => handle_homeethic_command(world, &parts),
         "trade" => handle_trade_command(world, &parts),
         "roomzones" => print_roomzones(world),
@@ -3542,6 +3545,8 @@ fn print_stats(world: &mut World) {
     let dyson_label = scale::layer2::dysonian::dysonian_stats_label(world);
     // Spec 404: thermal management census for STATS (full panel: `thermals`).
     let thermal_label = scale::layer1::temperature::thermal_stats_label(world);
+    // Spec 405: cybernetic augmentation census for STATS (full panel: `cyber`).
+    let cyber_label = scale::layer1::cybernetics::cyber_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3581,7 +3586,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={}",
         tick,
         scenario,
         pops,
@@ -3764,6 +3769,7 @@ fn print_stats(world: &mut World) {
         pressure_label,
         dyson_label,
         thermal_label,
+        cyber_label,
     );
 }
 
@@ -15309,6 +15315,126 @@ fn handle_insulate_command(world: &mut World, parts: &[&str]) {
         entity.index(),
         value * 100.0
     );
+}
+
+/// Debug: install a Spec 405 cybernetic implant on the first pop.
+///
+/// `implant [motor|neural|armor]` — default motor. Installation goes
+/// through `install_implant`, which registers a real Prosthetic entity
+/// in the pop's Augmentations (the work/affinity seams), records the
+/// loadout, and fits a full maintenance battery.
+fn handle_implant_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::cybernetics::{cybernetic_census, install_implant, ImplantType};
+
+    let kind = parts
+        .get(1)
+        .and_then(|s| ImplantType::parse(s))
+        .unwrap_or(ImplantType::MotorServo);
+    let pop = {
+        let mut q = world.query_filtered::<Entity, With<Pop>>();
+        q.iter(world).next()
+    };
+    let Some(pop) = pop else {
+        println!("No pops to augment.");
+        return;
+    };
+    if install_implant(world, pop, kind) {
+        let census = cybernetic_census(world);
+        println!(
+            "Installed {} on pop #{}. Colony now: {} augmented pop(s), {} implant(s). Watch STATS cyber= — batteries drain 0.1/implant/tick; `recharge` tops them up.",
+            kind.name(),
+            pop.index(),
+            census.augmented,
+            census.implants
+        );
+    } else {
+        println!("Install failed: pop #{} not found.", pop.index());
+    }
+}
+
+/// Debug: recharge the first augmented pop's implant battery (Spec 405).
+///
+/// `recharge [amount]` — default restores the battery to full.
+fn handle_recharge_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::cybernetics::{recharge_implants, CyberneticImplants, CyberneticMaintenance};
+
+    let target = {
+        let mut q = world.query_filtered::<Entity, With<CyberneticImplants>>();
+        q.iter(world).next()
+    };
+    let Some(pop) = target else {
+        println!("No augmented pops to recharge.");
+        return;
+    };
+    let amount = parts
+        .get(1)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(f32::MAX);
+    if recharge_implants(world, pop, amount) {
+        let maint = world.get::<CyberneticMaintenance>(pop).unwrap();
+        println!(
+            "Recharged pop #{}: battery {:.1}/{:.1}.",
+            pop.index(),
+            maint.current_charge,
+            maint.max_charge
+        );
+    } else {
+        println!("Pop #{} has no implant battery.", pop.index());
+    }
+}
+
+/// Show the Spec 405 cybernetic augmentation panel.
+fn print_cyber(world: &mut World) {
+    use scale::layer1::cybernetics::{
+        cybernetic_census, CyberneticImplants, CyberneticMaintenance, CyberneticModifiers,
+    };
+
+    let census = cybernetic_census(world);
+    println!(
+        "Cybernetic augmentation: {} augmented pop(s), {} implant(s), {} dead batter(ies), avg charge {:.0}%",
+        census.augmented,
+        census.implants,
+        census.dead_batteries,
+        census.avg_charge_fraction * 100.0
+    );
+    let mut rows: Vec<String> = Vec::new();
+    let mut q = world.query::<(
+        Entity,
+        &CyberneticImplants,
+        Option<&CyberneticMaintenance>,
+        Option<&CyberneticModifiers>,
+    )>();
+    for (entity, loadout, maint, mods) in q.iter(world) {
+        if loadout.implants.is_empty() {
+            continue;
+        }
+        let names: Vec<&str> = loadout.implants.iter().map(|i| i.name()).collect();
+        let charge = maint.map_or("no battery".to_string(), |m| {
+            format!("{:.1}/{:.1}", m.current_charge, m.max_charge)
+        });
+        let derived = mods.map_or("not synced yet".to_string(), |m| {
+            format!(
+                "work +{:.1}, social -{:.1}, armor {:.2}{}",
+                m.work_bonus,
+                m.social_penalty,
+                m.armor,
+                if m.theseus_active { ", SHIP OF THESEUS" } else { "" }
+            )
+        });
+        rows.push(format!(
+            "  pop #{}: [{}] battery {} | {}",
+            entity.index(),
+            names.join(", "),
+            charge,
+            derived
+        ));
+    }
+    for row in rows {
+        println!("{row}");
+    }
+    if census.augmented == 0 {
+        println!("  (none — `implant motor|neural|armor` fits the first pop)");
+    }
 }
 
 /// List Spec 404 emitters/insulators with live tile temperatures.
