@@ -15,7 +15,7 @@ use crate::layer1::mother_lode::MotherLode;
 use crate::layer1::pop::Pop;
 use crate::layer1::resources::{ResourceItem, ResourceType};
 use crate::layer1::seasons::SeasonState;
-use crate::layer1::terrain::TerrainGrid;
+use crate::layer1::terrain::{TerrainGrid, TerrainType};
 use bevy::utils::HashMap;
 use bevy_ecs::prelude::*;
 
@@ -24,6 +24,151 @@ use bevy_ecs::prelude::*;
 pub struct HeatSource {
     /// Amount of heat produced per tick (Celsius).
     pub output: f32,
+}
+
+/// Spec 404: a standalone thermal emitter — a heater, vent, or cooler
+/// that adds heat to (positive `heat_output`) or removes heat from
+/// (negative) its own tile every tick.
+///
+/// ADAPTATION (spec 404 grounding): the spec sketch assumed no
+/// temperature system existed. Trunk already has [`HeatSource`] and a
+/// full [`TemperatureGrid`]; `ThermalEmitter` is the spec's named,
+/// building-independent seam (any entity with a [`GridPosition`] can
+/// carry one — no `Building` required), applied by
+/// [`update_temperature_system`] alongside `HeatSource`, and standalone
+/// via [`thermal_emission_system`].
+#[derive(Component, Debug, Clone, Default)]
+pub struct ThermalEmitter {
+    /// Heat added per tick (Celsius). Negative values cool.
+    pub heat_output: f32,
+}
+
+/// Spec 404: a standalone thermal insulator on a tile.
+///
+/// `insulation_value` is 0.0 (fully conductive) to 1.0 (perfect
+/// insulator). During diffusion the tile's effective conductivity is
+/// `1.0 - insulation_value`, folded into the same conductivity map the
+/// building system already builds (Walls sit at 0.05) — the diffuse
+/// step's bottleneck (`min`) rule does the rest, so an insulator is an
+/// O(1) hash entry per tile, never a per-neighbor query scan (spec §5).
+#[derive(Component, Debug, Clone, Default)]
+pub struct ThermalInsulator {
+    /// Fraction of heat transfer blocked, 0.0..=1.0 (clamped on use).
+    pub insulation_value: f32,
+}
+
+impl ThermalInsulator {
+    /// Effective thermal conductivity of an insulated tile.
+    #[must_use]
+    pub fn conductivity(&self) -> f32 {
+        1.0 - self.insulation_value.clamp(0.0, 1.0)
+    }
+}
+
+/// Fold one insulator tile into a conductivity map (Spec 404).
+///
+/// The map is keyed by tile and read once per tile per diffuse step, so
+/// this is the spec §5 REFACTOR spatial index: insulators become map
+/// entries instead of an O(N) component scan inside the diffusion
+/// loops. An existing lower conductivity (e.g. a Wall's 0.05) wins —
+/// insulation can only ever reduce transfer, never increase it.
+pub fn merge_insulation_into_conductivity(
+    conductivity: &mut HashMap<(i32, i32), f32>,
+    pos: (i32, i32),
+    insulation_value: f32,
+) {
+    let k = 1.0 - insulation_value.clamp(0.0, 1.0);
+    let entry = conductivity.entry(pos).or_insert(1.0);
+    *entry = entry.min(k);
+}
+
+/// Census of the Spec 404 thermal layer for STATS / headless panels.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ThermalCensus {
+    /// Live [`ThermalEmitter`] entities.
+    pub emitters: usize,
+    /// Live [`ThermalInsulator`] entities.
+    pub insulators: usize,
+    /// Mean tile temperature across the grid (0.0 with no grid).
+    pub avg_temp: f32,
+    /// Hottest tile temperature (ambient with no grid).
+    pub max_temp: f32,
+}
+
+/// Count emitters/insulators and summarize the grid (Spec 404).
+pub fn thermal_census(world: &mut World) -> ThermalCensus {
+    let emitters = world
+        .query::<&ThermalEmitter>()
+        .iter(world)
+        .count();
+    let insulators = world
+        .query::<&ThermalInsulator>()
+        .iter(world)
+        .count();
+    let (avg_temp, max_temp) = world.get_resource::<TemperatureGrid>().map_or(
+        (0.0, 0.0),
+        |grid| {
+            if grid.values.is_empty() {
+                (grid.ambient, grid.ambient)
+            } else {
+                let sum: f32 = grid.values.iter().sum();
+                #[allow(clippy::cast_precision_loss)]
+                let avg = sum / grid.values.len() as f32;
+                let max = grid
+                    .values
+                    .iter()
+                    .copied()
+                    .fold(f32::MIN, f32::max);
+                (avg, max)
+            }
+        },
+    );
+    ThermalCensus {
+        emitters,
+        insulators,
+        avg_temp,
+        max_temp,
+    }
+}
+
+/// Compact STATS label for the thermal layer (Spec 404), mirroring the
+/// `dysonian_stats_label` pattern: `avg<avg>/max<max>/<n>e/<n>i`.
+pub fn thermal_stats_label(world: &mut World) -> String {
+    let census = thermal_census(world);
+    format!(
+        "avg{:.1}/max{:.1}/{}e/{}i",
+        census.avg_temp, census.max_temp, census.emitters, census.insulators
+    )
+}
+
+/// Spawn a bare Spec 404 emitter entity at a tile (headless/debug seam).
+pub fn spawn_thermal_emitter(
+    world: &mut World,
+    x: i32,
+    y: i32,
+    heat_output: f32,
+) -> Entity {
+    world
+        .spawn((
+            GridPosition { x, y },
+            ThermalEmitter { heat_output },
+        ))
+        .id()
+}
+
+/// Spawn a bare Spec 404 insulator entity at a tile (headless/debug seam).
+pub fn spawn_thermal_insulator(
+    world: &mut World,
+    x: i32,
+    y: i32,
+    insulation_value: f32,
+) -> Entity {
+    world
+        .spawn((
+            GridPosition { x, y },
+            ThermalInsulator { insulation_value },
+        ))
+        .id()
 }
 
 /// Grid managing temperature simulation.
@@ -204,6 +349,8 @@ pub fn update_temperature_system(
     heat_sources: Query<(&HeatSource, &GridPosition)>,
     items: Query<(&ResourceItem, &GridPosition)>,
     lodes: Query<(&MotherLode, &GridPosition)>,
+    thermal_emitters: Query<(&ThermalEmitter, &GridPosition)>,
+    thermal_insulators: Query<(&ThermalInsulator, &GridPosition)>,
 ) {
     let Some(mut grid) = grid else { return };
 
@@ -370,6 +517,12 @@ pub fn update_temperature_system(
         grid.add(pos.x, pos.y, source.output);
     }
 
+    // Spec 404: Apply ThermalEmitter Components (positive heats,
+    // negative cools — the cooler half of the spec's acceptance list).
+    for (emitter, pos) in &thermal_emitters {
+        grid.add(pos.x, pos.y, emitter.heat_output);
+    }
+
     // Apply Item Heat Sources
     for (item, pos) in &items {
         let heat = match item.resource_type {
@@ -387,8 +540,75 @@ pub fn update_temperature_system(
         grid.add(pos.x, pos.y, lode.heat_output);
     }
 
+    // Spec 404: fold ThermalInsulator tiles into the conductivity map
+    // built above, so the existing double-buffered diffuse() step sees
+    // them through its bottleneck rule. No insulators -> the map is
+    // exactly what trunk built before this spec (byte-compatible).
+    for (insulator, pos) in &thermal_insulators {
+        merge_insulation_into_conductivity(
+            &mut conductivity_map,
+            (pos.x, pos.y),
+            insulator.insulation_value,
+        );
+    }
+
     // 4. Diffuse (Drift depends on retention)
     grid.diffuse(&conductivity_map, &terrain, &building_retention);
+}
+
+/// Spec 404 standalone emission leg: add every [`ThermalEmitter`]'s
+/// output to its tile.
+///
+/// This is the spec's named system, kept as a composable piece for
+/// isolated schedules/tests. PRODUCTION does not schedule it
+/// separately — [`update_temperature_system`] applies emitters itself
+/// (between the `HeatSource` leg and diffusion), so scheduling both
+/// would double-count every emitter.
+pub fn thermal_emission_system(
+    mut grid: ResMut<TemperatureGrid>,
+    emitters: Query<(&GridPosition, &ThermalEmitter)>,
+) {
+    for (pos, emitter) in emitters.iter() {
+        grid.add(pos.x, pos.y, emitter.heat_output);
+    }
+}
+
+/// Spec 404 standalone diffusion leg: one double-buffered diffusion
+/// step over the existing [`TemperatureGrid`], honoring
+/// [`ThermalInsulator`] tiles.
+///
+/// Delegates to the grid's own `diffuse()` — the same code production
+/// runs inside [`update_temperature_system`] — so conductivity
+/// bottleneck, terrain/building retention, and the ambient drift
+/// (the grid trending back toward ambient, spec §5) are identical,
+/// never a parallel reimplementation. When no `TerrainGrid` resource
+/// exists (the spec's isolated test setup), a flat grass grid stands
+/// in so retention falls back to the terrain defaults.
+pub fn thermal_diffusion_system(
+    mut grid: ResMut<TemperatureGrid>,
+    terrain: Option<Res<TerrainGrid>>,
+    insulators: Query<(&GridPosition, &ThermalInsulator)>,
+) {
+    let mut conductivity_map = HashMap::new();
+    for (pos, insulator) in insulators.iter() {
+        merge_insulation_into_conductivity(
+            &mut conductivity_map,
+            (pos.x, pos.y),
+            insulator.insulation_value,
+        );
+    }
+    let building_retention = HashMap::new();
+    match terrain {
+        Some(terrain) => grid.diffuse(&conductivity_map, &terrain, &building_retention),
+        None => {
+            let flat = TerrainGrid {
+                width: grid.width,
+                height: grid.height,
+                tiles: vec![TerrainType::Grass; grid.width * grid.height],
+            };
+            grid.diffuse(&conductivity_map, &flat, &building_retention);
+        }
+    }
 }
 
 /// Event emitted when a pop takes thermal damage (hypothermia or heatstroke).
@@ -498,7 +718,9 @@ mod tests {
     use crate::layer1::pop::Pop;
     use crate::layer1::seasons::{Season, SeasonState};
     use crate::layer1::temperature::{
-        thermal_damage_system, update_temperature_system, HeatSource, TemperatureGrid,
+        thermal_damage_system, thermal_diffusion_system, thermal_emission_system,
+        update_temperature_system, HeatSource, TemperatureGrid, ThermalEmitter,
+        ThermalInsulator,
     };
     use crate::layer1::terrain::{TerrainGrid, TerrainType};
     use bevy_ecs::prelude::*;
@@ -1282,5 +1504,183 @@ mod tests {
         // The center should be cooler than it would be without the park
         // Assuming without park it's > 21.5, with park it should be < 21.5
         assert!(grid.get(5, 5) < 21.5);
+    }
+
+    // ---- Spec 404 Thermal Management (adapted RED tests) ----
+    // The spec sketch used an App + MapDimensions; trunk's temperature
+    // tests use World + run_system_once and there is no MapDimensions
+    // resource — the tests below keep the spec's three scenarios (plus
+    // cooler / production-integration / ambient-trend coverage) in the
+    // file's real idiom.
+
+    #[test]
+    fn test_thermal_emitter_increases_local_temperature() {
+        let mut world = World::new();
+        world.insert_resource(TemperatureGrid::new(10, 10, 20.0));
+        world.spawn((
+            GridPosition { x: 5, y: 5 },
+            ThermalEmitter { heat_output: 10.0 },
+        ));
+        world.run_system_once(thermal_emission_system).unwrap();
+        let grid = world.resource::<TemperatureGrid>();
+        assert!(
+            grid.get(5, 5) > 20.0,
+            "Heater should raise the local tile temperature"
+        );
+    }
+
+    #[test]
+    fn test_thermal_emitter_cooler_decreases_local_temperature() {
+        let mut world = World::new();
+        world.insert_resource(TemperatureGrid::new(10, 10, 20.0));
+        world.spawn((
+            GridPosition { x: 5, y: 5 },
+            ThermalEmitter { heat_output: -10.0 },
+        ));
+        world.run_system_once(thermal_emission_system).unwrap();
+        let grid = world.resource::<TemperatureGrid>();
+        assert!(
+            grid.get(5, 5) < 20.0,
+            "Cooler (negative output) should lower the local tile temperature"
+        );
+    }
+
+    #[test]
+    fn test_heat_diffuses_to_adjacent_tiles() {
+        // No TerrainGrid inserted on purpose: the spec's isolated setup
+        // has none, and the standalone diffusion leg must still run.
+        let mut world = World::new();
+        let mut grid = TemperatureGrid::new(10, 10, 20.0);
+        grid.set(5, 5, 100.0);
+        world.insert_resource(grid);
+        world
+            .run_system_once(thermal_diffusion_system)
+            .unwrap();
+        let grid = world.resource::<TemperatureGrid>();
+        assert!(grid.get(5, 5) < 100.0, "Center should shed heat");
+        assert!(
+            grid.get(5, 4) > 20.0,
+            "Heat should diffuse to neighbors"
+        );
+    }
+
+    #[test]
+    fn test_insulation_blocks_diffusion() {
+        let mut world = World::new();
+        let mut grid = TemperatureGrid::new(10, 10, 20.0);
+        grid.set(5, 5, 100.0);
+        world.insert_resource(grid);
+        world.spawn((
+            GridPosition { x: 5, y: 4 },
+            ThermalInsulator {
+                insulation_value: 0.9,
+            },
+        ));
+        world
+            .run_system_once(thermal_diffusion_system)
+            .unwrap();
+        let grid = world.resource::<TemperatureGrid>();
+        let insulated_temp = grid.get(5, 4);
+        let open_temp = grid.get(5, 6);
+        assert!(
+            insulated_temp < open_temp,
+            "Insulator should resist temperature changes ({insulated_temp} vs {open_temp})"
+        );
+    }
+
+    #[test]
+    fn test_thermal_emitter_flows_through_production_temperature_system() {
+        // The production seam: update_temperature_system itself must
+        // apply ThermalEmitters (no separate schedule needed).
+        let mut world = World::new();
+        world.insert_resource(TemperatureGrid::new(10, 10, 20.0));
+        world.insert_resource(SeasonState::default());
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Grass; 100],
+        });
+        // SeasonState::default is Spring (15C ambient): the system
+        // recomputes ambient, so start the grid there to isolate the
+        // emitter's contribution.
+        world.resource_mut::<TemperatureGrid>().ambient = 15.0;
+        world.resource_mut::<TemperatureGrid>().values.fill(15.0);
+        world.spawn((
+            GridPosition { x: 5, y: 5 },
+            ThermalEmitter { heat_output: 10.0 },
+        ));
+        world.run_system_once(update_temperature_system).unwrap();
+        let grid = world.resource::<TemperatureGrid>();
+        assert!(
+            grid.get(5, 5) > 15.0,
+            "Production system should apply the emitter, got {}",
+            grid.get(5, 5)
+        );
+    }
+
+    #[test]
+    fn test_thermal_insulator_flows_through_production_temperature_system() {
+        let mut world = World::new();
+        let mut grid = TemperatureGrid::new(10, 10, 20.0);
+        grid.set(5, 5, 100.0);
+        world.insert_resource(grid);
+        world.insert_resource(SeasonState::default());
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Grass; 100],
+        });
+        world.spawn((
+            GridPosition { x: 5, y: 4 },
+            ThermalInsulator {
+                insulation_value: 0.9,
+            },
+        ));
+        world.run_system_once(update_temperature_system).unwrap();
+        let grid = world.resource::<TemperatureGrid>();
+        assert!(
+            grid.get(5, 4) < grid.get(5, 6),
+            "Production diffusion should honor the insulator ({} vs {})",
+            grid.get(5, 4),
+            grid.get(5, 6)
+        );
+    }
+
+    #[test]
+    fn test_thermal_grid_trends_toward_ambient() {
+        // Spec §5 ambient equilibrium: a hot grid with no sources must
+        // cool toward ambient through the diffusion leg's drift.
+        let mut world = World::new();
+        world.insert_resource(TemperatureGrid::new(10, 10, 20.0));
+        {
+            let mut grid = world.resource_mut::<TemperatureGrid>();
+            grid.values.fill(40.0);
+        }
+        for _ in 0..10 {
+            world
+                .run_system_once(thermal_diffusion_system)
+                .unwrap();
+        }
+        let grid = world.resource::<TemperatureGrid>();
+        assert!(
+            grid.get(5, 5) < 40.0 && grid.get(5, 5) > 20.0,
+            "Grid should trend toward ambient without overshooting, got {}",
+            grid.get(5, 5)
+        );
+    }
+
+    #[test]
+    fn test_insulator_conductivity_clamps() {
+        assert!((ThermalInsulator { insulation_value: 0.9 }.conductivity() - 0.1).abs() < 1e-6);
+        assert_eq!(
+            ThermalInsulator { insulation_value: 2.0 }.conductivity(),
+            0.0,
+            "Over-1.0 insulation clamps to a perfect insulator"
+        );
+        assert_eq!(
+            ThermalInsulator { insulation_value: -1.0 }.conductivity(),
+            1.0,
+            "Negative insulation clamps to fully conductive"
+        );
     }
 }

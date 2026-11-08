@@ -560,6 +560,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "pressure" => handle_pressure_command(world, &parts),
         "swarm" => handle_swarm_command(world, &parts),
         "swarms" => print_swarms(world),
+        "heater" => handle_heater_command(world, &parts),
+        "insulate" => handle_insulate_command(world, &parts),
+        "thermals" => print_thermals(world),
         "homeethic" => handle_homeethic_command(world, &parts),
         "trade" => handle_trade_command(world, &parts),
         "roomzones" => print_roomzones(world),
@@ -3537,6 +3540,8 @@ fn print_stats(world: &mut World) {
     let pressure_label = scale::layer1::social::ideological_pressure::pressure_stats_label(world);
     // Spec 403: dysonian swarm census for STATS (full panel: `swarms`).
     let dyson_label = scale::layer2::dysonian::dysonian_stats_label(world);
+    // Spec 404: thermal management census for STATS (full panel: `thermals`).
+    let thermal_label = scale::layer1::temperature::thermal_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3576,7 +3581,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={}",
         tick,
         scenario,
         pops,
@@ -3758,6 +3763,7 @@ fn print_stats(world: &mut World) {
         asteroid_label,
         pressure_label,
         dyson_label,
+        thermal_label,
     );
 }
 
@@ -15239,6 +15245,118 @@ fn print_lpoints(world: &mut World) {
 
 // Spec 403 Dysonian Swarms: `swarm [n]` launches n collectors into
 // close stellar orbit (default batch), `swarms` inspects the layer.
+/// Debug: place a Spec 404 thermal emitter (heater/cooler).
+///
+/// `heater [x] [y] [output]` — output defaults to +10 (negative cools);
+/// coordinates default to the first living pop's tile.
+fn handle_heater_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::temperature::spawn_thermal_emitter;
+
+    let (mut x, mut y) = (40, 25);
+    if let (Some(px), Some(py)) = (parts.get(1), parts.get(2)) {
+        if let (Ok(px), Ok(py)) = (px.parse::<i32>(), py.parse::<i32>()) {
+            x = px;
+            y = py;
+        }
+    } else {
+        let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+        if let Some(pos) = q.iter(world).next() {
+            x = pos.x;
+            y = pos.y;
+        }
+    }
+    let output: f32 = parts
+        .get(3)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(10.0);
+    let entity = spawn_thermal_emitter(world, x, y, output);
+    let temp = world
+        .get_resource::<scale::layer1::temperature::TemperatureGrid>()
+        .map_or(f32::NAN, |g| g.get_safe(x, y));
+    println!(
+        "Thermal emitter #{} placed at ({x}, {y}) with output {output:+.1}/tick (tile now {temp:.1}C). It feeds the real TemperatureGrid through update_temperature_system — watch `thermals` and STATS thermal=.",
+        entity.index()
+    );
+}
+
+/// Debug: place a Spec 404 thermal insulator.
+///
+/// `insulate [x] [y] [value]` — value defaults to 0.9 (blocks 90%).
+fn handle_insulate_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::temperature::spawn_thermal_insulator;
+
+    let (mut x, mut y) = (40, 25);
+    if let (Some(px), Some(py)) = (parts.get(1), parts.get(2)) {
+        if let (Ok(px), Ok(py)) = (px.parse::<i32>(), py.parse::<i32>()) {
+            x = px;
+            y = py;
+        }
+    } else {
+        let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+        if let Some(pos) = q.iter(world).next() {
+            x = pos.x;
+            y = pos.y;
+        }
+    }
+    let value: f32 = parts
+        .get(3)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(0.9)
+        .clamp(0.0, 1.0);
+    let entity = spawn_thermal_insulator(world, x, y, value);
+    println!(
+        "Thermal insulator #{} placed at ({x}, {y}) blocking {:.0}% of heat transfer. Diffusion through this tile slows by that fraction — compare its temperature against an open neighbor with `thermals`.",
+        entity.index(),
+        value * 100.0
+    );
+}
+
+/// List Spec 404 emitters/insulators with live tile temperatures.
+fn print_thermals(world: &mut World) {
+    use scale::layer1::temperature::{
+        thermal_census, ThermalEmitter, ThermalInsulator,
+    };
+
+    let census = thermal_census(world);
+    println!(
+        "Thermal layer: {} emitter(s), {} insulator(s) | grid avg {:.1}C, max {:.1}C",
+        census.emitters, census.insulators, census.avg_temp, census.max_temp
+    );
+    let grid_temps: Vec<(i32, i32, f32, String)> = {
+        let mut rows = Vec::new();
+        let mut q = world.query::<(&GridPosition, &ThermalEmitter)>();
+        for (pos, e) in q.iter(world) {
+            rows.push((pos.x, pos.y, e.heat_output, "emitter".to_string()));
+        }
+        let mut q2 = world.query::<(&GridPosition, &ThermalInsulator)>();
+        for (pos, i) in q2.iter(world) {
+            rows.push((pos.x, pos.y, i.insulation_value, "insulator".to_string()));
+        }
+        rows
+    };
+    for (x, y, value, kind) in &grid_temps {
+        let temp = world
+            .get_resource::<scale::layer1::temperature::TemperatureGrid>()
+            .map_or(f32::NAN, |g| g.get_safe(*x, *y));
+        if kind == "emitter" {
+            println!("  emitter at ({x}, {y}) — output {value:+.1}/tick, tile {temp:.1}C");
+        } else {
+            let hottest_neighbor = world
+                .get_resource::<scale::layer1::temperature::TemperatureGrid>()
+                .map_or(f32::NAN, |g| {
+                    [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                        .iter()
+                        .map(|(dx, dy)| g.get_safe(x + dx, y + dy))
+                        .fold(f32::MIN, f32::max)
+                });
+            println!("  insulator at ({x}, {y}) — blocks {:.0}%, tile {temp:.1}C (hottest neighbor {hottest_neighbor:.1}C)", value * 100.0);
+        }
+    }
+    if grid_temps.is_empty() {
+        println!("No thermal devices placed. Use `heater [x] [y] [output]` or `insulate [x] [y] [value]`.");
+    }
+}
+
 fn handle_swarm_command(world: &mut World, parts: &[&str]) {
     use scale::layer2::dysonian::{
         dysonian_census, launch_collectors, DysonianState, DEFAULT_LAUNCH_BATCH,
