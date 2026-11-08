@@ -972,7 +972,7 @@ fn parse_designation_type(name: &str) -> Option<DesignationType> {
 fn parse_zone_type(name: &str) -> Option<crate::layer1::zone::ZoneType> {
     use crate::layer1::zone::ZoneType::{
         Bedroom, Customs, Dezoned, Dining, Extraterritorial, Hospital, Jail, None as ZoneNone,
-        Office, Pasture, Penal, Sanctuary, Storage,
+        Office, Pasture, Penal, Quarantine, Sanctuary, Storage,
     };
     Some(match name {
         "None" => ZoneNone,
@@ -988,6 +988,7 @@ fn parse_zone_type(name: &str) -> Option<crate::layer1::zone::ZoneType> {
         "Extraterritorial" => Extraterritorial,
         "Customs" => Customs,
         "Dezoned" => Dezoned,
+        "Quarantine" => Quarantine,
         _ => return None,
     })
 }

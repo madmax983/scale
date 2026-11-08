@@ -184,6 +184,7 @@ pub const fn zone_type_label(zone_type: ZoneType) -> &'static str {
         ZoneType::Extraterritorial => "embassy suite",
         ZoneType::Customs => "customs room",
         ZoneType::Dezoned => "dezoned room",
+        ZoneType::Quarantine => "quarantine ward",
         ZoneType::None => "room",
     }
 }

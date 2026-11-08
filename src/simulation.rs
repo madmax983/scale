@@ -618,6 +618,16 @@ pub fn build_simulation_schedule() -> Schedule {
     // Spec 270 The Organ Market: Biomass Extractor harvests organs from
     // corpses; organs sell for credits or cure critical injuries; harvests
     // spread colony-wide horror through the morale system.
+    // Spec 406 Quarantine Protocols: designation stress spike, door
+    // lockdown/restore on the real access seams, breach tagging.
+    schedule.add_systems(
+        (
+            crate::layer1::quarantine::quarantine_designation_system,
+            crate::layer1::quarantine::enforce_quarantine_locks_system,
+            crate::layer1::quarantine::quarantine_breach_system,
+        )
+            .chain(),
+    );
     schedule.add_systems(
         (
             crate::layer1::economy::organ_market::process_corpse_harvest_system,
@@ -645,6 +655,9 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 1384 EVA suits: status snapshot + scenario issue floor
     // (init only — never clobber a scenario-granted value).
     world.init_resource::<crate::layer1::eva_suit::ColonySuitStatus>();
+    // Spec 406 Quarantine Protocols: designation/breach ledger
+    // (first-tick pattern — the designation system reads it tick one).
+    world.init_resource::<crate::layer1::quarantine::QuarantineState>();
     world.init_resource::<crate::layer1::eva_suit::ScenarioSuitFloor>();
     // Spec 1387 The Grind: epoch wallet median, chronicle state, and the
     // dwell-filtered simmering display (first-tick pattern — the accrual

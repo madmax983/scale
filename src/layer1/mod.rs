@@ -125,6 +125,8 @@ pub mod anomalies;
 pub mod notifications;
 /// Pathfinding algorithms.
 pub mod pathfinding;
+/// Quarantine protocols (Spec 406).
+pub mod quarantine;
 /// Seasonal rhythms (Spring, Summer, Autumn, Winter).
 mod shift_integration_tests;
 /// Social needs and tavern.

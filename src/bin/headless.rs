@@ -566,6 +566,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "implant" => handle_implant_command(world, &parts),
         "recharge" => handle_recharge_command(world, &parts),
         "cyber" => print_cyber(world),
+        "quarantine" => handle_quarantine_command(world, &parts),
+        "quarantines" => print_quarantines(world),
         "homeethic" => handle_homeethic_command(world, &parts),
         "trade" => handle_trade_command(world, &parts),
         "roomzones" => print_roomzones(world),
@@ -3547,6 +3549,8 @@ fn print_stats(world: &mut World) {
     let thermal_label = scale::layer1::temperature::thermal_stats_label(world);
     // Spec 405: cybernetic augmentation census for STATS (full panel: `cyber`).
     let cyber_label = scale::layer1::cybernetics::cyber_stats_label(world);
+    // Spec 406: quarantine census for STATS (full panel: `quarantines`).
+    let quarantine_label = scale::layer1::quarantine::quarantine_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3586,7 +3590,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={}",
         tick,
         scenario,
         pops,
@@ -3770,6 +3774,7 @@ fn print_stats(world: &mut World) {
         dyson_label,
         thermal_label,
         cyber_label,
+        quarantine_label,
     );
 }
 
@@ -15538,4 +15543,57 @@ fn print_swarms(world: &mut World) {
     if census.stars == 0 {
         println!("No swarm yet — launch collectors with `swarm [n]` (default 50). Power rises 10 per collector; sunlight falls toward the 0.90 shadow cap at 1000 collectors.");
     }
+}
+
+/// Spec 406: designate or lift a quarantine zone (headless-first).
+/// `quarantine <x> <y> [w] [h]` seals a rectangle (default 3x3);
+/// `quarantine lift <x> <y> [w] [h]` clears it. Lockdown, the stress
+/// spike, and breach tagging run in the simulation schedule.
+fn handle_quarantine_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::quarantine::{designate_quarantine, lift_quarantine, quarantine_census};
+    let (lift, args): (bool, &[&str]) = if parts.get(1) == Some(&"lift") {
+        (true, &parts[2..])
+    } else {
+        (false, &parts[1..])
+    };
+    if args.len() < 2 {
+        println!("Usage: quarantine [lift] <x> <y> [w] [h]");
+        return;
+    }
+    let parse = |i: usize, d: i32| args.get(i).and_then(|s| s.parse::<i32>().ok()).unwrap_or(d);
+    let (x, y) = (parse(0, 0), parse(1, 0));
+    let (w, h) = (parse(2, 3), parse(3, 3));
+    let changed = {
+        let Some(mut zg) = world.get_resource_mut::<scale::layer1::zone::ZoneGrid>() else {
+            println!("No zone grid in this world.");
+            return;
+        };
+        if lift {
+            lift_quarantine(&mut zg, x, y, w, h)
+        } else {
+            designate_quarantine(&mut zg, x, y, w, h)
+        }
+    };
+    let c = quarantine_census(world);
+    if lift {
+        println!(
+            "Lifted quarantine over {} tile(s) at ({},{}); sealed doors restore on the next tick. Colony now: {} quarantined tile(s), {} sealed door(s), {} breach(es).",
+            changed, x, y, c.tiles, c.locked, c.breaches
+        );
+    } else {
+        println!(
+            "Sealed {} tile(s) at ({},{}) as quarantine; doors inside lock and the stress spike fires on the next tick. Colony now: {} quarantined tile(s).",
+            changed, x, y, c.tiles
+        );
+    }
+}
+
+/// Spec 406: show the quarantine panel.
+fn print_quarantines(world: &mut World) {
+    use scale::layer1::quarantine::quarantine_census;
+    let c = quarantine_census(world);
+    println!(
+        "Quarantine: {} tile(s) sealed, {} door(s) locked down, {} designation(s), {} breach(es). Designate with `quarantine <x> <y> [w] [h]`, lift with `quarantine lift <x> <y> [w] [h]`.",
+        c.tiles, c.locked, c.designations, c.breaches
+    );
 }

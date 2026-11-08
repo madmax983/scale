@@ -123,6 +123,7 @@ pub struct MovementContext<'w, 's> {
     tide: Option<Res<'w, crate::layer1::atmosphere::AtmosphericTide>>,
     clutter_grid: Option<Res<'w, crate::layer1::clutter::ClutterGrid>>,
     season: Option<Res<'w, crate::layer1::seasons::SeasonState>>,
+    zone_grid: Option<Res<'w, crate::layer1::zone::ZoneGrid>>,
     quirks: Option<Res<'w, crate::layer1::quirks::PlanetaryTraits>>,
     buildings: Query<
         'w,
@@ -327,6 +328,18 @@ fn process_single_movement(
             let steps: VecDeque<GridPosition> = path.into();
             chosen_pos = steps.front().copied();
             planned_detour = Some(steps);
+        }
+    }
+
+    // Spec 406: a greedy/detour step may not cross a quarantine
+    // boundary edge, even in open field with no door to lock.
+    if let (Some(zg), Some(cp)) = (ctx.zone_grid.as_deref(), chosen_pos) {
+        if crate::layer1::quarantine::is_quarantine_edge_blocked(
+            zg,
+            (current_pos.x, current_pos.y),
+            (cp.x, cp.y),
+        ) {
+            return;
         }
     }
 

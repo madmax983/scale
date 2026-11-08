@@ -204,6 +204,8 @@ fn find_path_internal(
     let crowding = world.get_resource::<crate::layer1::crowding::CrowdingGrid>();
     let clutter = world.get_resource::<crate::layer1::clutter::ClutterGrid>();
     let wind_grid = world.get_resource::<WindGrid>();
+    // Spec 406: quarantine edge severance on the real ZoneGrid.
+    let zone_grid = world.get_resource::<crate::layer1::zone::ZoneGrid>();
 
     #[cfg(feature = "nova")]
     let ghost_grid = world.get_resource::<crate::experimental::ghost_grid::GhostGrid>();
@@ -302,6 +304,14 @@ fn find_path_internal(
             let Some(next_idx) = get_idx(next) else {
                 continue;
             };
+
+            // Spec 406: sever quarantine boundary edges (inside<->outside)
+            // while leaving inside->inside / outside->outside edges open.
+            if let Some(zg) = zone_grid {
+                if crate::layer1::quarantine::is_quarantine_edge_blocked(zg, pos, next) {
+                    continue;
+                }
+            }
 
             // Check if walkable
             if !is_walkable(

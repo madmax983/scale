@@ -40,6 +40,9 @@ pub enum ZoneType {
     Customs,
     /// Redlined zone where pops become Stateless.
     Dezoned,
+    /// Quarantine zone sealed by Spec 406 protocols: pathfinding
+    /// edges across its boundary are severed and doors inside lock.
+    Quarantine,
 }
 
 /// Resource storing the grid of zones.
