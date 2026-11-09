@@ -244,6 +244,7 @@ pub fn can_designate(world: &World, x: i32, y: i32, designation_type: Designatio
                 return true;
             }
             has_component_at::<ImpactSite>(world, x, y)
+                || has_component_at::<crate::layer1::shipbreaking::HullTile>(world, x, y)
         }
         DesignationType::Demolish => {
             let occupied = world.resource::<OccupiedTiles>();
@@ -522,6 +523,12 @@ pub fn try_designate_area(
         .collect();
 
     let valid_targets = get_valid_targets_for_tool(world, tool);
+    // Spec 409: hull tiles are Mine targets in area designation too.
+    let hull_targets: HashSet<(i32, i32)> = world
+        .query::<(&GridPosition, &crate::layer1::shipbreaking::HullTile)>()
+        .iter(world)
+        .map(|(pos, _)| (pos.x, pos.y))
+        .collect();
     let mut to_spawn = Vec::new();
 
     {
@@ -547,8 +554,11 @@ pub fn try_designate_area(
 
                 #[allow(clippy::cast_sign_loss)]
                 let is_valid = match tool {
-                    DesignationType::Mine => terrain_grid
-                        .is_some_and(|g| g.get(x as usize, y as usize) == Some(TerrainType::Rock)),
+                    DesignationType::Mine => {
+                        terrain_grid.is_some_and(|g| {
+                            g.get(x as usize, y as usize) == Some(TerrainType::Rock)
+                        }) || hull_targets.contains(&(x, y))
+                    }
                     DesignationType::Demolish => {
                         occupied_tiles.is_some_and(|o| o.0.contains(&(x, y)))
                     }
@@ -711,6 +721,28 @@ mod tests {
 
         // Cannot mine Grass
         assert!(!can_designate(&world, 5, 5, DesignationType::Mine));
+    }
+
+    #[test]
+    fn test_can_designate_mine_on_hull_tile() {
+        // Spec 409: a crashed ship's hull is a Mine designation target
+        // even though its terrain is ordinary ground.
+        let mut world = World::new();
+        world.insert_resource(TerrainGrid {
+            width: 10,
+            height: 10,
+            tiles: vec![TerrainType::Grass; 100],
+        });
+        world.insert_resource(OccupiedTiles::default());
+        world.spawn((
+            crate::layer1::shipbreaking::HullTile,
+            GridPosition { x: 5, y: 5 },
+        ));
+        assert!(can_designate(&world, 5, 5, DesignationType::Mine));
+        assert!(!can_designate(&world, 5, 6, DesignationType::Mine));
+        // Area designation picks up exactly the hull tile.
+        let count = try_designate_area(&mut world, 0, 0, 9, 9, DesignationType::Mine);
+        assert_eq!(count, 1);
     }
 
     #[test]

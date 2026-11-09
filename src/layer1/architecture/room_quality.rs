@@ -102,9 +102,13 @@ fn is_boundary_enclosed(
         })
     });
 
+    // Spec 409: a crashed ship's hull ring encloses a room exactly
+    // like a built wall — pops can live inside the wreck.
+    let is_hull = crate::layer1::shipbreaking::is_hull_tile(world, nx, ny);
+
     let is_walkable = terrain.get(ux, uy).is_some_and(TerrainType::is_walkable);
 
-    is_rock || is_wall || !is_walkable
+    is_rock || is_wall || is_hull || !is_walkable
 }
 
 pub fn calculate_room_quality(world: &mut World, pos: GridPosition) -> f32 {
@@ -378,6 +382,29 @@ mod tests {
         assert!(
             quality >= 1.5,
             "Quality {} should include enclosure bonus",
+            quality
+        );
+    }
+
+    #[test]
+    fn test_hull_enclosure_bonus() {
+        // Spec 409: a room ringed by crashed-ship hull (no built walls)
+        // counts as enclosed, exactly like a wall ring.
+        let mut world = setup_world();
+        {
+            let mut zones = world.resource_mut::<ZoneGrid>();
+            zones.set(1, 1, ZoneType::Bedroom);
+        }
+        for (nx, ny) in [(1, 0), (0, 1), (2, 1), (1, 2)] {
+            world.spawn((
+                crate::layer1::shipbreaking::HullTile,
+                GridPosition { x: nx, y: ny },
+            ));
+        }
+        let quality = calculate_room_quality(&mut world, GridPosition { x: 1, y: 1 });
+        assert!(
+            quality >= 1.5,
+            "Quality {} should include hull enclosure bonus",
             quality
         );
     }

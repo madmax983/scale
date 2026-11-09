@@ -571,6 +571,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "quarantine" => handle_quarantine_command(world, &parts),
         "quarantines" => print_quarantines(world),
         "tourism" => handle_tourism_command(world, &parts),
+        "crash" => handle_crash_command(world, &parts),
+        "shipbreak" => handle_shipbreak_command(world, &parts),
+        "hull" => print_shipbreaking(world),
         "tourists" => print_tourists(world),
         "homeethic" => handle_homeethic_command(world, &parts),
         "trade" => handle_trade_command(world, &parts),
@@ -3559,6 +3562,8 @@ fn print_stats(world: &mut World) {
     let rings_label = scale::layer2::planetary_rings::rings_stats_label(world);
     // Spec 408: galactic-tourism census for STATS (full panel: `tourists`).
     let tourists_label = scale::layer1::tourism::tourism_stats_label(world);
+    // Spec 409: shipbreaking census for STATS (full panel: `hull`).
+    let shipbreak_label = scale::layer1::shipbreaking::hull_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3598,7 +3603,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={}",
         tick,
         scenario,
         pops,
@@ -3785,6 +3790,7 @@ fn print_stats(world: &mut World) {
         quarantine_label,
         rings_label,
         tourists_label,
+        shipbreak_label,
     );
 }
 
@@ -15708,6 +15714,87 @@ fn print_tourists(world: &mut World) {
         "TOURISTS present={} pending={} reputation={:.2} boom={} policy={} credits_earned={:.0} arrived={} departed={} departed_early={} denied_meals={} disease_imports={}",
         c.present, c.pending, c.reputation, boom, policy, c.credits_earned, arrived, departed,
         c.departed_early, denied, c.disease_imports
+    );
+}
+
+/// Spec 409: spawn a crashed ship (headless-first).
+/// `crash <x> <y> [cruiser|freighter]` queues the crash for the
+/// shipbreaking spawn system, which runs next tick.
+fn handle_crash_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::map::GridPosition;
+    use scale::layer1::shipbreaking::{ShipType, SpawnCrashedShipEvent};
+    let x: i32 = parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(20);
+    let y: i32 = parts.get(2).and_then(|v| v.parse().ok()).unwrap_or(20);
+    let ship_type = match parts.get(3).copied() {
+        Some("freighter") => ShipType::Freighter,
+        _ => ShipType::Cruiser,
+    };
+    if let Some(mut events) =
+        world.get_resource_mut::<bevy_ecs::event::Events<SpawnCrashedShipEvent>>()
+    {
+        events.send(SpawnCrashedShipEvent {
+            location: GridPosition { x, y },
+            ship_type,
+        });
+        println!(
+            "Queued a crashed {} at ({}, {}). It lands next tick.",
+            ship_type.name(),
+            x,
+            y
+        );
+    } else {
+        println!("Shipbreaking events are not initialized in this world.");
+    }
+}
+
+/// Spec 409: mine one hull tile with a synthetic qualified breaker.
+/// `shipbreak <x> <y>` sends ten qualified MineEvents at the tile
+/// (a full break at HULL_MINE_DAMAGE per hit); the real gate is the
+/// tool tier — see `hull` for the standing census.
+fn handle_shipbreak_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::map::GridPosition;
+    use scale::layer1::shipbreaking::{MineEvent, Miner};
+    let x: i32 = parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+    let y: i32 = parts.get(2).and_then(|v| v.parse().ok()).unwrap_or(0);
+    let target = {
+        let mut q = world.query::<(
+            bevy_ecs::entity::Entity,
+            &GridPosition,
+            &scale::layer1::shipbreaking::HullTile,
+        )>();
+        q.iter(world)
+            .find(|(_, p, _)| p.x == x && p.y == y)
+            .map(|(e, _, _)| e)
+    };
+    let Some(target) = target else {
+        println!("No hull tile at ({}, {}).", x, y);
+        return;
+    };
+    let breaker = world.spawn(Miner { tool_tier: 3 }).id();
+    if let Some(mut events) = world.get_resource_mut::<bevy_ecs::event::Events<MineEvent>>() {
+        for _ in 0..10 {
+            events.send(MineEvent {
+                miner: breaker,
+                target,
+            });
+        }
+        println!(
+            "Shipbreaking crew set to work on the hull at ({}, {}). Yields land next tick.",
+            x, y
+        );
+    }
+    // The breaker entity must stay alive until mine_system consumes
+    // the events next tick, so it is deliberately left in the world
+    // (a one-entity debug crew per `shipbreak` command).
+}
+
+/// Spec 409: show the shipbreaking panel.
+fn print_shipbreaking(world: &mut World) {
+    use scale::layer1::shipbreaking::hull_census;
+    let c = hull_census(world);
+    println!(
+        "HULL tiles={} health={} — mine with a tier-3 breaker (pickaxe + Mining level 2+), build inside the ring, or keep it as shelter. Commands: `crash <x> <y> [cruiser|freighter]`, `shipbreak <x> <y>`.",
+        c.tiles, c.health
     );
 }
 
