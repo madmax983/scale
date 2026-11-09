@@ -644,6 +644,16 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 410 The Inspector: dignitary tours, observes, files report.
+    schedule.add_systems(
+        (
+            crate::layer1::inspector::spawn_dignitary_system,
+            crate::layer1::inspector::inspector_tour_system,
+            crate::layer1::inspector::inspector_mood_system,
+            crate::layer1::inspector::process_inspector_departure_system,
+        )
+            .chain(),
+    );
     schedule.add_systems(
         (
             crate::layer1::quarantine::quarantine_designation_system,
@@ -686,6 +696,11 @@ fn init_simulation_resources(world: &mut World) {
     // (first-tick pattern).
     world.init_resource::<crate::layer1::tourism::TourismState>();
     world.init_resource::<Events<crate::layer1::tourism::TouristArrivalEvent>>();
+    // Spec 410 The Inspector: ledger + spawn/depart event buses
+    // (first-tick pattern).
+    world.init_resource::<crate::layer1::inspector::InspectionState>();
+    world.init_resource::<Events<crate::layer1::inspector::SpawnInspectorEvent>>();
+    world.init_resource::<Events<crate::layer1::inspector::InspectorDepartEvent>>();
     world.init_resource::<crate::layer1::eva_suit::ScenarioSuitFloor>();
     // Spec 1387 The Grind: epoch wallet median, chronicle state, and the
     // dwell-filtered simmering display (first-tick pattern — the accrual

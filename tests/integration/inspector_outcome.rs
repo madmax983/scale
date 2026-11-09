@@ -41,6 +41,7 @@ fn inspector_outcome_affects_colony() {
             beauty_score: 30.0,
             samples_taken: 5,
             next_sample_tick: 0,
+            ..Default::default()
         },
         Visitor {
             state: VisitorState::Departing,

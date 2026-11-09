@@ -529,6 +529,12 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<crate::layer1::ancestral_graves::SacrilegeEvent>>();
     world.init_resource::<Events<crate::layer1::resources::MiningEvent>>();
     world.init_resource::<Events<crate::layer1::shipbreaking::SpawnCrashedShipEvent>>();
+    // Spec 410 The Inspector: ledger + event buses must exist before
+    // the first tick so headless spawn/report commands work pre-tick
+    // (same pattern as shipbreaking above; also init in simulation.rs).
+    world.init_resource::<crate::layer1::inspector::InspectionState>();
+    world.init_resource::<Events<crate::layer1::inspector::SpawnInspectorEvent>>();
+    world.init_resource::<Events<crate::layer1::inspector::InspectorDepartEvent>>();
     world.init_resource::<Events<crate::layer1::social::factions::subcontractor_factions::LeaseZoneEvent>>();
     world.init_resource::<Events<crate::layer1::social::factions::subcontractor_factions::MegacorpSecuritySweepEvent>>();
     world.init_resource::<Events<crate::layer1::shipbreaking::MineEvent>>();

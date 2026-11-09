@@ -571,6 +571,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "quarantine" => handle_quarantine_command(world, &parts),
         "quarantines" => print_quarantines(world),
         "tourism" => handle_tourism_command(world, &parts),
+        "inspector" => handle_inspector_command(world, &parts),
+        "inspect" => print_inspector(world),
+        "report" => file_inspector_report(world),
         "crash" => handle_crash_command(world, &parts),
         "shipbreak" => handle_shipbreak_command(world, &parts),
         "hull" => print_shipbreaking(world),
@@ -3564,6 +3567,8 @@ fn print_stats(world: &mut World) {
     let tourists_label = scale::layer1::tourism::tourism_stats_label(world);
     // Spec 409: shipbreaking census for STATS (full panel: `hull`).
     let shipbreak_label = scale::layer1::shipbreaking::hull_stats_label(world);
+    // Spec 410: inspector census for STATS (full panel: `inspector`).
+    let inspector_label = scale::layer1::inspector::inspector_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3603,7 +3608,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={}",
         tick,
         scenario,
         pops,
@@ -3791,6 +3796,7 @@ fn print_stats(world: &mut World) {
         rings_label,
         tourists_label,
         shipbreak_label,
+        inspector_label,
     );
 }
 
@@ -15805,4 +15811,118 @@ fn print_quarantines(world: &mut World) {
         "Quarantine: {} tile(s) sealed, {} door(s) locked down, {} designation(s), {} breach(es). Designate with `quarantine <x> <y> [w] [h]`, lift with `quarantine lift <x> <y> [w] [h]`.",
         c.tiles, c.locked, c.designations, c.breaches
     );
+}
+
+/// Spec 410: inspector visit control (headless-first).
+/// `inspector` shows the panel; `inspector spawn [inspector|ambassador|auditor]
+/// [open|restricted]` queues a dignitary landing next tick;
+/// `inspector depart` / `inspector report` files the exit report now.
+fn handle_inspector_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::inspector::{
+        InspectorTitle, SpawnInspectorEvent, TourAccess, INSPECTOR_FACTION_ID,
+    };
+    match parts.get(1).copied() {
+        Some("spawn") => {
+            let title = parts
+                .get(2)
+                .and_then(|w| InspectorTitle::parse(w))
+                .unwrap_or_default();
+            let access = match parts.get(3).copied() {
+                Some("restricted") => TourAccess::Restricted,
+                _ => TourAccess::Open,
+            };
+            if let Some(mut events) =
+                world.get_resource_mut::<bevy_ecs::event::Events<SpawnInspectorEvent>>()
+            {
+                events.send(SpawnInspectorEvent {
+                    faction_id: INSPECTOR_FACTION_ID,
+                    title,
+                    access,
+                });
+                println!(
+                    "A visiting {} has been dispatched ({} tour). They land next tick.",
+                    title.name(),
+                    if access == TourAccess::Restricted {
+                        "restricted"
+                    } else {
+                        "open"
+                    }
+                );
+            } else {
+                println!("Inspector events are not initialized in this world.");
+            }
+        }
+        Some("depart") | Some("report") => file_inspector_report(world),
+        _ => print_inspector(world),
+    }
+}
+
+/// Spec 410: force the present dignitary to depart and file the report.
+fn file_inspector_report(world: &mut World) {
+    use scale::layer1::inspector::{Inspector, InspectorDepartEvent};
+    let target = {
+        let mut q = world.query::<(bevy_ecs::entity::Entity, &Inspector)>();
+        q.iter(world).next().map(|(e, _)| e)
+    };
+    let Some(entity) = target else {
+        println!("No dignitary is currently visiting.");
+        return;
+    };
+    if let Some(mut events) =
+        world.get_resource_mut::<bevy_ecs::event::Events<InspectorDepartEvent>>()
+    {
+        events.send(InspectorDepartEvent { entity });
+        println!("The dignitary will file their exit report next tick. See `inspector` for the outcome.");
+    } else {
+        println!("Inspector events are not initialized in this world.");
+    }
+}
+
+/// Spec 410: show the inspector panel (also the `inspect` command).
+fn print_inspector(world: &mut World) {
+    use scale::layer1::inspector::{inspector_census, InspectionState, Inspector};
+    let c = inspector_census(world);
+    let detail = {
+        let mut q = world.query::<&Inspector>();
+        q.iter(world).next().map(|ins| {
+            format!(
+                " stops={}/{} report_so_far=[{}]",
+                ins.tour_index,
+                ins.tour_targets.len(),
+                ins.report.summary()
+            )
+        })
+    };
+    let last = world
+        .get_resource::<InspectionState>()
+        .map_or(String::new(), |s| {
+            if s.reports_filed > 0 {
+                format!(
+                    " last_report=[{}] last_mood={:.0} last_delta={:+} funding_granted={:.0}",
+                    s.last_report,
+                    s.last_mood.unwrap_or(0.0),
+                    s.last_delta,
+                    s.funding_granted
+                )
+            } else {
+                String::new()
+            }
+        });
+    match (c.title, c.mood) {
+        (Some(title), Some(mood)) => println!(
+            "INSPECTOR present=1 title={} mood={:.0} verdict_if_departed={} reports={} glowing={} damning={}{}{}",
+            title.name(),
+            mood,
+            scale::layer1::inspector::verdict_for_mood(mood).name(),
+            c.reports,
+            c.glowing,
+            c.damning,
+            detail.unwrap_or_default(),
+            last
+        ),
+        _ => println!(
+            "INSPECTOR present=0 reports={} glowing={} damning={}{}",
+            c.reports, c.glowing, c.damning, last
+        ),
+    }
 }
