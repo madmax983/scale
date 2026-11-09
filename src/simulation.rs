@@ -165,6 +165,18 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 407 Planetary Rings: shadow ledger first (the real
+    // temperature system reads it), then annulus attrition for both
+    // fleet-position legs, then the ring mining bonus.
+    schedule.add_systems(
+        (
+            crate::layer2::planetary_rings::update_ring_shadow_state_system,
+            crate::layer2::planetary_rings::ring_attrition_system,
+            crate::layer2::planetary_rings::apply_planetary_ring_effects_system,
+            crate::layer2::planetary_rings::ring_mining_system,
+        )
+            .chain(),
+    );
     // Spec 383 Diplomatic Marriage: marry off a high-status / high-skill
     // pop to a foreign faction — the pop departs, the faction allies.
     schedule.add_systems(
@@ -1016,6 +1028,9 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer2::lagrange::LagrangeState>();
     // Spec 403 Dysonian Swarms: ledger + seed (first-tick pattern).
     world.init_resource::<crate::layer2::dysonian::DysonianState>();
+    // Spec 407 Planetary Rings: shadow ledger (first-tick pattern —
+    // the temperature system and the shadow-state system read it).
+    world.init_resource::<crate::layer2::planetary_rings::PlanetaryRingState>();
     // Spec 401 Asteroid Redirect: ledger + director + event bus
     // (first-tick pattern — the redirect systems read these on tick one).
     world.init_resource::<crate::layer2::asteroid_redirect::AsteroidRedirectState>();

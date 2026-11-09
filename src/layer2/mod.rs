@@ -150,6 +150,8 @@ impl Plugin for PlanetarySpinUpPlugin {
                     planetary_spin_up::calculate_effective_gravity_system,
                     planetary_spin_up::trigger_coriolis_weather_system,
                     planetary_rings::apply_planetary_ring_effects_system,
+                    planetary_rings::ring_attrition_system,
+                    planetary_rings::ring_mining_system,
                     orbital_ring::update_shadow_band_system,
                     navigation::chronological_stutter::apply_chronological_stutter_system,
                     navigation::warp_wake::apply_warp_wake_system,

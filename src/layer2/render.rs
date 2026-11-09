@@ -111,6 +111,33 @@ pub fn render_system_view(frame: &mut Frame, area: Rect, world: &World) {
                     );
                 }
             }
+
+            // Spec 407: a ringed body draws a faint dotted annulus at
+            // its outer edge (same 2:1 terminal aspect as orbits).
+            if let Some(ring) = entity.get::<crate::layer2::planetary_rings::PlanetaryRing>() {
+                let radius_x = ring.radius_max * 2.0;
+                let radius_y = ring.radius_max;
+                for k in 0..16 {
+                    #[allow(clippy::cast_precision_loss)]
+                    let angle = (k as f32) * std::f32::consts::TAU / 16.0;
+                    let px = radius_x.mul_add(angle.cos(), x);
+                    let py = radius_y.mul_add(angle.sin(), y);
+                    #[allow(clippy::cast_possible_truncation)]
+                    let (px_i, py_i) = (px.round() as i32, py.round() as i32);
+                    if px_i >= 0 && py_i >= 0 {
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let (ux, uy) = (px_i as u16, py_i as u16);
+                        if inner.contains(ratatui::layout::Position { x: ux, y: uy }) {
+                            frame.buffer_mut().set_string(
+                                ux,
+                                uy,
+                                "·",
+                                Style::default().fg(Color::DarkGray),
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 

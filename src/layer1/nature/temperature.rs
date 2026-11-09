@@ -343,6 +343,7 @@ pub fn update_temperature_system(
     quirks: Option<Res<crate::layer1::quirks::PlanetaryTraits>>,
     cycle: Option<Res<DayNightCycle>>,
     dysonian: Option<Res<crate::layer2::dysonian::DysonianState>>,
+    rings: Option<Res<crate::layer2::planetary_rings::PlanetaryRingState>>,
     eclipse: Option<Res<crate::layer2::void_leviathan::LeviathanEclipse>>,
     terrain: Res<TerrainGrid>,
     buildings: Query<(&Building, &GridPosition, Option<&PowerConsumer>)>,
@@ -394,10 +395,32 @@ pub fn update_temperature_system(
 
     // Spec 403: insolation scales the solar heat that gets through.
     let solar_heat = solar_heat * (1.0 - dyson_shadow);
+
+    // Spec 407 Planetary Rings: the colony planet's ring blocks
+    // sunlight in one band of rows. With no ring shadow both terms
+    // below are exact no-ops (band tiles get the full solar heat,
+    // and the post-diffusion band relaxation is skipped).
+    let (ring_shadow, ring_band_drop) = rings.as_deref().map_or((0.0, 0.0), |s| {
+        (s.shadow_factor, s.band_temp_drop)
+    });
     if solar_heat > 0.0 {
-        // Apply solar heat to all tiles
-        for value in &mut grid.values {
-            *value += solar_heat;
+        // Apply solar heat to all tiles; band tiles receive only
+        // the fraction of insolation the ring lets through.
+        if ring_shadow > 0.0 {
+            let width = grid.width.max(1);
+            let band = crate::layer2::planetary_rings::ring_shadow_band(grid.height);
+            for (idx, value) in grid.values.iter_mut().enumerate() {
+                let y = idx / width;
+                *value += if band.contains(&y) {
+                    solar_heat * (1.0 - ring_shadow)
+                } else {
+                    solar_heat
+                };
+            }
+        } else {
+            for value in &mut grid.values {
+                *value += solar_heat;
+            }
         }
     }
 
@@ -554,6 +577,23 @@ pub fn update_temperature_system(
 
     // 4. Diffuse (Drift depends on retention)
     grid.diffuse(&conductivity_map, &terrain, &building_retention);
+
+    // Spec 407: after diffusion, shadow-band tiles relax toward the
+    // band's colder target (ambient minus the ring's band drop).
+    // This is a bounded relaxation, not a per-tick subtraction, so
+    // the band equilibrates colder instead of freezing without
+    // limit; heaters / LifeSupport in the band still fight back
+    // through the normal heat-source legs above.
+    if ring_band_drop > 0.0 {
+        let target = grid.ambient - ring_band_drop;
+        let band = crate::layer2::planetary_rings::ring_shadow_band(grid.height);
+        for y in band {
+            for x in 0..grid.width {
+                let current = grid.get(x, y);
+                grid.set(x, y, current + (target - current) * 0.2);
+            }
+        }
+    }
 }
 
 /// Spec 404 standalone emission leg: add every [`ThermalEmitter`]'s

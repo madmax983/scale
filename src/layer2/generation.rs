@@ -153,13 +153,14 @@ pub fn generate_system(
         };
 
         let planet_traits = generate_planet_traits(planet_type, &mut rng);
+        let body_radius = rng.gen_range(planet_type.radius_range());
 
         let planet = commands
             .spawn((
                 Planet,
                 OrbitalBody {
                     name: format!("Planet {}", i + 1),
-                    radius: rng.gen_range(planet_type.radius_range()),
+                    radius: body_radius,
                     color: planet_type.color(),
                     char: 'O',
                 },
@@ -174,6 +175,31 @@ pub fn generate_system(
                 },
             ))
             .id();
+
+        // Spec 407 Planetary Rings: some planets spawn with a dense
+        // debris annulus — a high-yield mining zone (the ring carries
+        // a real MiningTarget of the rare ring resource) that grinds
+        // down any fleet stationed in it. Gas giants, with their deep
+        // gravity wells, keep rings most often.
+        let ring_chance = match planet_type {
+            PlanetType::GasGiant => 0.5,
+            PlanetType::IceWorld => 0.3,
+            PlanetType::Rocky => 0.25,
+        };
+        if rng.gen_bool(ring_chance) {
+            commands.entity(planet).insert((
+                crate::layer2::planetary_rings::PlanetaryRing::for_body_radius(
+                    body_radius,
+                    rng.gen_range(2.0..5.0),
+                    rng.gen_range(0.3..1.0),
+                ),
+                crate::layer2::mining::MiningTarget {
+                    resource_type: crate::layer2::planetary_rings::RING_RESOURCE_TYPE,
+                    amount: crate::layer2::planetary_rings::RING_RESOURCE_AMOUNT,
+                    mining_difficulty: 1.5,
+                },
+            ));
+        }
 
         planets.push((planet, planet_type, planet_traits));
 

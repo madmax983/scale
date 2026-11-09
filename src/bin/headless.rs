@@ -560,6 +560,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "pressure" => handle_pressure_command(world, &parts),
         "swarm" => handle_swarm_command(world, &parts),
         "swarms" => print_swarms(world),
+        "ring" => handle_ring_command(world, &parts),
+        "rings" => print_rings(world),
         "heater" => handle_heater_command(world, &parts),
         "insulate" => handle_insulate_command(world, &parts),
         "thermals" => print_thermals(world),
@@ -3551,6 +3553,8 @@ fn print_stats(world: &mut World) {
     let cyber_label = scale::layer1::cybernetics::cyber_stats_label(world);
     // Spec 406: quarantine census for STATS (full panel: `quarantines`).
     let quarantine_label = scale::layer1::quarantine::quarantine_stats_label(world);
+    // Spec 407: planetary-ring census for STATS (full panel: `rings`).
+    let rings_label = scale::layer2::planetary_rings::rings_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3590,7 +3594,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={}",
         tick,
         scenario,
         pops,
@@ -3775,6 +3779,7 @@ fn print_stats(world: &mut World) {
         thermal_label,
         cyber_label,
         quarantine_label,
+        rings_label,
     );
 }
 
@@ -15542,6 +15547,67 @@ fn print_swarms(world: &mut World) {
     }
     if census.stars == 0 {
         println!("No swarm yet — launch collectors with `swarm [n]` (default 50). Power rises 10 per collector; sunlight falls toward the 0.90 shadow cap at 1000 collectors.");
+    }
+}
+
+// Spec 407 Planetary Rings: `ring [density]` gives the colony planet
+// a debris ring (default density 0.8); `rings` inspects the layer.
+// Fleets stationed in the annulus take density x 2.0 attrition per
+// tick; mining the ringed planet yields rare ring dust on top of the
+// normal yield; the ring shadows a band of the colony map.
+fn handle_ring_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::planetary_rings::{
+        ensure_colony_ring, planetary_ring_census, PlanetaryRing, PlanetaryRingState,
+    };
+    let density: f32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0.8);
+    if density <= 0.0 {
+        println!("Ring density must be positive — try `ring 0.8`.");
+        return;
+    }
+    let planet = ensure_colony_ring(world, density);
+    // Refresh the shadow ledger now so the effect is visible at once.
+    world.init_resource::<PlanetaryRingState>();
+    let mut schedule = bevy_ecs::schedule::Schedule::default();
+    schedule.add_systems(scale::layer2::planetary_rings::update_ring_shadow_state_system);
+    schedule.run(world);
+    let ring = world.get::<PlanetaryRing>(planet).copied();
+    let census = planetary_ring_census(world);
+    match ring {
+        Some(ring) => println!(
+            "The colony planet (entity {}) now wears a debris ring: annulus {:.1}..{:.1}, density {:.2} — fleets inside take {:.1} attrition/tick, mining yields rare ring dust, and a shadow band (factor {:.2}, {:.1}C colder) crosses the colony map. Rings in system: {}. Watch STATS rings=.",
+            planet.index(),
+            ring.radius_min,
+            ring.radius_max,
+            ring.density,
+            ring.attrition_per_tick(),
+            census.shadow,
+            census.band_drop,
+            census.rings
+        ),
+        None => println!("Ring command failed: no planet entity could be ringed."),
+    }
+}
+
+fn print_rings(world: &mut World) {
+    use scale::layer2::planetary_rings::{planetary_ring_census, PlanetaryRing};
+    let census = planetary_ring_census(world);
+    println!(
+        "Planetary rings: {} ringed planet(s) | densest: {:.2} | colony ring: {} | Layer 1 shadow: {:.2} | band drop: {:.1}C",
+        census.rings, census.max_density, census.colony_ring, census.shadow, census.band_drop
+    );
+    let mut q = world.query::<(Entity, &PlanetaryRing)>();
+    for (entity, ring) in q.iter(world) {
+        println!(
+            "  planet entity {} — annulus {:.1}..{:.1}, density {:.2}, attrition {:.1}/tick",
+            entity.index(),
+            ring.radius_min,
+            ring.radius_max,
+            ring.density,
+            ring.attrition_per_tick()
+        );
+    }
+    if census.rings == 0 {
+        println!("No rings yet — give the colony planet one with `ring [density]` (default 0.8).");
     }
 }
 
