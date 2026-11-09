@@ -632,6 +632,18 @@ pub fn build_simulation_schedule() -> Schedule {
     // spread colony-wide horror through the morale system.
     // Spec 406 Quarantine Protocols: designation stress spike, door
     // lockdown/restore on the real access seams, breach tagging.
+    // Spec 408 Galactic Tourism: beauty attracts liners, arrivals pay
+    // into the real credits ledger, tourists eat the shared stockpile.
+    schedule.add_systems(
+        (
+            crate::layer1::tourism::evaluate_tourist_attraction_system,
+            crate::layer1::tourism::spawn_tourist_system,
+            crate::layer1::tourism::process_tourist_arrival_system,
+            crate::layer1::tourism::tourist_consumption_system,
+            crate::layer1::tourism::tourist_departure_system,
+        )
+            .chain(),
+    );
     schedule.add_systems(
         (
             crate::layer1::quarantine::quarantine_designation_system,
@@ -670,6 +682,10 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 406 Quarantine Protocols: designation/breach ledger
     // (first-tick pattern — the designation system reads it tick one).
     world.init_resource::<crate::layer1::quarantine::QuarantineState>();
+    // Spec 408 Galactic Tourism: ledger/policy + arrival event bus
+    // (first-tick pattern).
+    world.init_resource::<crate::layer1::tourism::TourismState>();
+    world.init_resource::<Events<crate::layer1::tourism::TouristArrivalEvent>>();
     world.init_resource::<crate::layer1::eva_suit::ScenarioSuitFloor>();
     // Spec 1387 The Grind: epoch wallet median, chronicle state, and the
     // dwell-filtered simmering display (first-tick pattern — the accrual

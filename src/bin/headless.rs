@@ -570,6 +570,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "cyber" => print_cyber(world),
         "quarantine" => handle_quarantine_command(world, &parts),
         "quarantines" => print_quarantines(world),
+        "tourism" => handle_tourism_command(world, &parts),
+        "tourists" => print_tourists(world),
         "homeethic" => handle_homeethic_command(world, &parts),
         "trade" => handle_trade_command(world, &parts),
         "roomzones" => print_roomzones(world),
@@ -3555,6 +3557,8 @@ fn print_stats(world: &mut World) {
     let quarantine_label = scale::layer1::quarantine::quarantine_stats_label(world);
     // Spec 407: planetary-ring census for STATS (full panel: `rings`).
     let rings_label = scale::layer2::planetary_rings::rings_stats_label(world);
+    // Spec 408: galactic-tourism census for STATS (full panel: `tourists`).
+    let tourists_label = scale::layer1::tourism::tourism_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3594,7 +3598,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={}",
         tick,
         scenario,
         pops,
@@ -3780,6 +3784,7 @@ fn print_stats(world: &mut World) {
         cyber_label,
         quarantine_label,
         rings_label,
+        tourists_label,
     );
 }
 
@@ -15655,6 +15660,57 @@ fn handle_quarantine_command(world: &mut World, parts: &[&str]) {
 }
 
 /// Spec 406: show the quarantine panel.
+/// Spec 408: tourism policy / debug spawn (headless-first).
+/// `tourism` shows the panel; `tourism deny|feed` sets the food policy;
+/// `tourism spawn [n]` queues n tourists to land next tick.
+fn handle_tourism_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tourism::{TourismPolicy, TourismState};
+    match parts.get(1).copied() {
+        Some("deny") => {
+            if let Some(mut s) = world.get_resource_mut::<TourismState>() {
+                s.policy = TourismPolicy::DenyVisitors;
+            }
+            println!("Tourism policy: visitors will be DENIED food. Expect early departures and a reputation hit.");
+        }
+        Some("feed") => {
+            if let Some(mut s) = world.get_resource_mut::<TourismState>() {
+                s.policy = TourismPolicy::FeedVisitors;
+            }
+            println!("Tourism policy: visitors will be FED from the shared stockpile.");
+        }
+        Some("spawn") => {
+            let n: u32 = parts.get(2).and_then(|v| v.parse().ok()).unwrap_or(3);
+            if let Some(mut s) = world.get_resource_mut::<TourismState>() {
+                s.pending_tourists += n;
+            }
+            println!("Queued {n} tourist(s) to land.");
+        }
+        _ => print_tourists(world),
+    }
+}
+
+/// Spec 408: show the tourism panel.
+fn print_tourists(world: &mut World) {
+    use scale::layer1::tourism::{tourism_census, TourismPolicy, TourismState};
+    let c = tourism_census(world);
+    let (policy, boom, arrived, departed, denied) = world
+        .get_resource::<TourismState>()
+        .map_or(("feed", false, 0, 0, 0), |s| {
+            (
+                if s.policy == TourismPolicy::DenyVisitors { "deny" } else { "feed" },
+                s.boom_active,
+                s.total_arrived,
+                s.total_departed,
+                s.denied_meals,
+            )
+        });
+    println!(
+        "TOURISTS present={} pending={} reputation={:.2} boom={} policy={} credits_earned={:.0} arrived={} departed={} departed_early={} denied_meals={} disease_imports={}",
+        c.present, c.pending, c.reputation, boom, policy, c.credits_earned, arrived, departed,
+        c.departed_early, denied, c.disease_imports
+    );
+}
+
 fn print_quarantines(world: &mut World) {
     use scale::layer1::quarantine::quarantine_census;
     let c = quarantine_census(world);

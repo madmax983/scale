@@ -127,6 +127,8 @@ pub mod notifications;
 pub mod pathfinding;
 /// Quarantine protocols (Spec 406).
 pub mod quarantine;
+/// Galactic tourism (Spec 408).
+pub mod tourism;
 /// Seasonal rhythms (Spring, Summer, Autumn, Winter).
 mod shift_integration_tests;
 /// Social needs and tavern.
