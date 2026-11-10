@@ -661,6 +661,16 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 412 Fluid Simulation: level-seeking flow, powered pumps,
+    // and fluid hazards (deep water drowns, magma burns).
+    schedule.add_systems(
+        (
+            crate::layer1::fluid_sim::fluid_flow_system,
+            crate::layer1::fluid_sim::fluid_pump_system,
+            crate::layer1::fluid_sim::fluid_hazard_system,
+        )
+            .chain(),
+    );
     // Spec 410 The Inspector: dignitary tours, observes, files report.
     schedule.add_systems(
         (
@@ -725,6 +735,11 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::tech::machine_awakening::BotGlitchEvent>>();
     world.init_resource::<Events<crate::layer1::tech::machine_awakening::MachineAwakenedEvent>>();
     world.init_resource::<Events<crate::layer1::tech::machine_awakening::BotRebellionEvent>>();
+    // Spec 412 Fluid Simulation: volume grid + aquifer registry
+    // (first-tick pattern; setup.rs inserts the sized grid, this
+    // covers schedule-only worlds).
+    world.init_resource::<crate::layer1::fluid_sim::FluidGrid>();
+    world.init_resource::<crate::layer1::fluid_sim::AquiferMap>();
     world.init_resource::<crate::layer1::eva_suit::ScenarioSuitFloor>();
     // Spec 1387 The Grind: epoch wallet median, chronicle state, and the
     // dwell-filtered simmering display (first-tick pattern — the accrual

@@ -364,6 +364,9 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.insert_resource(crate::layer1::beauty::BeautyGrid::new(80, 50));
     world.insert_resource(crate::layer1::erosion::ErosionGrid::new(80, 50));
     world.insert_resource(crate::layer1::water::WaterGrid::new(80, 50));
+    // Spec 412: dynamic fluid volumes (beside hydration, not in it).
+    world.insert_resource(crate::layer1::fluid_sim::FluidGrid::new(80, 50));
+    world.init_resource::<crate::layer1::fluid_sim::AquiferMap>();
     world.insert_resource(crate::layer1::zone::ZoneGrid::new(80, 50));
     world.insert_resource(crate::layer1::acoustic::NoiseMap::new(80, 50));
     world.init_resource::<crate::layer1::olfactory::ScentMap>();

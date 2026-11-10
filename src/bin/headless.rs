@@ -500,6 +500,12 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "recalls" => print_recalls(world),
         "fools" => handle_fools_command(world, &parts),
         "bot" => handle_bot_command(world, &parts),
+        "fluid" => handle_fluid_command(world, &parts),
+        "fluids" => print_fluids(world),
+        "floodgate" => handle_floodgate_command(world, &parts),
+        "pump" => handle_pump_command(world, &parts),
+        "aquifer" => handle_aquifer_command(world, &parts),
+        "puncture" => handle_puncture_command(world, &parts),
         "glitch" => handle_glitch_command(world, &parts),
         "bots" => print_bots(world),
         "stance" => handle_stance_command(world, &parts),
@@ -3575,6 +3581,8 @@ fn print_stats(world: &mut World) {
     let inspector_label = scale::layer1::inspector::inspector_stats_label(world);
     // Spec 411: machine-awakening census for STATS (full panel: `bots`).
     let awakening_label = scale::layer1::tech::machine_awakening::awakening_stats_label(world);
+    // Spec 412: fluid census for STATS (full panel: `fluids`).
+    let fluid_label = scale::layer1::fluid_sim::fluid_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3614,7 +3622,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={}",
         tick,
         scenario,
         pops,
@@ -3804,6 +3812,7 @@ fn print_stats(world: &mut World) {
         shipbreak_label,
         inspector_label,
         awakening_label,
+        fluid_label,
     );
 }
 
@@ -9199,6 +9208,172 @@ fn handle_spite_command(world: &mut World, parts: &[&str]) {
 /// Spec 411: `bot [n]` constructs dormant bots; `glitch [gain]` jolts
 /// every dormant bot with sentience; `bots` shows the census;
 /// `stance [embrace|suppress]` reads or sets the colony policy.
+
+/// Spec 412: `fluid <water|magma> <x> <y> <vol>` pours fluid onto a
+/// tile; `fluids` shows the census; `floodgate <x> <y> [open|shut]`
+/// places or toggles a gate; `pump <x> <y> <tx> <ty>` installs a
+/// powered pump; `aquifer <x> <y>` registers a buried aquifer and
+/// `puncture <x> <y>` bursts it.
+fn handle_fluid_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::fluid_sim::{FluidGrid, FluidType};
+    if world.get_resource::<FluidGrid>().is_none() {
+        world.insert_resource(FluidGrid::default());
+    }
+    let kind = match parts.get(1).map(|s| s.to_lowercase()).as_deref() {
+        Some("magma") => FluidType::Magma,
+        _ => FluidType::Water,
+    };
+    let x: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(40);
+    let y: i32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(25);
+    let volume: f32 = parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(10.0);
+    let added = world.resource_mut::<FluidGrid>().add_fluid(x, y, volume, kind);
+    print_dashboard_panel(
+        "FLUID SIMULATION",
+        &format!(
+            "Poured {added:.1} of {} onto ({x}, {y}). Run `tick 10` and watch it seek its level with `fluids`.\n unlike soil hydration, this volume is conserved: it only moves.",
+            kind.name()
+        ),
+        Some(comfy_table::Color::Blue),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn print_fluids(world: &mut World) {
+    use scale::layer1::fluid_sim::{fluid_stats_label, FluidGrid, FluidType};
+    let label = fluid_stats_label(world);
+    let mut lines = format!("Census: {label}");
+    if let Some(grid) = world.get_resource::<FluidGrid>() {
+        lines.push_str(&format!(
+            "\nTotal water: {:.1}  Total magma: {:.1}  Total volume: {:.1}",
+            grid.total_of(FluidType::Water),
+            grid.total_of(FluidType::Magma),
+            grid.total_volume()
+        ));
+        if let Some((pos, fluid)) = grid.deepest() {
+            lines.push_str(&format!(
+                "\nDeepest pool: {:.1} of {} at ({}, {})",
+                fluid.volume,
+                fluid.fluid_type.name(),
+                pos.x,
+                pos.y
+            ));
+        }
+    }
+    print_dashboard_panel(
+        "FLUID SIMULATION",
+        &lines,
+        Some(comfy_table::Color::Blue),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_floodgate_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::fluid_sim::Floodgate;
+    use scale::layer1::map::GridPosition;
+    let x: i32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(40);
+    let y: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(25);
+    let open = matches!(parts.get(3), Some(s) if s.eq_ignore_ascii_case("open"));
+    let existing: Option<bevy_ecs::entity::Entity> = {
+        let mut q = world.query::<(bevy_ecs::entity::Entity, &GridPosition, &Floodgate)>();
+        q.iter(world)
+            .find(|(_, pos, _)| pos.x == x && pos.y == y)
+            .map(|(e, _, _)| e)
+    };
+    if let Some(entity) = existing {
+        if let Some(mut gate) = world.get_mut::<Floodgate>(entity) {
+            gate.open = open;
+        }
+    } else {
+        world.spawn((GridPosition { x, y }, Floodgate { open }));
+    }
+    print_dashboard_panel(
+        "FLUID SIMULATION",
+        &format!(
+            "Floodgate at ({x}, {y}) is now {}. Shut gates dam fluid flow; open gates let it pass.",
+            if open { "OPEN" } else { "SHUT" }
+        ),
+        Some(comfy_table::Color::Blue),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_pump_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::fluid_sim::FluidPump;
+    use scale::layer1::map::{GridPosition, TilePos};
+    let x: i32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(40);
+    let y: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(25);
+    let tx: i32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(x);
+    let ty: i32 = parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(y + 3);
+    world.spawn((
+        GridPosition { x, y },
+        FluidPump {
+            target: TilePos::new(tx, ty),
+            ..Default::default()
+        },
+        scale::layer1::energy::PowerConsumer {
+            demand: 1.0,
+            active: true,
+        },
+    ));
+    print_dashboard_panel(
+        "FLUID SIMULATION",
+        &format!("Powered pump installed at ({x}, {y}), discharging to ({tx}, {ty}). It moves fluid against the gradient while powered."),
+        Some(comfy_table::Color::Blue),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_aquifer_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::fluid_sim::AquiferMap;
+    world.init_resource::<AquiferMap>();
+    let x: i32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(40);
+    let y: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(25);
+    world.resource_mut::<AquiferMap>().tiles.insert((x, y));
+    print_dashboard_panel(
+        "FLUID SIMULATION",
+        &format!("A pressurized aquifer sleeps under ({x}, {y}). `puncture {x} {y}` — or careless digging — will wake it."),
+        Some(comfy_table::Color::Blue),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_puncture_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::chronicle::{AddChronicleEvent, EventImportance};
+    use scale::layer1::fluid_sim::{puncture_aquifer, AquiferMap, FluidGrid};
+    if world.get_resource::<FluidGrid>().is_none() {
+        world.insert_resource(FluidGrid::default());
+    }
+    world.init_resource::<AquiferMap>();
+    let x: i32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(40);
+    let y: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(25);
+    let burst = world.resource_scope(|world, mut grid: bevy_ecs::world::Mut<FluidGrid>| {
+        let mut aquifers = world.resource_mut::<AquiferMap>();
+        puncture_aquifer(&mut *grid, &mut aquifers, x, y)
+    });
+    if burst {
+        world.init_resource::<bevy_ecs::event::Events<AddChronicleEvent>>();
+        world
+            .resource_mut::<bevy_ecs::event::Events<AddChronicleEvent>>()
+            .send(AddChronicleEvent {
+                text: format!("An aquifer bursts at ({x}, {y}) — water floods the dig before anyone can shout."),
+                importance: EventImportance::Major,
+            });
+    }
+    print_dashboard_panel(
+        "FLUID SIMULATION",
+        &format!(
+            "{}",
+            if burst {
+                format!("The aquifer under ({x}, {y}) BURSTS. Water is pouring in — run `tick 10`, then `fluids`.")
+            } else {
+                format!("Nothing under ({x}, {y}) but dry rock. Register one first with `aquifer {x} {y}`.")
+            }
+        ),
+        Some(comfy_table::Color::Blue),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 fn handle_bot_command(world: &mut World, parts: &[&str]) {
     use scale::layer1::tech::machine_awakening::dormant_bot_components;
     let count: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(3);

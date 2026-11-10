@@ -584,3 +584,6 @@ impl bevy::prelude::Plugin for ConsultantPlugin {
         );
     }
 }
+
+/// Fluid Simulation (Spec 412).
+pub mod fluid_sim;
