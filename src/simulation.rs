@@ -644,6 +644,23 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    schedule.add_systems((
+        update_event_buffer::<crate::layer1::tech::machine_awakening::MachineAwakenedEvent>,
+        update_event_buffer::<crate::layer1::tech::machine_awakening::BotRebellionEvent>,
+    ));
+    // Spec 411 Machine Awakening: tech-derived sentience, glitches,
+    // awakening needs/traits, chronicle, suppression tension.
+    // (process_bot_sentience + apply_awakened_needs already run in the
+    // Execution set; the chronicle entry is the existing integration
+    // bridge — registering any of those here would duplicate them.)
+    schedule.add_systems(
+        (
+            crate::layer1::tech::machine_awakening::sync_global_sentience_system,
+            crate::layer1::tech::machine_awakening::announce_awakening_system,
+            crate::layer1::tech::machine_awakening::awakened_tension_system,
+        )
+            .chain(),
+    );
     // Spec 410 The Inspector: dignitary tours, observes, files report.
     schedule.add_systems(
         (
@@ -701,6 +718,13 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::inspector::InspectionState>();
     world.init_resource::<Events<crate::layer1::inspector::SpawnInspectorEvent>>();
     world.init_resource::<Events<crate::layer1::inspector::InspectorDepartEvent>>();
+    // Spec 411 Machine Awakening: policy + sentience ledger + glitch /
+    // awakening / rebellion event buses (first-tick pattern).
+    world.init_resource::<crate::layer1::tech::machine_awakening::AwakeningPolicy>();
+    world.init_resource::<crate::layer1::tech::machine_awakening::GlobalSentience>();
+    world.init_resource::<Events<crate::layer1::tech::machine_awakening::BotGlitchEvent>>();
+    world.init_resource::<Events<crate::layer1::tech::machine_awakening::MachineAwakenedEvent>>();
+    world.init_resource::<Events<crate::layer1::tech::machine_awakening::BotRebellionEvent>>();
     world.init_resource::<crate::layer1::eva_suit::ScenarioSuitFloor>();
     // Spec 1387 The Grind: epoch wallet median, chronicle state, and the
     // dwell-filtered simmering display (first-tick pattern — the accrual

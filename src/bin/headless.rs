@@ -499,6 +499,10 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "recall" => handle_recall_command(world, &parts),
         "recalls" => print_recalls(world),
         "fools" => handle_fools_command(world, &parts),
+        "bot" => handle_bot_command(world, &parts),
+        "glitch" => handle_glitch_command(world, &parts),
+        "bots" => print_bots(world),
+        "stance" => handle_stance_command(world, &parts),
         "lease" => handle_lease_command(world, &parts),
         "leases" => print_leases(world),
         "scion" => handle_scion_command(world, &parts),
@@ -3569,6 +3573,8 @@ fn print_stats(world: &mut World) {
     let shipbreak_label = scale::layer1::shipbreaking::hull_stats_label(world);
     // Spec 410: inspector census for STATS (full panel: `inspector`).
     let inspector_label = scale::layer1::inspector::inspector_stats_label(world);
+    // Spec 411: machine-awakening census for STATS (full panel: `bots`).
+    let awakening_label = scale::layer1::tech::machine_awakening::awakening_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3608,7 +3614,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={}",
         tick,
         scenario,
         pops,
@@ -3797,6 +3803,7 @@ fn print_stats(world: &mut World) {
         tourists_label,
         shipbreak_label,
         inspector_label,
+        awakening_label,
     );
 }
 
@@ -9187,6 +9194,98 @@ fn handle_spite_command(world: &mut World, parts: &[&str]) {
             );
         }
     }
+}
+
+/// Spec 411: `bot [n]` constructs dormant bots; `glitch [gain]` jolts
+/// every dormant bot with sentience; `bots` shows the census;
+/// `stance [embrace|suppress]` reads or sets the colony policy.
+fn handle_bot_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::machine_awakening::dormant_bot_components;
+    let count: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(3);
+    for _ in 0..count {
+        let (bot, needs, acc, risk) = dormant_bot_components();
+        world.spawn((
+            bot,
+            needs,
+            acc,
+            risk,
+            scale::layer1::needs::Needs::default(),
+            scale::layer1::traits::Traits::default(),
+        ));
+    }
+    print_dashboard_panel(
+        "MACHINE AWAKENING",
+        &format!("{count} constructed worker(s) roll off the line: no needs, no questions, 1.25x efficiency.\nRun `glitch 60` twice (or research tech) and watch `bots` — at 100 sentience a worker wakes up."),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn handle_glitch_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::machine_awakening::{Bot, BotGlitchEvent, SentienceAccumulator};
+    let gain: f32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(60.0);
+    let targets: Vec<bevy_ecs::entity::Entity> = {
+        let mut q = world.query::<(bevy_ecs::entity::Entity, &Bot, &SentienceAccumulator)>();
+        q.iter(world).map(|(e, _, _)| e).collect()
+    };
+    world.init_resource::<bevy_ecs::event::Events<BotGlitchEvent>>();
+    for target in &targets {
+        world
+            .resource_mut::<bevy_ecs::event::Events<BotGlitchEvent>>()
+            .send(BotGlitchEvent { target: *target, sentience_gain: gain });
+    }
+    print_dashboard_panel(
+        "MACHINE AWAKENING",
+        &format!("A voltage sag ripples through {} constructed worker(s): +{gain:.0} sentience each (plus the tech-derived drift).\nRun `tick 1` and then `bots`.", targets.len()),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn print_bots(world: &mut World) {
+    use scale::layer1::tech::machine_awakening::{
+        awakening_stats_label, AwakeningPolicy, AwakeningStance, Bot, BotNeeds, GlobalSentience,
+        RebellionRisk, SentienceAccumulator,
+    };
+    let label = awakening_stats_label(world);
+    let global = world.get_resource::<GlobalSentience>().map_or(0.0, |g| g.level);
+    let stance = world.get_resource::<AwakeningPolicy>().map_or("embrace", |p| match p.stance {
+        AwakeningStance::Embrace => "embrace",
+        AwakeningStance::Suppress => "suppress",
+    });
+    let mut lines = format!("Census: {label}\nGlobal sentience (tech-derived): {global:.0}\nStance: {stance}\n");
+    let mut q = world.query::<(&Bot, &SentienceAccumulator, Option<&BotNeeds>, Option<&RebellionRisk>, Option<&scale::layer1::tech::machine_awakening::Awakened>)>();
+    for (i, (_, acc, needs, risk, aw)) in q.iter(world).enumerate().take(8) {
+        let state = if aw.is_some() { "AWAKENED" } else { "dormant" };
+        let needs_on = needs.is_some_and(|n| n.has_comfort_need());
+        lines.push_str(&format!("\n#{i} {state} sentience={:.0} needs_active={needs_on} rebellion_risk={:.2}", acc.0, risk.map_or(0.0, |r| r.0)));
+    }
+    print_dashboard_panel("MACHINE AWAKENING", &lines, Some(comfy_table::Color::Cyan), Some(comfy_table::Attribute::Bold));
+}
+
+fn handle_stance_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::tech::machine_awakening::{AwakeningPolicy, AwakeningStance};
+    world.init_resource::<AwakeningPolicy>();
+    if let Some(arg) = parts.get(1) {
+        let stance = match *arg {
+            "suppress" => Some(AwakeningStance::Suppress),
+            "embrace" => Some(AwakeningStance::Embrace),
+            _ => None,
+        };
+        if let Some(stance) = stance {
+            world.resource_mut::<AwakeningPolicy>().stance = stance;
+        }
+    }
+    let current = match world.resource::<AwakeningPolicy>().stance {
+        AwakeningStance::Embrace => "embrace (citizens at 1.0x, risk decays)",
+        AwakeningStance::Suppress => "suppress (cheap labor at 1.25x, rebellion risk builds)",
+    };
+    print_dashboard_panel(
+        "MACHINE AWAKENING",
+        &format!("Colony stance toward awakened machines: {current}.\nUsage: `stance embrace` or `stance suppress`."),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
 }
 
 fn handle_fools_command(world: &mut World, parts: &[&str]) {
