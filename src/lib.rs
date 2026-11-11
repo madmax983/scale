@@ -79,6 +79,8 @@ pub mod ui;
 pub use shared::rendering::{RenderBuffer, RenderItem, RenderLayer};
 pub use shared::state::GameState;
 pub use ui::selection::{inspect_entity, inspect_tile, Selection, SelectionTarget};
+/// Meta layer: cross-run state (Spec 414 The Black Box).
+pub mod meta;
 pub mod cross_layer;
 pub mod experimental;
 

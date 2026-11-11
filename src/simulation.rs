@@ -689,6 +689,26 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 414 The Black Box: upload accrues -> collapse detection
+    // fires Game Over -> the box is sealed -> inherited ruins spawn ->
+    // decrypt restores. Chained so a collapse and its save land in the
+    // same tick, in that order.
+    schedule.add_systems((
+        update_event_buffer::<crate::meta::archive::GameOverEvent>,
+        update_event_buffer::<crate::meta::archive::DecryptArchiveEvent>,
+    ));
+    schedule.add_systems(
+        (
+            crate::meta::archive::archive_upload_system,
+            crate::meta::archive::colony_collapse_detection_system,
+            crate::meta::archive::save_black_box_system,
+            crate::meta::archive::load_black_box_system,
+            crate::meta::archive::spawn_ruined_archive_system,
+        )
+            .chain(),
+    );
+    #[cfg(not(target_arch = "wasm32"))]
+    schedule.add_systems(crate::meta::archive::flush_black_box_to_disk_system);
     schedule.add_systems(
         (
             crate::layer1::economy::organ_market::process_corpse_harvest_system,
@@ -725,6 +745,26 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::tourism::TouristArrivalEvent>>();
     // Spec 410 The Inspector: ledger + spawn/depart event buses
     // (first-tick pattern).
+    // Spec 414 The Black Box: saved legacy + lifecycle ledger + disk
+    // sync + game-over/decrypt event buses (first-tick pattern).
+    world.init_resource::<crate::meta::archive::BlackBoxData>();
+    world.init_resource::<crate::meta::archive::BlackBoxState>();
+    world.init_resource::<crate::meta::archive::BlackBoxDiskSync>();
+    world.init_resource::<Events<crate::meta::archive::GameOverEvent>>();
+    world.init_resource::<Events<crate::meta::archive::DecryptArchiveEvent>>();
+    // Spec 414 §5 disk seed (native startup seam): a previous run's
+    // black box becomes this run's discoverable legacy. Only seeds an
+    // empty box; a corrupt/missing file means a fresh lineage.
+    #[cfg(not(target_arch = "wasm32"))]
+    if world.resource::<crate::meta::archive::BlackBoxData>().unlocked_techs.is_empty() {
+        if let Some(data) = crate::meta::archive::read_black_box_from_path(
+            &crate::meta::archive::black_box_file_path(),
+        ) {
+            if !data.unlocked_techs.is_empty() {
+                world.insert_resource(data);
+            }
+        }
+    }
     world.init_resource::<crate::layer1::inspector::InspectionState>();
     world.init_resource::<Events<crate::layer1::inspector::SpawnInspectorEvent>>();
     world.init_resource::<Events<crate::layer1::inspector::InspectorDepartEvent>>();

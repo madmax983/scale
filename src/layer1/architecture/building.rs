@@ -371,6 +371,9 @@ pub enum BuildingType {
     CoreDrill,
     /// Landing pad for merchant ships (Spec 382: Merchant Landings).
     TradePad,
+    /// Cross-run knowledge archive: seals tech/lore into a black box
+    /// that a future colony can decrypt (Spec 414: The Black Box).
+    Archive,
 }
 
 impl BuildingType {
@@ -563,6 +566,7 @@ impl BuildingType {
             Self::School | Self::MediaStation => false,
             Self::Mainframe | Self::CommsRelay => false,
             Self::Billboard | Self::BiomassExtractor | Self::TradePad => false,
+            Self::Archive => true,
         }
     }
 
@@ -734,6 +738,7 @@ impl BuildingType {
             Self::CultShrine => "Cult Shrine",
             Self::CoreDrill => "Core Drill",
             Self::TradePad => "Trade Pad",
+            Self::Archive => "Archive",
         }
     }
 
@@ -804,6 +809,7 @@ impl BuildingType {
             Self::CultShrine => '♱',
             Self::CoreDrill => '⊙',
             Self::TradePad => '¤',
+            Self::Archive => '▤',
         }
     }
 
@@ -1190,6 +1196,11 @@ impl BuildingType {
                 stone: 20.0,
                 ..ColonyResources::zeroed()
             },
+            Self::Archive => ColonyResources {
+                metal: 30.0,
+                stone: 20.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1495,6 +1506,16 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
         | BuildingType::PersonalGarden
         | BuildingType::PersonalShrine => {
             // Logic handled by components added in system
+        }
+        // Spec 414 The Black Box: a standing Archive accrues upload
+        // progress, and its own data store (25 TB) is what a future
+        // decryption draws capacity from.
+        BuildingType::Archive => {
+            entity.insert((
+                crate::meta::archive::Archive::default(),
+                crate::meta::archive::UploadProgress::default(),
+                DataStorage { capacity: 25.0 },
+            ));
         }
     }
 }
@@ -2861,7 +2882,8 @@ mod tests {
             BuildingType::CoreDrill
         );
         assert_eq!(BuildingType::CoreDrill.next(), BuildingType::TradePad);
-        assert_eq!(BuildingType::TradePad.next(), BuildingType::Housing);
+        assert_eq!(BuildingType::TradePad.next(), BuildingType::Archive);
+        assert_eq!(BuildingType::Archive.next(), BuildingType::Housing);
     }
 
     #[test]
@@ -3121,6 +3143,8 @@ mod tests {
         assert_eq!(mode.selected, BuildingType::CoreDrill);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::TradePad);
+        mode.selected = mode.selected.next();
+        assert_eq!(mode.selected, BuildingType::Archive);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Housing);
     }

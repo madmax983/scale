@@ -845,6 +845,7 @@ pub const fn get_building_char(building: BuildingType) -> &'static str {
         BuildingType::CultShrine => "♱",
         BuildingType::CoreDrill => "\u{2299}",
         BuildingType::TradePad => "\u{00A4}",
+        BuildingType::Archive => "\u{25A4}",
     }
 }
 
@@ -933,6 +934,7 @@ pub const fn get_building_color(building: BuildingType, material: MaterialType) 
             BuildingType::CultShrine => Color::Rgb(255, 215, 0),
             BuildingType::CoreDrill => Color::Rgb(255, 100, 0),
             BuildingType::TradePad => Color::Rgb(255, 200, 100),
+            BuildingType::Archive => Color::Rgb(120, 200, 220),
         }
     }
 }

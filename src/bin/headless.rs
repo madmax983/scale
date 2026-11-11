@@ -53,6 +53,12 @@
 //!   `saves`          - List stored saves with metadata
 //!   `delsave <slot>` - Delete a stored save
 //!   `export <slot> <path>` - Copy a save to a .scale-save file
+//!   `archive`        - Build an Archive (Spec 414: The Black Box)
+//!   `upload`         - Complete every Archive's black-box upload
+//!   `gameover`       - Declare the colony fallen (seals the box)
+//!   `blackbox`       - Show archives, the sealed box, and ruins
+//!   `ruin`           - Raise a RuinedArchive from a fallen colony
+//!   `decrypt`        - Decrypt a RuinedArchive, restoring its tech
 
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_possible_truncation)]
@@ -510,6 +516,12 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "bots" => print_bots(world),
         "cryo" => handle_cryo_command(world, &parts),
         "cryoshock" => print_cryo_shock(world),
+        "archive" => handle_archive_command(world, &parts),
+        "upload" => handle_upload_command(world, &parts),
+        "gameover" => handle_gameover_command(world, &parts),
+        "blackbox" => print_black_box(world),
+        "ruin" => handle_ruin_command(world, &parts),
+        "decrypt" => handle_decrypt_command(world, &parts),
         "stance" => handle_stance_command(world, &parts),
         "lease" => handle_lease_command(world, &parts),
         "leases" => print_leases(world),
@@ -3587,6 +3599,8 @@ fn print_stats(world: &mut World) {
     let fluid_label = scale::layer1::fluid_sim::fluid_stats_label(world);
     // Spec 413: cryo-shock census for STATS (full panel: `cryoshock`).
     let cryo_label = scale::layer1::cryo_shock::cryo_shock_stats_label(world);
+    // Spec 414: black-box census for STATS (full panel: `blackbox`).
+    let blackbox_label = scale::meta::archive::black_box_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3626,7 +3640,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={}",
         tick,
         scenario,
         pops,
@@ -3818,6 +3832,7 @@ fn print_stats(world: &mut World) {
         awakening_label,
         fluid_label,
         cryo_label,
+        blackbox_label,
     );
 }
 
@@ -16255,4 +16270,177 @@ fn print_inspector(world: &mut World) {
             c.reports, c.glowing, c.damning, last
         ),
     }
+}
+
+/// Spec 414: `archive` builds an Archive near the colony center (the
+/// debug command stands in for a colony that can afford one: it tops up
+/// metal/stone like `tether` does). Run `upload`, then `gameover`, and
+/// the black box seals — watch STATS blackbox= / `blackbox`.
+fn handle_archive_command(world: &mut World, _parts: &[&str]) {
+    {
+        let mut resources = world.resource_mut::<ColonyResources>();
+        resources.metal = resources.metal.max(500.0);
+        resources.stone = resources.stone.max(200.0);
+    }
+    let mut placed = 0usize;
+    'scan: for y in 18..=30 {
+        for x in 28..=52 {
+            if placed >= 1 {
+                break 'scan;
+            }
+            if try_place_building(world, x, y, BuildingType::Archive) {
+                placed += 1;
+            }
+        }
+    }
+    print_dashboard_panel(
+        "THE BLACK BOX",
+        &format!(
+            "Built {placed}/1 Archive near the colony center.\nIts upload accrues over {} ticks (or run `upload` to finish it now). Once uploaded, a colony collapse seals the colony's tech + lore into the black box.",
+            scale::meta::archive::UPLOAD_TICKS
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 414: `upload` completes every standing Archive's upload at once
+/// (debug stand-in for the crew's upload work).
+fn handle_upload_command(world: &mut World, _parts: &[&str]) {
+    use scale::meta::archive::{Archive, UploadProgress};
+    let mut done = 0usize;
+    let mut query = world.query::<(&mut Archive, &mut UploadProgress)>();
+    for (mut archive, mut progress) in query.iter_mut(world) {
+        if !archive.data_uploaded {
+            progress.progress_ticks = scale::meta::archive::UPLOAD_TICKS;
+            archive.data_uploaded = true;
+            done += 1;
+        }
+    }
+    let total = world.query::<&Archive>().iter(world).count();
+    print_dashboard_panel(
+        "THE BLACK BOX",
+        &format!(
+            "Upload completed for {done} Archive(s); {total} standing.\nThe colony's knowledge is secured — if the colony falls now, the black box is sealed. Watch STATS blackbox=."
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 414: `gameover` declares the colony fallen (debug trigger for
+/// the real collapse-detection event). Run `tick 1` afterwards so the
+/// save system seals the box.
+fn handle_gameover_command(world: &mut World, _parts: &[&str]) {
+    world.init_resource::<Events<scale::meta::archive::GameOverEvent>>();
+    world
+        .resource_mut::<Events<scale::meta::archive::GameOverEvent>>()
+        .send(scale::meta::archive::GameOverEvent);
+    print_dashboard_panel(
+        "THE BLACK BOX",
+        "Game Over declared. Run `tick 1` — if an Archive finished its upload, the black box seals with the colony's tech + lore (and flushes to black_box.json). Then `blackbox` shows what survived.",
+        Some(comfy_table::Color::Red),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 414: `ruin` raises a RuinedArchive from a fallen colony at the
+/// colony heart (debug stand-in for the discovery spawn).
+fn handle_ruin_command(world: &mut World, _parts: &[&str]) {
+    use scale::meta::archive::RuinedArchive;
+    let colony_tile = {
+        let mut q = world.query_filtered::<&GridPosition, With<Building>>();
+        q.iter(world).next().copied().unwrap_or(GridPosition { x: 0, y: 0 })
+    };
+    let ruin = world
+        .spawn((
+            RuinedArchive,
+            GridPosition {
+                x: colony_tile.x + 3,
+                y: colony_tile.y,
+            },
+        ))
+        .id();
+    print_dashboard_panel(
+        "THE BLACK BOX",
+        &format!(
+            "A ruined Archive from a fallen colony stands at ({}, {}) (id {:?}).\nRun `decrypt` to recover whatever its black box holds.",
+            colony_tile.x + 3,
+            colony_tile.y,
+            ruin
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 414: `decrypt` opens the first RuinedArchive: the box's techs
+/// restore into this colony's TechState. Run `tick 1` afterwards so the
+/// decrypt system lands it.
+fn handle_decrypt_command(world: &mut World, _parts: &[&str]) {
+    use scale::meta::archive::{DecryptArchiveEvent, RuinedArchive};
+    let ruin = world.query::<(Entity, &RuinedArchive)>().iter(world).next();
+    if let Some((entity, _)) = ruin {
+        world.init_resource::<Events<DecryptArchiveEvent>>();
+        world
+            .resource_mut::<Events<DecryptArchiveEvent>>()
+            .send(DecryptArchiveEvent { entity });
+        print_dashboard_panel(
+            "THE BLACK BOX",
+            "Decrypting the ruined Archive. Run `tick 1`, then check `blackbox` and the chronicle — recovered technologies restore in full, and the Archive's own data store covers their capacity.",
+            Some(comfy_table::Color::Green),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        print_dashboard_panel(
+            "THE BLACK BOX",
+            "No ruined Archive stands in this colony. Run `ruin` to raise one, or inherit a black box from a fallen colony.",
+            Some(comfy_table::Color::Yellow),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+}
+
+/// Spec 414: `blackbox` panel — archives standing, uploads, the sealed
+/// box's contents, ruins awaiting decrypt.
+fn print_black_box(world: &mut World) {
+    use scale::meta::archive::{Archive, BlackBoxData, RuinedArchive, UploadProgress};
+    let label = scale::meta::archive::black_box_stats_label(world);
+    let mut lines = format!("Census: {label} (archives/saved techs/ruins)\n");
+    let mut q = world.query::<(&Archive, &UploadProgress)>();
+    for (i, (archive, progress)) in q.iter(world).enumerate().take(8) {
+        lines.push_str(&format!(
+            "\nArchive #{i} — uploaded: {} ({} ticks of upload work)",
+            archive.data_uploaded, progress.progress_ticks
+        ));
+    }
+    let ruins = world.query::<&RuinedArchive>().iter(world).count();
+    lines.push_str(&format!("\nRuined Archives awaiting decrypt: {ruins}"));
+    if let Some(data) = world.get_resource::<BlackBoxData>() {
+        if data.unlocked_techs.is_empty() {
+            lines.push_str("\nBlack box: empty — no fallen colony's knowledge is sealed yet.");
+        } else {
+            lines.push_str(&format!(
+                "\nBlack box: {} technologies sealed across {} save(s), from tick {}: {}",
+                data.unlocked_techs.len(),
+                data.saves,
+                data.saved_at_tick,
+                data.unlocked_techs.join(", ")
+            ));
+            lines.push_str(&format!(
+                "\nLore carried: {} chronicle entries.",
+                data.chronicle_texts.len()
+            ));
+        }
+    }
+    lines.push_str(&format!(
+        "\nDisk file: {}",
+        scale::meta::archive::black_box_file_path().display()
+    ));
+    print_dashboard_panel(
+        "THE BLACK BOX",
+        &lines,
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
 }
