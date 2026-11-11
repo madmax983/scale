@@ -37,7 +37,7 @@ use crate::layer1::medical::Hospital;
 use crate::layer1::pop::{Pop, Speed};
 
 /// Ticks a fresh cryo arrival stays shocked without treatment.
-pub const CRYO_SHOCK_DURATION_TICKS: u64 = 1000;
+pub const CRYO_SHOCK_DURATION_TICKS: u64 = 250;
 /// Fraction of movement/work speed a fresh cryo arrival loses (spec RED:
 /// severity 0.5 halves speed).
 pub const CRYO_SHOCK_SEVERITY: f32 = 0.5;
