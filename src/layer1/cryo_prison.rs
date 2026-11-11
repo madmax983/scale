@@ -62,7 +62,14 @@ pub fn thaw_cryo_pod_system(
                 let (x, y) = pos.map(|p| (p.x, p.y)).unwrap_or((0, 0));
                 let mut bundle = crate::layer1::PopBundle::random(x, y, &mut rng);
                 bundle.skills = skills;
-                commands.spawn((bundle, CriminalRecord));
+                // Spec 413: a thawed prisoner is genuinely "from cryo" —
+                // they wake up groggy with CryoShock like any other
+                // suspension arrival.
+                commands.spawn((
+                    bundle,
+                    CriminalRecord,
+                    crate::layer1::cryo_shock::CryoShock::default(),
+                ));
                 unrest.level = (unrest.level + 0.9).min(1.0);
             }
         }

@@ -123,6 +123,7 @@ struct WorkerQuery {
     dialect: Option<&'static Dialect>,
     linguistics: Option<&'static Linguistics>,
     fog: Option<&'static MentalFog>,
+    cryo: Option<&'static crate::layer1::cryo_shock::CryoShock>,
     ostracized: Option<&'static crate::layer1::social::grievances::Ostracized>,
     on_strike: Has<crate::layer1::culture::memorial_revolt::OnStrike>,
     nostalgia_infected: Has<crate::layer1::social::nostalgia_plague::NostalgiaInfection>,
@@ -202,6 +203,10 @@ fn collect_workers_by_target(
                 )
             });
             let fog_mod = item.fog.map_or(1.0, |f| f.work_speed_penalty);
+            // Spec 413: cryo-shocked workers are groggy — the same
+            // severity that halves their movement halves their work.
+            let cryo_mod =
+                crate::layer1::cryo_shock::cryo_shock_work_multiplier(item.cryo);
 
             (
                 item.mt.target_entity,
@@ -215,7 +220,8 @@ fn collect_workers_by_target(
                         * buff_mod
                         * fog_mod
                         * nostalgia_mod
-                        * cult_mod,
+                        * cult_mod
+                        * cryo_mod,
                     job: item.job.copied(),
                     dialect: item.dialect.copied().unwrap_or_default(),
                     linguistics: item.linguistics.cloned().unwrap_or_default(),

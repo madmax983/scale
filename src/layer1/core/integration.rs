@@ -1842,7 +1842,14 @@ pub fn beacon_migrant_arrival_bridge(
                 ))
                 .id();
             bundle.equipment.body = Some(suit_entity);
-            commands.spawn((bundle, RecentArrival { arrival_tick: tick }));
+            // Spec 413: migrants arrive via ship out of suspension —
+            // they wake up groggy with CryoShock (movement + work
+            // debuff, natural decay, recovery beds accelerate it).
+            commands.spawn((
+                bundle,
+                RecentArrival { arrival_tick: tick },
+                crate::layer1::cryo_shock::CryoShock::default(),
+            ));
         }
 
         chronicle_events.send(crate::layer1::core::chronicle::AddChronicleEvent {

@@ -508,6 +508,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "puncture" => handle_puncture_command(world, &parts),
         "glitch" => handle_glitch_command(world, &parts),
         "bots" => print_bots(world),
+        "cryo" => handle_cryo_command(world, &parts),
+        "cryoshock" => print_cryo_shock(world),
         "stance" => handle_stance_command(world, &parts),
         "lease" => handle_lease_command(world, &parts),
         "leases" => print_leases(world),
@@ -3583,6 +3585,8 @@ fn print_stats(world: &mut World) {
     let awakening_label = scale::layer1::tech::machine_awakening::awakening_stats_label(world);
     // Spec 412: fluid census for STATS (full panel: `fluids`).
     let fluid_label = scale::layer1::fluid_sim::fluid_stats_label(world);
+    // Spec 413: cryo-shock census for STATS (full panel: `cryoshock`).
+    let cryo_label = scale::layer1::cryo_shock::cryo_shock_stats_label(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3622,7 +3626,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={}",
         tick,
         scenario,
         pops,
@@ -3813,6 +3817,7 @@ fn print_stats(world: &mut World) {
         inspector_label,
         awakening_label,
         fluid_label,
+        cryo_label,
     );
 }
 
@@ -9412,6 +9417,57 @@ fn handle_glitch_command(world: &mut World, parts: &[&str]) {
     print_dashboard_panel(
         "MACHINE AWAKENING",
         &format!("A voltage sag ripples through {} constructed worker(s): +{gain:.0} sentience each (plus the tech-derived drift).\nRun `tick 1` and then `bots`.", targets.len()),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 413: `cryo [n]` wakes n suspension arrivals at a living
+/// colonist's tile (same landing logic as the beacon migrant bridge):
+/// full PopBundles with fresh CryoShock. `cryoshock` shows the census.
+fn handle_cryo_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::cryo_shock::CryoShock;
+
+    let count: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(2);
+
+    let colony_tile = {
+        let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+        q.iter(world).next().copied().unwrap_or(GridPosition { x: 0, y: 0 })
+    };
+    let mut rng = rand::thread_rng();
+    for _ in 0..count {
+        let bundle = scale::layer1::PopBundle::random(colony_tile.x, colony_tile.y, &mut rng);
+        world.spawn((bundle, CryoShock::default()));
+    }
+    print_dashboard_panel(
+        "CRYO SHOCK",
+        &format!(
+            "{count} suspension arrival(s) wake at the colony, groggy and half-frozen.\nMovement and work are halved while the shock lasts — triage them as patients at a hospital to recover {}x faster, or wait it out. Run `cryoshock` to watch them thaw.",
+            scale::layer1::cryo_shock::CRYO_RECOVERY_DECAY_MULTIPLIER
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+fn print_cryo_shock(world: &mut World) {
+    use scale::layer1::cryo_shock::{cryo_shock_count, CryoShock};
+
+    let label = cryo_shock_count(world).to_string();
+    let mut lines = format!("Census: {label} pop(s) still shaking off cryo shock\n");
+    let mut q = world.query::<(Option<&PopName>, &CryoShock)>();
+    for (i, (name, shock)) in q.iter(world).enumerate().take(8) {
+        let name = name.map_or_else(|| "?".to_string(), |n| n.0.clone());
+        lines.push_str(&format!(
+            "\n#{i} {name} — {} ticks left, severity {:.2} (speed x{:.2})",
+            shock.duration_ticks,
+            shock.severity,
+            shock.speed_multiplier()
+        ));
+    }
+    print_dashboard_panel(
+        "CRYO SHOCK",
+        &lines,
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
