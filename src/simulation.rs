@@ -784,6 +784,9 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 1387 The Grind: epoch wallet median, chronicle state, and the
     // dwell-filtered simmering display (first-tick pattern — the accrual
     // and bridge systems read/write these on tick one).
+    // Spec 415 Company Scrip: the scrip ledger (first-tick pattern —
+    // pay_wage and the luxury register write it on tick one).
+    world.init_resource::<crate::layer1::economy::scrip::ScripSystem>();
     world.init_resource::<crate::layer1::social::dissatisfaction::ColonyWalletMedian>();
     world.init_resource::<crate::layer1::social::dissatisfaction::GrindChronicleState>();
     world.init_resource::<crate::layer1::social::dissatisfaction::SimmeringDisplay>();

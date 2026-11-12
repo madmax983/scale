@@ -715,6 +715,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "misery" => print_misery(world),
         "setprice" => handle_setprice_command(world, &parts),
         "drainwallets" => handle_drainwallets_command(world),
+        "scrip" => handle_scrip_command(world),
         "smuggler" => handle_smuggler_command(world),
         "greatwork" => handle_greatwork_command(world, &parts),
         "contribute" => handle_contribute_command(world, &parts),
@@ -3601,6 +3602,9 @@ fn print_stats(world: &mut World) {
     let cryo_label = scale::layer1::cryo_shock::cryo_shock_stats_label(world);
     // Spec 414: black-box census for STATS (full panel: `blackbox`).
     let blackbox_label = scale::meta::archive::black_box_stats_label(world);
+    // Spec 415: scrip census for STATS (full panel: `scrip`).
+    let (scrip_total, scrip_broke, scrip_luxury_sales) =
+        scale::layer1::economy::scrip::scrip_stats(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3640,7 +3644,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={}",
         tick,
         scenario,
         pops,
@@ -3833,6 +3837,9 @@ fn print_stats(world: &mut World) {
         fluid_label,
         cryo_label,
         blackbox_label,
+        scrip_total,
+        scrip_broke,
+        scrip_luxury_sales,
     );
 }
 
@@ -6671,6 +6678,43 @@ fn handle_drainwallets_command(world: &mut World) {
     println!("drained {drained} wallets to 0 credits");
 }
 
+/// Spec 415 panel (headless `scrip`): the company-scrip loop — price
+/// book, wage table, wallet census, and the cumulative ledger.
+fn handle_scrip_command(world: &mut World) {
+    use scale::layer1::actions::AssignmentType;
+    use scale::layer1::economy::{get_wage_for_job, ColonyPrices, ScripSystem};
+    let prices = world
+        .get_resource::<ColonyPrices>()
+        .copied()
+        .unwrap_or_default();
+    let (total, broke, _sales) =
+        scale::layer1::economy::scrip::scrip_stats(world);
+    let (wages_paid, luxury_sales, luxury_spent, richest, poorest, wallets) =
+        world.get_resource::<ScripSystem>().map_or(
+            (0.0, 0, 0.0, 0.0, 0.0, 0),
+            |s| {
+                (
+                    s.wages_paid,
+                    s.luxury_sales,
+                    s.luxury_spent,
+                    s.richest,
+                    s.poorest,
+                    s.wallet_count,
+                )
+            },
+        );
+    println!(
+        "Company Scrip (Spec 415)\nPrices: food {:.2} / luxury {:.2}\nWages per job: farm {:.2} / library {:.2} / admin {:.2} / mine {:.2} / other {:.2}\nWallets: {wallets} pops hold {total:.1} credits (richest {richest:.1}, poorest {poorest:.1}); {broke} cannot afford a meal\nLedger: wages paid {wages_paid:.1}; luxury sales {luxury_sales} ({luxury_spent:.1} credits)\n\nPops earn scrip through pay_wage / farm wages, spend it on food via consume_food_system (priced at food_price), and on the paid luxury tier at luxury_price. Watch STATS scrip= / broke= / luxury_sales=.",
+        prices.food_price,
+        prices.luxury_price,
+        get_wage_for_job(AssignmentType::FarmWorker),
+        get_wage_for_job(AssignmentType::LibraryWorker),
+        get_wage_for_job(AssignmentType::Administrator),
+        get_wage_for_job(AssignmentType::DeepMining),
+        get_wage_for_job(AssignmentType::Sheriff),
+    );
+}
+
 /// Debug trigger (headless `smuggler` command, Spec 348): a smuggler
 /// answers immediately and docks with a ready trade, bypassing the
 /// unmet-needs gate and the spawn cooldown.
@@ -7098,6 +7142,7 @@ fn print_help() {
                 ("shift [<x> <y> [mode] | <type> [mode]]", "", "Shift work panel (Spec 359): building schedules + current night workers; with coordinates inspect/set one building, with a type name filter the panel or set every building of that type (modes: day|night|both|off|toggle)"),
                 ("setprice food <n>", "", "Debug lever (Spec 1387): set the colony food price"),
                 ("drainwallets", "", "Debug lever (Spec 1387): zero every pop's credits"),
+                ("scrip", "", "Company Scrip panel (Spec 415): prices, wage table, wallet census, scrip ledger"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
                 (
                     "greatwork start <skyhook|aegis|spire>",

@@ -124,6 +124,9 @@ pub fn produce_food_system(
     mut eureka_events: EventWriter<crate::layer1::eureka::EurekaEvent>,
     // Fallen Sovereign: cumulative farm-production ledger for the labor decree.
     mut ledger: Option<ResMut<FarmProductionLedger>>,
+    // Spec 415: scrip ledger — farm wages bypass `pay_wage`, so they
+    // report themselves here (None = don't track).
+    mut scrip_ledger: Option<ResMut<crate::layer1::economy::scrip::ScripSystem>>,
 ) {
     let modifier = season_state
         .as_ref()
@@ -188,6 +191,7 @@ pub fn produce_food_system(
                 modifier,
                 current_season,
                 ledger.as_deref_mut(),
+                scrip_ledger.as_deref_mut(),
             );
         }
     }
@@ -213,6 +217,8 @@ fn process_single_farmer(
     current_season: Season,
     // Fallen Sovereign: cumulative farm-production ledger (None = don't track).
     ledger: Option<&mut FarmProductionLedger>,
+    // Spec 415: scrip ledger for the inline farm wage (None = don't track).
+    scrip_ledger: Option<&mut crate::layer1::economy::scrip::ScripSystem>,
 ) {
     // Tech Corruption Check
     if let Some(tech) = building_type.required_tech() {
@@ -310,6 +316,9 @@ fn process_single_farmer(
             let base_wage = get_wage_for_job(job_type);
             let wage = base_wage * 0.01;
             wallet.credits += wage;
+            if let Some(ledger) = scrip_ledger {
+                ledger.wages_paid += wage;
+            }
         }
 
         // Eureka Check

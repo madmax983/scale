@@ -58,8 +58,18 @@ pub fn pay_wage(world: &mut World, worker: Entity, amount: f32) {
     } else {
         amount
     };
+    let mut paid = false;
     if let Some(mut wallet) = world.get_mut::<Wallet>(worker) {
         wallet.credits += amount;
+        paid = true;
+    }
+    // Spec 415: the scrip ledger records wages that actually reached a
+    // wallet (after the Stateless refusal above and the corruption
+    // skim), so `wages_paid` is money that moved, not money attempted.
+    if paid {
+        if let Some(mut ledger) = world.get_resource_mut::<scrip::ScripSystem>() {
+            ledger.wages_paid += amount;
+        }
     }
 }
 
@@ -336,3 +346,8 @@ pub use bio_loom::*;
 
 pub mod biomass_dividend;
 pub use biomass_dividend::*;
+
+/// Company scrip (Spec 415): luxury purchases + the scrip ledger,
+/// bridged onto `Wallet` / `ColonyPrices` / `pay_wage`.
+pub mod scrip;
+pub use scrip::ScripSystem;

@@ -298,6 +298,19 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::Consumption),
     );
+
+    // Spec 415: company scrip — the paid luxury tier above free
+    // leisure, plus the scrip census that feeds headless STATS.
+    // Separate add_systems call (the consumption tuples are at the
+    // IntoSystemConfigs arity limit).
+    schedule.add_systems(
+        (
+            crate::layer1::economy::scrip::purchase_luxury_system.after(consume_food_system),
+            crate::layer1::economy::scrip::scrip_census_system
+                .after(crate::layer1::economy::scrip::purchase_luxury_system),
+        )
+            .in_set(Layer1SystemSet::Consumption),
+    );
 }
 
 /// System for consuming Void-Ale to boost morale and leisure.
