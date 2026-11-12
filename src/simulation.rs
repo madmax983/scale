@@ -342,6 +342,16 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 416 Cognitive Hazards: horror exposure -> insanity ->
+    // hallucinations (false notifications through the real queue).
+    schedule.add_systems(
+        (
+            crate::layer1::hazards::cognitive_hazards::ensure_insanity_system,
+            crate::layer1::hazards::cognitive_hazards::exposure_system,
+            crate::layer1::hazards::cognitive_hazards::hallucination_system,
+        )
+            .chain(),
+    );
     // Spec 1372 Gravity-Fed Logistics: downhill chute flow is free,
     // level/uphill flow requires an active PowerConsumer (the pump).
     schedule.add_systems(
@@ -787,6 +797,11 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 415 Company Scrip: the scrip ledger (first-tick pattern —
     // pay_wage and the luxury register write it on tick one).
     world.init_resource::<crate::layer1::economy::scrip::ScripSystem>();
+    // Spec 416 Cognitive Hazards: ledger/cooldown + hallucination event
+    // bus (first-tick pattern — the exposure/hallucination chain reads
+    // and writes these from tick one).
+    world.init_resource::<crate::layer1::hazards::cognitive_hazards::CognitiveHazardState>();
+    world.init_resource::<Events<crate::layer1::hazards::cognitive_hazards::HallucinationEvent>>();
     world.init_resource::<crate::layer1::social::dissatisfaction::ColonyWalletMedian>();
     world.init_resource::<crate::layer1::social::dissatisfaction::GrindChronicleState>();
     world.init_resource::<crate::layer1::social::dissatisfaction::SimmeringDisplay>();

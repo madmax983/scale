@@ -1,3 +1,4 @@
+pub mod cognitive_hazards;
 pub mod megastructure_decay;
 #[cfg(test)]
 mod megastructure_decay_tests;

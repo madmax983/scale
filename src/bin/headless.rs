@@ -716,6 +716,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "setprice" => handle_setprice_command(world, &parts),
         "drainwallets" => handle_drainwallets_command(world),
         "scrip" => handle_scrip_command(world),
+        "coghaz" => print_cog_haz(world),
+        "horror" => handle_horror_command(world, &parts),
+        "insanity" => handle_insanity_command(world, &parts),
         "smuggler" => handle_smuggler_command(world),
         "greatwork" => handle_greatwork_command(world, &parts),
         "contribute" => handle_contribute_command(world, &parts),
@@ -3605,6 +3608,9 @@ fn print_stats(world: &mut World) {
     // Spec 415: scrip census for STATS (full panel: `scrip`).
     let (scrip_total, scrip_broke, scrip_luxury_sales) =
         scale::layer1::economy::scrip::scrip_stats(world);
+    // Spec 416: cognitive-hazard census for STATS (full panel: `coghaz`).
+    let (coghaz_avg, coghaz_max, coghaz_hallucinations, coghaz_over) =
+        scale::layer1::hazards::cognitive_hazards::cognitive_hazard_stats(world);
     let front_weather_label = world.get_resource::<scale::layer1::weather::WeatherState>().map_or("Clear Skies", |w| w.current_weather.name());
 
     // Item 117: consecutive strained ticks of the worst power grid
@@ -3644,7 +3650,7 @@ fn print_stats(world: &mut World) {
     // ledger fields and were invisible in STATS until now.
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={}",
         tick,
         scenario,
         pops,
@@ -3840,6 +3846,10 @@ fn print_stats(world: &mut World) {
         scrip_total,
         scrip_broke,
         scrip_luxury_sales,
+        coghaz_avg,
+        coghaz_max,
+        coghaz_hallucinations,
+        coghaz_over,
     );
 }
 
@@ -6715,6 +6725,91 @@ fn handle_scrip_command(world: &mut World) {
     );
 }
 
+/// Spec 416 panel (headless `coghaz`): insanity census + hallucination
+/// ledger — who is unhinged, how far gone, and what they have made the
+/// colony see.
+fn print_cog_haz(world: &mut World) {
+    use scale::layer1::hazards::cognitive_hazards::{
+        cognitive_hazard_stats, CognitiveHazardState, Insanity, HALLUCINATION_THRESHOLD,
+    };
+    let (avg, max, hallucinations, over) = cognitive_hazard_stats(world);
+    let cooldown = world
+        .get_resource::<CognitiveHazardState>()
+        .map_or(0, |s| s.cooldown_ticks);
+    let mut lines = format!(
+        "Insanity: avg {avg:.1} / max {max:.1} across the colony; {over} pop(s) over the hallucination threshold ({HALLUCINATION_THRESHOLD:.0})\nHallucinations fired: {hallucinations} (next may fire in {cooldown} ticks)"
+    );
+    let mut q = world.query::<(Option<&PopName>, &Insanity)>();
+    let mut rows: Vec<(String, f32)> = q
+        .iter(world)
+        .map(|(name, ins)| {
+            (
+                name.map_or_else(|| "?".to_string(), |n| n.0.clone()),
+                ins.level,
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    for (i, (name, level)) in rows.iter().take(8).enumerate() {
+        lines.push_str(&format!("\n#{i} {name} — insanity {level:.1}"));
+    }
+    lines.push_str(
+        "\n\nHorror (corpses, deep darkness, horror loci) raises insanity; distance and time lower it. Over the threshold, pops hallucinate false raid / fire / hostile alerts into the real notification queue. Debug: `horror [n]`, `insanity [level]`. Watch STATS insanity= / max_insanity= / hallucinations=.",
+    );
+    print_dashboard_panel(
+        "COGNITIVE HAZARDS",
+        &lines,
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug trigger (headless `horror [n]`, Spec 416): place n horror loci
+/// on the first living pop's tile. Nearby pops accumulate insanity
+/// through the real exposure system.
+fn handle_horror_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::hazards::cognitive_hazards::HorrorSource;
+    let count: usize = parts
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1)
+        .min(20);
+    let anchor = {
+        let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+        q.iter(world).next().copied().unwrap_or(GridPosition { x: 0, y: 0 })
+    };
+    for _ in 0..count {
+        world.spawn((HorrorSource::default(), anchor));
+    }
+    println!(
+        "{count} horror locus/loci settle over ({}, {}). Nearby pops will accumulate insanity — run `coghaz` to watch, `insanity 95` to skip the wait.",
+        anchor.x, anchor.y
+    );
+}
+
+/// Debug lever (headless `insanity [level]`, Spec 416): set every
+/// pop's insanity directly (default 95, just over the hallucination
+/// threshold).
+fn handle_insanity_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::hazards::cognitive_hazards::Insanity;
+    let level: f32 = parts
+        .get(1)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(95.0)
+        .clamp(0.0, 100.0);
+    let ids: Vec<Entity> = {
+        let mut q = world.query_filtered::<Entity, With<Pop>>();
+        q.iter(world).collect()
+    };
+    for id in &ids {
+        world.entity_mut(*id).insert(Insanity { level });
+    }
+    println!(
+        "set insanity to {level:.1} for {} pop(s) — tick to let them hallucinate",
+        ids.len()
+    );
+}
+
 /// Debug trigger (headless `smuggler` command, Spec 348): a smuggler
 /// answers immediately and docks with a ready trade, bypassing the
 /// unmet-needs gate and the spawn cooldown.
@@ -7143,6 +7238,9 @@ fn print_help() {
                 ("setprice food <n>", "", "Debug lever (Spec 1387): set the colony food price"),
                 ("drainwallets", "", "Debug lever (Spec 1387): zero every pop's credits"),
                 ("scrip", "", "Company Scrip panel (Spec 415): prices, wage table, wallet census, scrip ledger"),
+                ("coghaz", "", "Cognitive Hazards panel (Spec 416): insanity census, hallucination ledger"),
+                ("horror [n]", "", "Debug (Spec 416): place n horror loci on the first pop — nearby pops accumulate insanity"),
+                ("insanity [level]", "", "Debug (Spec 416): set every pop's insanity (default 95) — over 80 hallucinates false alerts"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
                 (
                     "greatwork start <skyhook|aegis|spire>",
