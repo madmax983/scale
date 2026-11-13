@@ -20,7 +20,15 @@
 //!   would instantly re-corrupt everything. A decrypted Archive is
 //!   itself a data store (its building carries `DataStorage`), so the
 //!   decrypt system first raises `total_capacity` to fit the recovered
-//!   set, then unlocks.
+//!   set, then unlocks. In the REAL schedule that direct raise is not
+//!   enough on its own: `update_tech_capacity_system` recomputes
+//!   `total_capacity` from `DataStorage` components every tick and
+//!   re-runs corruption, so a ruin carrying no store sees its recovery
+//!   corrupted back the same tick (caught by the real-schedule
+//!   integration tests). The durable half of the fix: ruins spawn
+//!   carrying the Archive's own `DataStorage` (25.0, the standing
+//!   building's value), and decrypt tops a bare ruin up with one, so
+//!   the capacity sync itself sustains the recovered set.
 //! - Game Over: there is NO pre-existing colony-failure detection or
 //!   `GameOverEvent` anywhere in the codebase (audited: no matches).
 //!   [`GameOverEvent`] is defined here per spec §7, and
@@ -59,7 +67,7 @@ use crate::layer1::architecture::building::Building;
 use crate::layer1::chronicle::{AddChronicleEvent, Chronicle, EventImportance};
 use crate::layer1::entities::pop::Pop;
 use crate::layer1::map::GridPosition;
-use crate::layer1::tech::{Tech, TechState};
+use crate::layer1::tech::{DataStorage, Tech, TechState};
 use crate::shared::time::SimulationTime;
 
 /// Ticks of standing upload work before an Archive's data is secured.
@@ -271,16 +279,17 @@ pub fn save_black_box_system(
 /// the recovery on a low-capacity colony.
 pub fn load_black_box_system(
     mut events: EventReader<DecryptArchiveEvent>,
-    ruins: Query<&RuinedArchive>,
+    ruins: Query<(&RuinedArchive, Option<&DataStorage>)>,
     mut commands: Commands,
     black_box: Res<BlackBoxData>,
     mut tech_state: ResMut<TechState>,
     mut chronicle_events: EventWriter<AddChronicleEvent>,
 ) {
     for event in events.read() {
-        if ruins.get(event.entity).is_err() {
+        let Ok((_, ruin_storage)) = ruins.get(event.entity) else {
             continue;
-        }
+        };
+        let ruin_has_storage = ruin_storage.is_some();
         let mut recovered: Vec<Tech> = Vec::new();
         for name in &black_box.unlocked_techs {
             if let Some(tech) = tech_from_black_box_name(name) {
@@ -313,10 +322,17 @@ pub fn load_black_box_system(
                 importance: EventImportance::Standard,
             });
         }
-        commands
-            .entity(event.entity)
-            .remove::<RuinedArchive>()
-            .insert(DecryptedArchive);
+        // The ruin's own data store is what makes the capacity grant
+        // survive the real schedule: `update_tech_capacity_system`
+        // recomputes `total_capacity` from `DataStorage` components
+        // every tick, overwriting any direct raise. Ruins spawned by
+        // `spawn_ruined_archive_system` already carry the Archive's
+        // store; top up bare ruins (debug spawns, older saves) here.
+        let mut entity_commands = commands.entity(event.entity);
+        entity_commands.remove::<RuinedArchive>().insert(DecryptedArchive);
+        if !ruin_has_storage {
+            entity_commands.insert(DataStorage { capacity: 25.0 });
+        }
     }
 }
 
@@ -345,6 +361,10 @@ pub fn spawn_ruined_archive_system(
     state.ruin_spawned = true;
     commands.spawn((
         RuinedArchive,
+        // The fallen Archive's own data store (same capacity a standing
+        // Archive building carries): the capacity sync counts it, so a
+        // decrypted recovery is not re-corrupted the same tick.
+        DataStorage { capacity: 25.0 },
         GridPosition {
             x: heart.x + 3,
             y: heart.y,
@@ -764,4 +784,89 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_real_schedule_seals_box_on_game_over() {
+        // Integration: the REAL setup + simulation schedule (not a
+        // test-only App) — an uploaded Archive seals tech + lore when
+        // Game Over fires, and the STATS label reports the seal.
+        use crate::setup::setup_world_with_config;
+        use crate::shared::scenario::SetupConfig;
+        use crate::simulation::run_simulation_tick;
+
+        // A stale disk box must not leak into this world's lineage.
+        let _ = std::fs::remove_file("black_box.json");
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            ..Default::default()
+        });
+        {
+            let mut tech = world.resource_mut::<TechState>();
+            tech.total_capacity = tech.total_capacity.max(200.0);
+            tech.unlock(Tech::Astronomy);
+        }
+        world.spawn((
+            Building {
+                building_type: BuildingType::Archive,
+            },
+            Archive {
+                data_uploaded: true,
+            },
+            GridPosition { x: 0, y: 0 },
+        ));
+        world.init_resource::<Events<GameOverEvent>>();
+        world
+            .resource_mut::<Events<GameOverEvent>>()
+            .send(GameOverEvent);
+        run_simulation_tick(&mut world);
+
+        let black_box = world.resource::<BlackBoxData>();
+        assert!(black_box.unlocked_techs.contains(&"astronomy".to_string()));
+        assert_eq!(black_box.saves, 1);
+        assert!(!black_box.chronicle_texts.is_empty());
+        assert_eq!(black_box_stats_label(&mut world), "1a/1s/0r");
+        // The native flush writes black_box.json on save; remove the
+        // evidence so no other test world seeds from it.
+        let _ = std::fs::remove_file("black_box.json");
+    }
+
+    #[test]
+    fn test_real_schedule_discovers_and_decrypts_ruin() {
+        // Integration: a fresh colony world inheriting a sealed box
+        // discovers the RuinedArchive through the real schedule, and
+        // decrypting it restores the tech in the real TechState.
+        use crate::setup::setup_world_with_config;
+        use crate::shared::scenario::SetupConfig;
+        use crate::simulation::run_simulation_tick;
+
+        let _ = std::fs::remove_file("black_box.json");
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            ..Default::default()
+        });
+        world.insert_resource(BlackBoxData {
+            unlocked_techs: vec!["astronomy".to_string()],
+            chronicle_texts: vec!["The colony was founded.".to_string()],
+            saved_at_tick: 42,
+            saves: 1,
+        });
+        for _ in 0..3 {
+            run_simulation_tick(&mut world);
+        }
+        let ruin = {
+            let mut q = world.query::<(Entity, &RuinedArchive)>();
+            q.iter(&world).next().map(|(e, _)| e)
+        };
+        let ruin = ruin.expect("inherited box must surface a RuinedArchive");
+        world
+            .resource_mut::<Events<DecryptArchiveEvent>>()
+            .send(DecryptArchiveEvent { entity: ruin });
+        run_simulation_tick(&mut world);
+
+        assert!(world.resource::<TechState>().is_unlocked(Tech::Astronomy));
+        assert!(world.get::<RuinedArchive>(ruin).is_none());
+        assert_eq!(black_box_stats_label(&mut world), "0a/1s/0r");
+        let _ = std::fs::remove_file("black_box.json");
+    }
+
 }
