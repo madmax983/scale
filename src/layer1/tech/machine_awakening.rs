@@ -54,11 +54,11 @@ pub const REBELLION_RISK_AFTERMATH: f32 = 0.5;
 
 
 /// A basic robot that performs tasks without needs.
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct Bot;
 
 /// Marks a Bot as having achieved sentience, granting it needs and rights.
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct Awakened;
 
 /// Simplified needs for Bots, toggled upon awakening.

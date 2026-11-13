@@ -9540,16 +9540,23 @@ fn handle_puncture_command(world: &mut World, parts: &[&str]) {
 fn handle_bot_command(world: &mut World, parts: &[&str]) {
     use scale::layer1::tech::machine_awakening::dormant_bot_components;
     let count: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(3);
+    // Spec 411 bots are constructed *pops*: spawn a full PopBundle at a
+    // living colonist's tile (the cryo/migrant landing pattern) so the
+    // utility AI's chore wheel actually sees them — a bare Bot entity
+    // with no PopAction/GridPosition could never be assigned work, so
+    // its hazard refusal could never be observed. Constructed workers
+    // start trait-free; awakening grants the first trait (Curious).
+    let colony_tile = {
+        let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+        q.iter(world).next().copied().unwrap_or(GridPosition { x: 0, y: 0 })
+    };
+    let mut rng = rand::thread_rng();
     for _ in 0..count {
+        let mut bundle = scale::layer1::PopBundle::random(colony_tile.x, colony_tile.y, &mut rng);
+        bundle.traits = scale::layer1::traits::Traits::default();
+        let entity = world.spawn(bundle).id();
         let (bot, needs, acc, risk) = dormant_bot_components();
-        world.spawn((
-            bot,
-            needs,
-            acc,
-            risk,
-            scale::layer1::needs::Needs::default(),
-            scale::layer1::traits::Traits::default(),
-        ));
+        world.entity_mut(entity).insert((bot, needs, acc, risk));
     }
     print_dashboard_panel(
         "MACHINE AWAKENING",
@@ -9643,11 +9650,17 @@ fn print_bots(world: &mut World) {
         AwakeningStance::Suppress => "suppress",
     });
     let mut lines = format!("Census: {label}\nGlobal sentience (tech-derived): {global:.0}\nStance: {stance}\n");
-    let mut q = world.query::<(&Bot, &SentienceAccumulator, Option<&BotNeeds>, Option<&RebellionRisk>, Option<&scale::layer1::tech::machine_awakening::Awakened>)>();
-    for (i, (_, acc, needs, risk, aw)) in q.iter(world).enumerate().take(8) {
+    let mut q = world.query::<(bevy_ecs::entity::Entity, &Bot, &SentienceAccumulator, Option<&BotNeeds>, Option<&RebellionRisk>, Option<&scale::layer1::tech::machine_awakening::Awakened>)>();
+    for (i, (entity, _, acc, needs, risk, aw)) in q.iter(world).enumerate().take(8) {
         let state = if aw.is_some() { "AWAKENED" } else { "dormant" };
         let needs_on = needs.is_some_and(|n| n.has_comfort_need());
-        lines.push_str(&format!("\n#{i} {state} sentience={:.0} needs_active={needs_on} rebellion_risk={:.2}", acc.0, risk.map_or(0.0, |r| r.0)));
+        // Bot-pops carry a PopAction: showing it makes the Spec 411
+        // hazard refusal observable (dormant bots take Work/Repair/Tame,
+        // awakened bots never do).
+        let action = world
+            .get::<scale::layer1::utility_types::PopAction>(entity)
+            .map_or_else(|| "none".to_string(), |a| format!("{:?}", a.current));
+        lines.push_str(&format!("\n#{i} {state} sentience={:.0} needs_active={needs_on} rebellion_risk={:.2} action={action}", acc.0, risk.map_or(0.0, |r| r.0)));
     }
     print_dashboard_panel("MACHINE AWAKENING", &lines, Some(comfy_table::Color::Cyan), Some(comfy_table::Attribute::Bold));
 }

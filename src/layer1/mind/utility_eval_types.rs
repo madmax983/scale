@@ -59,6 +59,7 @@ use crate::layer1::stress::{Breakdown, StressTracker, BREAKDOWN_TICKS_REQUIRED};
 use crate::layer1::taboo::TabooState;
 use crate::layer1::traits::Traits;
 use crate::layer1::social::feral_outpost::CulturalDrift;
+use crate::layer1::tech::machine_awakening::{Awakened, Bot};
 use crate::layer1::unrest::MentalState;
 use crate::layer1::utility_types::{
     calculate_context_score, ActionType, HobbyType, PopAction, UtilityWeights,
@@ -116,6 +117,8 @@ pub struct PopEvaluationQuery {
     pub cultural_drift: Option<&'static CulturalDrift>,
     pub dissatisfaction:
         Option<&'static crate::layer1::social::dissatisfaction::Dissatisfaction>,
+    pub bot: Option<&'static Bot>,
+    pub awakened: Option<&'static Awakened>,
 }
 
 impl PopEvalData {
@@ -154,6 +157,8 @@ impl PopEvalData {
             is_fringe: item.cultural_drift.is_some_and(|d| d.is_fringe()),
             wears_eva_suit: false,
             dissatisfaction_total: item.dissatisfaction.map_or(0.0, |d| d.total()),
+            is_bot: item.bot.is_some(),
+            is_awakened_bot: item.bot.is_some() && item.awakened.is_some(),
         }
     }
 }
@@ -244,6 +249,12 @@ pub struct PopEvalData {
     /// Structural dissatisfaction total (Spec 1387), 0.0 when the pop
     /// carries no ledger. Read by the sabotage evaluator's Bitter gate.
     pub dissatisfaction_total: f32,
+    /// Whether the pop is a constructed Bot (Spec 411).
+    pub is_bot: bool,
+    /// Whether the pop is a constructed Bot that has Awakened
+    /// (Spec 411: `Bot` + `Awakened`). Read by the utility AI's
+    /// hazard-refusal gate via `awakened_accepts_hazard`.
+    pub is_awakened_bot: bool,
 }
 
 #[cfg(test)]
@@ -282,6 +293,8 @@ impl PopEvalData {
             is_fringe: false,
             wears_eva_suit: false,
             dissatisfaction_total: 0.0,
+            is_bot: false,
+            is_awakened_bot: false,
         }
     }
 }
