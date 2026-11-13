@@ -9604,6 +9604,22 @@ fn handle_cryo_command(world: &mut World, parts: &[&str]) {
         let bundle = scale::layer1::PopBundle::random(colony_tile.x, colony_tile.y, &mut rng);
         world.spawn((bundle, CryoShock::default()));
     }
+    // Item 201: this debug arrival wave mirrors the beacon migrant
+    // bridge, so it emits the same arrival chronicle line (condition +
+    // duration, one line per wave) when the event channel exists —
+    // drained into the Chronicle by the simulation schedule next tick.
+    if world.contains_resource::<bevy_ecs::event::Events<
+        scale::layer1::core::chronicle::AddChronicleEvent,
+    >>() {
+        world
+            .resource_mut::<bevy_ecs::event::Events<
+                scale::layer1::core::chronicle::AddChronicleEvent,
+            >>()
+            .send(scale::layer1::core::chronicle::AddChronicleEvent {
+                text: scale::layer1::cryo_shock::cryo_arrival_chronicle_text(count),
+                importance: scale::layer1::core::chronicle::EventImportance::Major,
+            });
+    }
     print_dashboard_panel(
         "CRYO SHOCK",
         &format!(

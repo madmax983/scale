@@ -1853,7 +1853,10 @@ pub fn beacon_migrant_arrival_bridge(
         }
 
         chronicle_events.send(crate::layer1::core::chronicle::AddChronicleEvent {
-            text: format!("{} migrants have arrived in the colony.", event.count),
+            // Item 201: name the cryo shock these arrivals spawn with
+            // (condition + live duration) — one line per arrival wave,
+            // as before, just no longer silent about the debuff.
+            text: crate::layer1::cryo_shock::cryo_arrival_chronicle_text(event.count),
             importance: crate::layer1::core::chronicle::EventImportance::Major,
         });
     }

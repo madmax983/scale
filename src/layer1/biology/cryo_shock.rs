@@ -29,6 +29,15 @@
 //!   `medical::healing_system` consumes). Patients recover
 //!   [`CRYO_RECOVERY_DECAY_MULTIPLIER`]x faster in [`decay_cryo_shock_system`]
 //!   (spec §5).
+//! - Chronicle telegraphing (Item 201, 2026-11-13): cryo shock used to be
+//!   Chronicle-silent end to end — the only tell was STATS `cryo=`. Now
+//!   the two genuinely-from-cryo arrival legs name the condition and its
+//!   live duration ([`cryo_arrival_chronicle_text`] for the beacon
+//!   migrant bridge, [`cryo_thaw_chronicle_text`] for the cryo-prison
+//!   thaw, one line per arrival wave), and expiry emits one batched
+//!   Minor line ([`cryo_recovery_chronicle_text`]) per tick from
+//!   [`decay_cryo_shock_system`]. Text wiring only — no balance
+//!   constants or mechanics changed.
 
 use bevy_ecs::prelude::*;
 
@@ -113,7 +122,11 @@ pub fn decay_cryo_shock_system(
     mut commands: Commands,
     hospitals: Query<(), With<Hospital>>,
     mut query: Query<(Entity, &mut CryoShock, Option<&AssignedTo>)>,
+    mut chronicle: Option<
+        ResMut<Events<crate::layer1::core::chronicle::AddChronicleEvent>>,
+    >,
 ) {
+    let mut recovered: usize = 0;
     for (entity, mut shock, assigned) in query.iter_mut() {
         let in_recovery_bed = assigned.is_some_and(|a| {
             a.assignment_type == AssignmentType::Patient && hospitals.get(a.entity).is_ok()
@@ -125,8 +138,21 @@ pub fn decay_cryo_shock_system(
         };
         if shock.duration_ticks <= decay {
             commands.entity(entity).remove::<CryoShock>();
+            recovered += 1;
         } else {
             shock.duration_ticks -= decay;
+        }
+    }
+    // Item 201: expiry was Chronicle-silent. Emit ONE batched Minor
+    // line per tick no matter how many pops recover together
+    // (spam-capped), using the codebase's optional-chronicle idiom so
+    // harnesses without the event resource simply skip the line.
+    if recovered > 0 {
+        if let Some(events) = chronicle.as_deref_mut() {
+            events.send(crate::layer1::core::chronicle::AddChronicleEvent {
+                text: cryo_recovery_chronicle_text(recovered),
+                importance: crate::layer1::core::chronicle::EventImportance::Minor,
+            });
         }
     }
 }
@@ -144,6 +170,45 @@ pub fn cryo_shock_stats_label(world: &mut World) -> String {
     cryo_shock_count(world).to_string()
 }
 
+/// Chronicle line for a beacon-migrant arrival wave (Item 201): one
+/// line per wave, naming the condition and its live duration. The
+/// duration is read from [`CRYO_SHOCK_DURATION_TICKS`] at format time —
+/// never hardcoded, so balance tunes stay truthful in the text.
+#[must_use]
+pub fn cryo_arrival_chronicle_text(count: u32) -> String {
+    format!(
+        "{count} migrants have arrived in the colony, groggy with cryo shock — half speed for {CRYO_SHOCK_DURATION_TICKS} ticks while they thaw."
+    )
+}
+
+/// Chronicle line for a cryo-prison thaw wave (Item 201): one line per
+/// thaw system run, naming the condition and its live duration.
+#[must_use]
+pub fn cryo_thaw_chronicle_text(count: usize) -> String {
+    if count == 1 {
+        format!(
+            "A thawed prisoner stumbles out of suspension, groggy with cryo shock — half speed for {CRYO_SHOCK_DURATION_TICKS} ticks while they thaw."
+        )
+    } else {
+        format!(
+            "{count} thawed prisoners stumble out of suspension, groggy with cryo shock — half speed for {CRYO_SHOCK_DURATION_TICKS} ticks while they thaw."
+        )
+    }
+}
+
+/// Chronicle line for cryo-shock recovery/expiry (Item 201): batched —
+/// one line per tick for however many pops recovered together.
+#[must_use]
+pub fn cryo_recovery_chronicle_text(count: usize) -> String {
+    if count == 1 {
+        "Recovered from cryo shock: a colonist is steady again, up to full speed.".to_string()
+    } else {
+        format!(
+            "Recovered from cryo shock: {count} colonists are steady again, up to full speed."
+        )
+    }
+}
+
 /// Player-facing strings for this mechanic (IP-guard tested): original,
 /// generic wording only.
 #[must_use]
@@ -154,6 +219,9 @@ pub fn cryo_shock_public_strings() -> Vec<&'static str> {
         "A new arrival stumbles out of suspension, groggy and half-frozen.",
         "Still shaking off cryo shock",
         "Recovered from cryo shock",
+        "migrants have arrived in the colony, groggy with cryo shock",
+        "A thawed prisoner stumbles out of suspension, groggy with cryo shock",
+        "Recovered from cryo shock: a colonist is steady again, up to full speed.",
     ]
 }
 
@@ -502,6 +570,210 @@ mod tests {
                 assert!(
                     !lower.contains(b),
                     "banned term '{b}' in public string: {s}"
+                );
+            }
+        }
+    }
+
+    // --- Item 201: Cryo Shock Chronicle telegraphing (2026-11-13) ---
+
+    #[test]
+    fn test_cryo_arrival_text_names_condition_and_duration() {
+        // (a) An arrival wave must name the condition and how long it
+        // lasts, reading the live duration constant (250 after the
+        // 2026-11-11 balance tune — never a hardcoded stale value).
+        let text = cryo_arrival_chronicle_text(3);
+        assert!(
+            text.contains("3 migrants have arrived"),
+            "arrival line must keep the wave count: {text}"
+        );
+        assert!(
+            text.to_lowercase().contains("cryo shock"),
+            "arrival line must name cryo shock: {text}"
+        );
+        assert!(
+            text.contains(&CRYO_SHOCK_DURATION_TICKS.to_string()),
+            "arrival line must name the live duration {}: {text}",
+            CRYO_SHOCK_DURATION_TICKS
+        );
+    }
+
+    #[test]
+    fn test_cryo_thaw_text_names_condition_and_duration() {
+        let text = cryo_thaw_chronicle_text(1);
+        assert!(
+            text.to_lowercase().contains("cryo shock"),
+            "thaw line must name cryo shock: {text}"
+        );
+        assert!(
+            text.contains(&CRYO_SHOCK_DURATION_TICKS.to_string()),
+            "thaw line must name the live duration {}: {text}",
+            CRYO_SHOCK_DURATION_TICKS
+        );
+        let text2 = cryo_thaw_chronicle_text(2);
+        assert!(text2.contains('2'), "thaw line must count the wave: {text2}");
+    }
+
+    #[test]
+    fn test_cryo_recovery_text_names_condition_and_count() {
+        let one = cryo_recovery_chronicle_text(1);
+        assert!(
+            one.contains("Recovered from cryo shock"),
+            "recovery line must use the established wording: {one}"
+        );
+        let many = cryo_recovery_chronicle_text(4);
+        assert!(
+            many.contains("Recovered from cryo shock") && many.contains('4'),
+            "batched recovery line must name count: {many}"
+        );
+    }
+
+    #[test]
+    fn test_migrant_arrival_chronicle_names_cryo_shock() {
+        // The beacon migrant bridge is one chronicle line per arrival
+        // WAVE (not per pop), and that line must telegraph cryo shock.
+        use crate::layer1::core::chronicle::AddChronicleEvent;
+        use crate::layer1::economy::remittances::MigrantArrivalEvent;
+        use crate::layer1::integration::beacon_migrant_arrival_bridge;
+
+        let mut app = App::new();
+        app.add_event::<MigrantArrivalEvent>();
+        app.add_event::<AddChronicleEvent>();
+        app.add_systems(Update, beacon_migrant_arrival_bridge);
+        app.world_mut()
+            .spawn(crate::layer1::PopBundle::random(5, 5, &mut rand::thread_rng()));
+        app.world_mut()
+            .resource_mut::<bevy_ecs::event::Events<MigrantArrivalEvent>>()
+            .send(MigrantArrivalEvent {
+                count: 3,
+                ..Default::default()
+            });
+        app.update();
+        app.update();
+
+        let events = app
+            .world()
+            .resource::<bevy_ecs::event::Events<AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        let texts: Vec<String> = reader.read(events).map(|e| e.text.clone()).collect();
+        assert_eq!(
+            texts.len(),
+            1,
+            "one chronicle line per arrival wave, got: {texts:?}"
+        );
+        assert!(
+            texts[0].to_lowercase().contains("cryo shock"),
+            "arrival chronicle must name cryo shock: {}",
+            texts[0]
+        );
+        assert!(
+            texts[0].contains(&CRYO_SHOCK_DURATION_TICKS.to_string()),
+            "arrival chronicle must name duration: {}",
+            texts[0]
+        );
+    }
+
+    #[test]
+    fn test_cryo_recovery_emits_one_batched_minor_chronicle() {
+        // (b) Expiry/recovery emits a Minor chronicle line, batched:
+        // three pops expiring the same tick produce ONE line, not three.
+        use crate::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
+
+        let mut app = App::new();
+        app.add_event::<AddChronicleEvent>();
+        for _ in 0..3 {
+            app.world_mut().spawn((
+                Pop,
+                CryoShock {
+                    duration_ticks: 1,
+                    severity: 0.5,
+                },
+            ));
+        }
+        // A still-shocked pop must not be counted as recovered.
+        app.world_mut().spawn((
+            Pop,
+            CryoShock {
+                duration_ticks: 100,
+                severity: 0.5,
+            },
+        ));
+        app.add_systems(Update, decay_cryo_shock_system);
+        app.update();
+
+        let events = app
+            .world()
+            .resource::<bevy_ecs::event::Events<AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        let evs: Vec<_> = reader.read(events).collect();
+        assert_eq!(
+            evs.len(),
+            1,
+            "same-tick expiries must batch into one chronicle line, got {}",
+            evs.len()
+        );
+        assert_eq!(evs[0].importance, EventImportance::Minor);
+        assert!(
+            evs[0].text.contains("Recovered from cryo shock") && evs[0].text.contains('3'),
+            "recovery line must name condition + recovered count: {}",
+            evs[0].text
+        );
+    }
+
+    #[test]
+    fn test_cryo_no_recovery_chronicle_when_nothing_expires() {
+        use crate::layer1::core::chronicle::AddChronicleEvent;
+
+        let mut app = App::new();
+        app.add_event::<AddChronicleEvent>();
+        app.world_mut().spawn((
+            Pop,
+            CryoShock {
+                duration_ticks: 100,
+                severity: 0.5,
+            },
+        ));
+        app.add_systems(Update, decay_cryo_shock_system);
+        app.update();
+
+        let events = app
+            .world()
+            .resource::<bevy_ecs::event::Events<AddChronicleEvent>>();
+        let mut reader = events.get_cursor();
+        assert_eq!(
+            reader.read(events).count(),
+            0,
+            "no expiry, no recovery chronicle line"
+        );
+    }
+
+    #[test]
+    fn test_ip_guard_chronicle_texts() {
+        // Every new player-facing chronicle text passes the same
+        // banned-terms guard as the public strings.
+        let banned = [
+            "sad king billy",
+            "windsor",
+            "hibernation sickness",
+            "carbonite",
+            "han solo",
+            "ripley",
+            "nostromo",
+            "buck rogers",
+            "futurama",
+            "demolition man",
+            "stallone",
+        ];
+        for text in [
+            cryo_arrival_chronicle_text(2),
+            cryo_thaw_chronicle_text(2),
+            cryo_recovery_chronicle_text(2),
+        ] {
+            let lower = text.to_lowercase();
+            for b in banned {
+                assert!(
+                    !lower.contains(b),
+                    "banned term '{b}' in chronicle text: {text}"
                 );
             }
         }
