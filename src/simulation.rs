@@ -650,6 +650,7 @@ pub fn build_simulation_schedule() -> Schedule {
             crate::layer1::tourism::spawn_tourist_system,
             crate::layer1::tourism::process_tourist_arrival_system,
             crate::layer1::tourism::tourist_consumption_system,
+            crate::layer1::tourism::tourist_self_care_system,
             crate::layer1::tourism::tourist_departure_system,
         )
             .chain(),

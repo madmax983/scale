@@ -41,6 +41,48 @@
 //!   (spec RED test), [`TOURIST_STAY_TICKS`] `800`, [`EAT_INTERVAL`]
 //!   `100`, [`EAT_AMOUNT`] `1.0`, [`REP_PENALTY_EARLY_DEPARTURE`] `0.25`,
 //!   [`DISEASE_CARRIER_FRACTION`] `0.10`.
+//!
+//! # Structural fixes (2026-11-13, balance-census follow-up)
+//!
+//! The 2026-11-10 census found tourism uncompletable in practice
+//! (138 arrivals, 138 early departures, 0 completed stays, reputation
+//! 0.00 in 24/24 colonies). Three structural defects, three legs:
+//!
+//! * **Reputation was a one-way ratchet** — the only mutation was
+//!   −0.25 per early departure and attraction gates at 0.5, so ~3 bad
+//!   departures ended tourism forever. Completed stays now restore
+//!   [`REP_GAIN_COMPLETED_STAY`] (capped at 1.0).
+//! * **Stays were uncompletable** — tourists carry the real [`Needs`],
+//!   `decay_needs_system` decays rest/leisure for every `Needs` entity
+//!   (tourists included; hygiene decay requires a `Filth` component,
+//!   which tourists do not carry, so hygiene is topped up defensively
+//!   rather than because it currently decays), yet only hunger had a
+//!   restoration leg (meals). Tourists
+//!   never join utility AI, so nothing restored rest/leisure/hygiene
+//!   and `needs.worst() < 0.2` fired ~tick 400 of an 800-tick stay.
+//!   [`tourist_self_care_system`] is the vacation leg: on a cadence,
+//!   present tourists recover rest/leisure/hygiene (leisure scaled by
+//!   local `BeautyGrid` beauty, the same seam `apply_beauty_effects`
+//!   uses for pops). No parallel needs system, no colony jobs.
+//! * **Payment ignored outcome** — the full [`TOURIST_WEALTH`] banked
+//!   on arrival. It is now split: [`TOURIST_ARRIVAL_PAYMENT`] on
+//!   landing, [`TOURIST_COMPLETION_PAYMENT`] only on a completed stay
+//!   (early departure forfeits it). The portions sum to the unchanged
+//!   total, and `credits_earned` counts only money actually paid.
+//!
+//! * **Beauty-gate audit (verdict: gate unchanged).** The only
+//!   production writer of `BeautyGrid` is `update_beauty_grid_system`,
+//!   which clears the grid and recomputes a single mixed sum per tile:
+//!   terrain (Grass +1 / Dirt −1 / Path −2 from `TerrainGrid`), clutter
+//!   penalty, `BeautySource` entities with radius falloff, and waste
+//!   items. There is no built-only accumulator or resource to read —
+//!   worldgen terrain alone sums to ~2,100 on an 80×50 grass map, far
+//!   over the 300 gate, and traffic erosion (Grass→Dirt→Path) decays
+//!   that same sum. Separating built beauty would require a parallel
+//!   grid inside `update_beauty_grid_system` (touching the beauty
+//!   system every room-quality/window/cabin-fever consumer reads),
+//!   which is not a cheap tourism-local seam, so [`BEAUTY_THRESHOLD`]
+//!   and [`global_beauty`] are deliberately left unchanged.
 
 use crate::layer1::beauty::BeautyGrid;
 use crate::layer1::biology::symbiotic_insurgency::MindSporeInfection;
@@ -71,6 +113,28 @@ pub const EAT_HUNGER_GAIN: f32 = 0.5;
 pub const MISSED_MEAL_HUNGER_LOSS: f32 = 0.3;
 /// Reputation lost per early (needs-cratered) departure.
 pub const REP_PENALTY_EARLY_DEPARTURE: f32 = 0.25;
+/// Reputation restored per completed stay (structural fix: the
+/// recovery leg that makes reputation two-way again; capped at 1.0).
+pub const REP_GAIN_COMPLETED_STAY: f32 = 0.10;
+/// Portion of [`TOURIST_WEALTH`] paid on landing. The remainder is
+/// contingent on a completed stay (see [`TOURIST_COMPLETION_PAYMENT`]).
+pub const TOURIST_ARRIVAL_PAYMENT: f32 = 100.0;
+/// Portion of [`TOURIST_WEALTH`] paid only when a tourist completes
+/// their stay; forfeited on early departure. Arrival + completion
+/// portions sum to the unchanged [`TOURIST_WEALTH`] total (500).
+pub const TOURIST_COMPLETION_PAYMENT: f32 = 400.0;
+/// Ticks between tourist self-care recoveries (vacation leg).
+pub const SELF_CARE_INTERVAL: u64 = 10;
+/// Rest restored per self-care tick-interval.
+pub const SELF_CARE_REST_GAIN: f32 = 0.03;
+/// Leisure restored per self-care tick-interval (before beauty bonus).
+pub const SELF_CARE_LEISURE_GAIN: f32 = 0.03;
+/// Hygiene restored per self-care tick-interval.
+pub const SELF_CARE_HYGIENE_GAIN: f32 = 0.03;
+/// Extra leisure per point of local tile beauty per self-care tick.
+pub const SELF_CARE_BEAUTY_BONUS_PER_POINT: f32 = 0.002;
+/// Cap on the local-beauty leisure bonus per self-care tick.
+pub const SELF_CARE_BEAUTY_BONUS_CAP: f32 = 0.02;
 /// Fraction of tourists who bypass screening carrying a mind-spore
 /// infection (deterministic per-arrival roll, see
 /// [`tourist_carries_disease`]).
@@ -86,6 +150,9 @@ pub const TOURISM_EARLY_DEPARTURE_TEXT: &str =
 /// Player-facing chronicle text when a tourist is found carrying spores.
 pub const TOURISM_DISEASE_TEXT: &str =
     "A visitor who bypassed screening has been found carrying spores.";
+/// Player-facing chronicle text when a tourist completes their stay.
+pub const TOURISM_COMPLETED_TEXT: &str =
+    "A visitor has completed their stay and departed happy. Word travels fast out there.";
 
 /// The colony's food policy toward docked tourists (spec §1 dilemma).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -104,7 +171,8 @@ pub enum TourismPolicy {
 /// AI (which visitors never join) never assigns colony jobs.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Tourist {
-    /// Credits paid to the colony on landing.
+    /// Total credits the tourist can pay the colony: the arrival
+    /// portion on landing, the remainder only on a completed stay.
     pub wealth: f32,
     /// Tick the tourist landed.
     pub arrival_tick: u64,
@@ -179,6 +247,21 @@ pub fn global_beauty(grid: &BeautyGrid) -> f32 {
 #[must_use]
 pub fn tourist_carries_disease(roll: f32) -> bool {
     roll < DISEASE_CARRIER_FRACTION
+}
+
+/// Credits paid on landing for a tourist of the given wealth: the
+/// fixed arrival portion, never more than the tourist carries.
+#[must_use]
+pub fn arrival_payment(wealth: f32) -> f32 {
+    TOURIST_ARRIVAL_PAYMENT.min(wealth)
+}
+
+/// Credits paid on a completed stay for a tourist of the given
+/// wealth: everything not already paid on arrival (forfeited on
+/// early departure).
+#[must_use]
+pub fn completion_payment(wealth: f32) -> f32 {
+    (wealth - arrival_payment(wealth)).max(0.0)
 }
 
 /// Spec §6: high beauty queues tourists. Evaluated on a cadence; each
@@ -272,8 +355,11 @@ pub fn spawn_tourist_system(
     }
 }
 
-/// Spec RED test 2, bridged: arrival pays the tourist's wealth into
-/// the real `ColonyResources` credits ledger.
+/// Spec RED test 2, bridged + structural fix: arrival pays only the
+/// arrival portion of the tourist's wealth into the real
+/// `ColonyResources` credits ledger. The completion portion is paid
+/// by [`tourist_departure_system`] on a completed stay only, and
+/// `credits_earned` counts only money actually paid.
 pub fn process_tourist_arrival_system(
     mut events: EventReader<TouristArrivalEvent>,
     tourists: Query<&Tourist>,
@@ -282,8 +368,9 @@ pub fn process_tourist_arrival_system(
 ) {
     for event in events.read() {
         if let Ok(tourist) = tourists.get(event.tourist) {
-            resources.add_credits(tourist.wealth);
-            state.credits_earned += tourist.wealth;
+            let paid = arrival_payment(tourist.wealth);
+            resources.add_credits(paid);
+            state.credits_earned += paid;
             state.total_arrived += 1;
         }
     }
@@ -313,13 +400,55 @@ pub fn tourist_consumption_system(
     }
 }
 
-/// Spec §5 anger leg: a tourist whose worst need craters departs early
-/// and costs reputation (ending the boom under 0.5); a tourist who
-/// reaches their departure tick leaves satisfied.
+/// Structural fix — the vacation leg. Tourists are on holiday: on a
+/// [`SELF_CARE_INTERVAL`] cadence, present tourists recover rest,
+/// leisure, and hygiene on the real [`Needs`] component. This bridges
+/// the restoration gap left by tourists never joining utility AI
+/// (colony pops restore these needs through jobs/actions; visitors
+/// deliberately have none). Leisure recovery scales with the beauty
+/// of the tile the tourist stands on — the same `BeautyGrid` seam
+/// `apply_beauty_effects_system` uses for pops — so pretty colonies
+/// keep guests happier. Hunger is NOT touched here; meals own it.
+pub fn tourist_self_care_system(
+    time: Res<SimulationTime>,
+    grid: Option<Res<BeautyGrid>>,
+    mut tourists: Query<(&mut Needs, Option<&GridPosition>), With<Tourist>>,
+) {
+    if time.tick == 0 || !time.tick.is_multiple_of(SELF_CARE_INTERVAL) {
+        return;
+    }
+    for (mut needs, pos) in &mut tourists {
+        needs.rest = (needs.rest + SELF_CARE_REST_GAIN).min(1.0);
+        needs.hygiene = (needs.hygiene + SELF_CARE_HYGIENE_GAIN).min(1.0);
+        let beauty_bonus = match (grid.as_deref(), pos) {
+            (Some(grid), Some(pos)) => {
+                let beauty = match (usize::try_from(pos.x), usize::try_from(pos.y)) {
+                    (Ok(x), Ok(y)) => grid.get(x, y),
+                    _ => 0.0,
+                };
+                if beauty > 0.0 {
+                    (beauty * SELF_CARE_BEAUTY_BONUS_PER_POINT).min(SELF_CARE_BEAUTY_BONUS_CAP)
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0,
+        };
+        needs.leisure = (needs.leisure + SELF_CARE_LEISURE_GAIN + beauty_bonus).min(1.0);
+    }
+}
+
+/// Spec §5 anger leg + structural fixes: a tourist whose worst need
+/// craters departs early, costs reputation (ending the boom under
+/// 0.5), and forfeits the completion payment; a tourist who reaches
+/// their departure tick leaves satisfied — the colony banks the
+/// completion payment and reputation recovers by
+/// [`REP_GAIN_COMPLETED_STAY`] (capped at 1.0).
 pub fn tourist_departure_system(
     mut commands: Commands,
     time: Res<SimulationTime>,
     mut state: ResMut<TourismState>,
+    mut resources: Option<ResMut<ColonyResources>>,
     tourists: Query<(Entity, &Tourist, &Needs)>,
     mut chronicle: Option<ResMut<Events<AddChronicleEvent>>>,
 ) {
@@ -339,6 +468,20 @@ pub fn tourist_departure_system(
             commands.entity(entity).despawn();
         } else if time.tick >= tourist.departure_tick {
             state.total_departed += 1;
+            state.reputation = (state.reputation + REP_GAIN_COMPLETED_STAY).min(1.0);
+            let paid = completion_payment(tourist.wealth);
+            if paid > 0.0 {
+                if let Some(resources) = resources.as_deref_mut() {
+                    resources.add_credits(paid);
+                    state.credits_earned += paid;
+                }
+            }
+            if let Some(events) = chronicle.as_deref_mut() {
+                events.send(AddChronicleEvent {
+                    text: TOURISM_COMPLETED_TEXT.to_string(),
+                    importance: EventImportance::Major,
+                });
+            }
             commands.entity(entity).despawn();
         }
     }
@@ -459,7 +602,13 @@ mod tests {
             .resource_mut::<Events<TouristArrivalEvent>>()
             .send(TouristArrivalEvent { tourist: tourist_ent });
         world.run_system_once(process_tourist_arrival_system).unwrap();
-        assert_eq!(world.resource::<ColonyResources>().credits, 600.0);
+        // Structural fix: only the arrival portion (100 of 500) banks
+        // on landing; the rest is contingent on a completed stay.
+        assert_eq!(world.resource::<ColonyResources>().credits, 200.0);
+        assert_eq!(
+            world.resource::<TourismState>().credits_earned,
+            TOURIST_ARRIVAL_PAYMENT
+        );
         assert_eq!(world.resource::<TourismState>().total_arrived, 1);
     }
 
@@ -532,6 +681,262 @@ mod tests {
         assert!(!tourist_carries_disease(0.99));
     }
 
+    // ---- Spec 408 structural fixes (2026-11-13): RED tests ----
+
+    #[test]
+    fn test_arrival_pays_only_arrival_portion() {
+        let mut world = World::new();
+        world.init_resource::<Events<TouristArrivalEvent>>();
+        world.insert_resource(ColonyResources {
+            credits: 100.0,
+            max_credits: 1_000_000.0,
+            ..Default::default()
+        });
+        world.init_resource::<TourismState>();
+        let tourist_ent = world
+            .spawn(Tourist {
+                wealth: TOURIST_WEALTH,
+                arrival_tick: 0,
+                departure_tick: 800,
+            })
+            .id();
+        world
+            .resource_mut::<Events<TouristArrivalEvent>>()
+            .send(TouristArrivalEvent { tourist: tourist_ent });
+        world.run_system_once(process_tourist_arrival_system).unwrap();
+        // Only the arrival portion lands on landing; the completion
+        // portion is withheld until a completed stay.
+        assert_eq!(
+            world.resource::<ColonyResources>().credits,
+            100.0 + TOURIST_ARRIVAL_PAYMENT
+        );
+        assert_eq!(
+            world.resource::<TourismState>().credits_earned,
+            TOURIST_ARRIVAL_PAYMENT
+        );
+        assert_eq!(
+            TOURIST_ARRIVAL_PAYMENT + TOURIST_COMPLETION_PAYMENT,
+            TOURIST_WEALTH,
+            "split portions must sum to the unchanged total wealth"
+        );
+    }
+
+    #[test]
+    fn test_completed_stay_pays_completion_and_restores_reputation() {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime {
+            tick: 800,
+            ..Default::default()
+        });
+        world.insert_resource(ColonyResources::default());
+        world.init_resource::<TourismState>();
+        world.resource_mut::<TourismState>().reputation = 0.40;
+        world.spawn((
+            Tourist { wealth: TOURIST_WEALTH, arrival_tick: 0, departure_tick: 800 },
+            Needs { hunger: 0.9, rest: 0.9, leisure: 0.9, hygiene: 0.9 },
+        ));
+        world.run_system_once(tourist_departure_system).unwrap();
+        let state = world.resource::<TourismState>();
+        assert_eq!(state.total_departed, 1);
+        assert_eq!(state.total_departed_early, 0);
+        assert!(
+            (state.reputation - (0.40 + REP_GAIN_COMPLETED_STAY)).abs() < 1e-6,
+            "completed stay must restore reputation, got {}",
+            state.reputation
+        );
+        assert_eq!(
+            world.resource::<ColonyResources>().credits,
+            TOURIST_COMPLETION_PAYMENT
+        );
+        assert_eq!(state.credits_earned, TOURIST_COMPLETION_PAYMENT);
+    }
+
+    #[test]
+    fn test_completed_stay_reputation_caps_at_one() {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime {
+            tick: 800,
+            ..Default::default()
+        });
+        world.insert_resource(ColonyResources::default());
+        world.init_resource::<TourismState>();
+        world.resource_mut::<TourismState>().reputation = 0.97;
+        world.spawn((
+            Tourist { wealth: TOURIST_WEALTH, arrival_tick: 0, departure_tick: 800 },
+            Needs { hunger: 0.9, rest: 0.9, leisure: 0.9, hygiene: 0.9 },
+        ));
+        world.run_system_once(tourist_departure_system).unwrap();
+        assert_eq!(world.resource::<TourismState>().reputation, 1.0);
+    }
+
+    #[test]
+    fn test_early_departure_forfeits_completion_payment() {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime {
+            tick: 100,
+            ..Default::default()
+        });
+        world.insert_resource(ColonyResources::default());
+        world.init_resource::<TourismState>();
+        world.spawn((
+            Tourist { wealth: TOURIST_WEALTH, arrival_tick: 0, departure_tick: 800 },
+            Needs { hunger: 0.1, rest: 0.9, leisure: 0.9, hygiene: 0.9 },
+        ));
+        world.run_system_once(tourist_departure_system).unwrap();
+        let state = world.resource::<TourismState>();
+        assert_eq!(state.total_departed_early, 1);
+        assert_eq!(world.resource::<ColonyResources>().credits, 0.0);
+        assert_eq!(state.credits_earned, 0.0);
+        assert!((state.reputation - 0.75).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_full_stay_total_payment_equals_full_wealth() {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        world.init_resource::<Events<TouristArrivalEvent>>();
+        world.insert_resource(ColonyResources {
+            credits: 0.0,
+            max_credits: 1_000_000.0,
+            ..Default::default()
+        });
+        world.init_resource::<TourismState>();
+        let ent = world
+            .spawn((
+                Tourist { wealth: TOURIST_WEALTH, arrival_tick: 0, departure_tick: 800 },
+                Needs { hunger: 0.9, rest: 0.9, leisure: 0.9, hygiene: 0.9 },
+            ))
+            .id();
+        world
+            .resource_mut::<Events<TouristArrivalEvent>>()
+            .send(TouristArrivalEvent { tourist: ent });
+        world.run_system_once(process_tourist_arrival_system).unwrap();
+        world.resource_mut::<SimulationTime>().tick = 800;
+        world.run_system_once(tourist_departure_system).unwrap();
+        assert_eq!(
+            world.resource::<ColonyResources>().credits,
+            TOURIST_WEALTH,
+            "arrival + completion portions must total the full wealth"
+        );
+        assert_eq!(world.resource::<TourismState>().credits_earned, TOURIST_WEALTH);
+    }
+
+    #[test]
+    fn test_self_care_restores_vacation_needs() {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime {
+            tick: SELF_CARE_INTERVAL,
+            ..Default::default()
+        });
+        let ent = world
+            .spawn((
+                Tourist { wealth: TOURIST_WEALTH, arrival_tick: 0, departure_tick: 800 },
+                Needs { hunger: 0.9, rest: 0.3, leisure: 0.3, hygiene: 0.3 },
+            ))
+            .id();
+        world.run_system_once(tourist_self_care_system).unwrap();
+        let needs = world.get::<Needs>(ent).unwrap();
+        assert!(needs.rest > 0.3, "self-care must restore rest");
+        assert!(needs.leisure > 0.3, "self-care must restore leisure");
+        assert!(needs.hygiene > 0.3, "self-care must restore hygiene");
+        assert_eq!(needs.hunger, 0.9, "self-care must not touch hunger (meals own it)");
+    }
+
+    #[test]
+    fn test_self_care_off_cadence_is_noop() {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime {
+            tick: SELF_CARE_INTERVAL - 3,
+            ..Default::default()
+        });
+        let ent = world
+            .spawn((
+                Tourist { wealth: TOURIST_WEALTH, arrival_tick: 0, departure_tick: 800 },
+                Needs { hunger: 0.9, rest: 0.3, leisure: 0.3, hygiene: 0.3 },
+            ))
+            .id();
+        world.run_system_once(tourist_self_care_system).unwrap();
+        let needs = world.get::<Needs>(ent).unwrap();
+        assert_eq!(needs.rest, 0.3);
+        assert_eq!(needs.leisure, 0.3);
+        assert_eq!(needs.hygiene, 0.3);
+    }
+
+    #[test]
+    fn test_self_care_leisure_scales_with_local_beauty() {
+        let mut world = World::new();
+        let mut grid = BeautyGrid::new(10, 10);
+        grid.set(5, 5, 10.0);
+        world.insert_resource(grid);
+        world.insert_resource(SimulationTime {
+            tick: SELF_CARE_INTERVAL,
+            ..Default::default()
+        });
+        let scenic = world
+            .spawn((
+                Tourist { wealth: TOURIST_WEALTH, arrival_tick: 0, departure_tick: 800 },
+                Needs { hunger: 0.9, rest: 0.9, leisure: 0.3, hygiene: 0.9 },
+                GridPosition { x: 5, y: 5 },
+            ))
+            .id();
+        let plain = world
+            .spawn((
+                Tourist { wealth: TOURIST_WEALTH, arrival_tick: 0, departure_tick: 800 },
+                Needs { hunger: 0.9, rest: 0.9, leisure: 0.3, hygiene: 0.9 },
+                GridPosition { x: 0, y: 0 },
+            ))
+            .id();
+        world.run_system_once(tourist_self_care_system).unwrap();
+        let scenic_leisure = world.get::<Needs>(scenic).unwrap().leisure;
+        let plain_leisure = world.get::<Needs>(plain).unwrap().leisure;
+        assert!(
+            scenic_leisure > plain_leisure,
+            "local beauty must boost leisure recovery ({scenic_leisure} vs {plain_leisure})"
+        );
+    }
+
+    #[test]
+    fn test_self_care_sustains_full_stay_then_completes() {
+        // Simulate a full 800-tick stay under the real decay rates
+        // (needs.rs: rest 0.001/tick, leisure 0.0015/tick; hygiene.rs:
+        // 0.001/tick base) with meals every EAT_INTERVAL restoring
+        // hunger (the FeedVisitors leg) and self-care on cadence.
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        world.insert_resource(ColonyResources::default());
+        world.init_resource::<TourismState>();
+        let ent = world
+            .spawn((
+                Tourist { wealth: TOURIST_WEALTH, arrival_tick: 0, departure_tick: 800 },
+                Needs::default(),
+            ))
+            .id();
+        for tick in 1..=TOURIST_STAY_TICKS {
+            world.resource_mut::<SimulationTime>().tick = tick;
+            {
+                let mut needs = world.get_mut::<Needs>(ent).unwrap();
+                needs.hunger = (needs.hunger - 0.001).max(0.0);
+                needs.rest = (needs.rest - 0.001).max(0.0);
+                needs.leisure = (needs.leisure - 0.0015).max(0.0);
+                needs.hygiene = (needs.hygiene - 0.001).max(0.0);
+                if tick % EAT_INTERVAL == 0 {
+                    needs.hunger = (needs.hunger + EAT_HUNGER_GAIN).min(1.0);
+                }
+            }
+            world.run_system_once(tourist_self_care_system).unwrap();
+        }
+        let needs = world.get::<Needs>(ent).unwrap();
+        assert!(
+            needs.worst() >= 0.2,
+            "after a full stay worst need must stay completable, got {}",
+            needs.worst()
+        );
+        world.run_system_once(tourist_departure_system).unwrap();
+        let state = world.resource::<TourismState>();
+        assert_eq!(state.total_departed, 1, "stay must complete, not depart early");
+        assert_eq!(state.total_departed_early, 0);
+    }
+
     /// IP guard: every new player-facing string is original/generic.
     #[test]
     fn test_ip_guard_tourism_strings() {
@@ -540,7 +945,12 @@ mod tests {
             "mass effect", "citadel", "coruscant", "tatooine", "enterprise",
             "fhloston", "fifth element", "total recall", "mars",
         ];
-        let strings = [TOURISM_BOOM_TEXT, TOURISM_EARLY_DEPARTURE_TEXT, TOURISM_DISEASE_TEXT];
+        let strings = [
+            TOURISM_BOOM_TEXT,
+            TOURISM_EARLY_DEPARTURE_TEXT,
+            TOURISM_DISEASE_TEXT,
+            TOURISM_COMPLETED_TEXT,
+        ];
         for s in strings {
             let lower = s.to_lowercase();
             for b in banned {
