@@ -308,6 +308,10 @@ pub fn register(schedule: &mut Schedule) {
             crate::layer1::economy::scrip::purchase_luxury_system.after(consume_food_system),
             crate::layer1::economy::scrip::scrip_census_system
                 .after(crate::layer1::economy::scrip::purchase_luxury_system),
+            // Item 202: periodic scrip ledger Chronicle summary
+            // (year cadence, fires only when the totals moved).
+            crate::layer1::economy::scrip::scrip_ledger_chronicle_system
+                .after(crate::layer1::economy::scrip::scrip_census_system),
         )
             .in_set(Layer1SystemSet::Consumption),
     );
