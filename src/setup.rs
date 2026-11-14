@@ -1052,6 +1052,54 @@ fn apply_social_drama_start(world: &mut World) {
     let _ = world.run_system_once(crate::layer1::chronicle::chronicle_event_handler_system);
 }
 
+/// Item 204 (balance report 2026-11-06): an L2R annex plan — (tunnel
+/// wall tile, tunnel far tile, annex LifeSupport tile, annex walls).
+type L2rAnnexPlan = (
+    crate::layer1::GridPosition,
+    crate::layer1::GridPosition,
+    crate::layer1::GridPosition,
+    [crate::layer1::GridPosition; 3],
+);
+
+/// Minimum Manhattan separation between the L2R LifeSupport pair.
+/// The primary unit sits west of the habitat heart at (-1, 0), so the
+/// east and north annexes (distance 4 from the heart) sit 5 from it,
+/// while a west annex sits only 3 from it — the clustered l2rgeo_9
+/// geometry (pair at (34, 20)/(31, 20), leisure 17-22 tiles away)
+/// whose colony was the sample's only L2R heatstroke death. Five is
+/// the separation the heart-anchored colonies in that sample used.
+const L2R_LIFE_SUPPORT_MIN_SEPARATION_MANHATTAN: u64 = 5;
+
+/// Whether an annex tile gives the LifeSupport pair the Item 204
+/// minimum separation from the primary unit.
+fn l2r_annex_is_separated(
+    primary: crate::layer1::GridPosition,
+    annex_pos: crate::layer1::GridPosition,
+) -> bool {
+    primary.distance_manhattan(annex_pos) >= L2R_LIFE_SUPPORT_MIN_SEPARATION_MANHATTAN
+}
+
+/// Pick the annex plan for the redundant L2R LifeSupport: the first
+/// viable plan (in direction-search order) that is separated from
+/// the primary unit. If no viable plan is separated — a constrained
+/// map where only the clustered west annex fits — fall back to the
+/// first viable plan rather than losing the second unit (documented
+/// fallback; it still keeps the Item 110 fire separation). Returns
+/// `None` when no annex is viable at all; the caller then falls back
+/// to the legacy interior tile.
+fn select_l2r_annex_plan(
+    candidates: Vec<L2rAnnexPlan>,
+    primary: crate::layer1::GridPosition,
+) -> Option<L2rAnnexPlan> {
+    let separated = candidates
+        .iter()
+        .position(|plan| l2r_annex_is_separated(primary, plan.2));
+    match separated {
+        Some(index) => candidates.into_iter().nth(index),
+        None => candidates.into_iter().next(),
+    }
+}
+
 fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayout>) {
     {
         let mut resources = world.resource_mut::<ColonyResources>();
@@ -1133,8 +1181,9 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
     // "redundant" units ~11 ticks apart (balance forensics 2026-10-20).
     // Redundancy that shares a fire neighborhood is not redundancy: the
     // second unit now lives in a sealed annex off the hull at distance
-    // 4 in the first workable direction (east, then west, then north;
-    // see the direction search below) — Chebyshev >= 3 from the primary
+    // 4 in a workable direction (searched east, west, then north, with
+    // the Item 204 separation preference below; see the direction
+    // search) — Chebyshev >= 3 from the primary
     // unit and every other heart building (5 for an east annex) —
     // reached by a power/pressure tunnel: the starter wall at distance
     // 2 becomes a metal PowerPole, a second metal PowerPole at
@@ -1165,8 +1214,11 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
     };
     // Annex direction search: the starter-site guarantee covers only
     // the 5x5 shell, so any single annex direction can be blocked by
-    // worldgen (rock, water, a ruin on an annex tile). Try east, west,
-    // then north; the first viable annex wins. (South is the airlock
+    // worldgen (rock, water, a ruin on an annex tile). All viable
+    // directions (east, west, north) are collected and
+    // `select_l2r_annex_plan` picks the first separated one (Item
+    // 204), falling back to the first viable one on constrained maps
+    // and to the legacy tile when none is viable. (South is the airlock
     // side — its ring tile is the Airlock, not a wall, so no tunnel can
     // start there.) Every direction keeps the annex unit >= 3 tiles
     // (Chebyshev) from the primary LifeSupport and every other heart
@@ -1196,12 +1248,14 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
         x: layout.center.x,
         y: layout.center.y + 1,
     };
-    let mut annex_plan: Option<(
-        crate::layer1::GridPosition,
-        crate::layer1::GridPosition,
-        crate::layer1::GridPosition,
-        [crate::layer1::GridPosition; 3],
-    )> = None;
+    // Item 204: collect every viable annex, then let
+    // `select_l2r_annex_plan` enforce the pair separation — the west
+    // annex is only 3 tiles from the primary unit (which sits west
+    // of the heart), so it must not win while an east or north annex
+    // (5 from the primary, 4 from the heart — inside the heart's
+    // thermoregulation reach) is viable. Every annex stays 4 from
+    // the heart, so heart-anchoring is unchanged by the choice.
+    let mut annex_candidates: Vec<L2rAnnexPlan> = Vec::new();
     for (ux, uy) in [(1, 0), (-1, 0), (0, -1)] {
         let (px, py) = (-uy, ux);
         let at = |k: i32, p: i32| crate::layer1::GridPosition {
@@ -1222,15 +1276,15 @@ fn apply_layer2_ready_start(world: &mut World, layout: Option<&StarterColonyLayo
                 .iter()
                 .all(|pos| annex_tile_viable(world, *pos));
         if ok {
-            annex_plan = Some((
+            annex_candidates.push((
                 tunnel_wall_pos,
                 tunnel_far_pos,
                 annex_pos,
                 annex_wall_positions,
             ));
-            break;
         }
     }
+    let annex_plan = select_l2r_annex_plan(annex_candidates, layout.life_support_pos);
     let annex_ok = annex_plan.is_some();
     let (tunnel_wall_pos, tunnel_far_pos, annex_pos, annex_wall_positions) =
         annex_plan.unwrap_or((legacy_pos, legacy_pos, legacy_pos, [legacy_pos; 3]));
@@ -2590,6 +2644,253 @@ mod tests {
             production >= 10.0,
             "annex LifeSupport must share the heart grid (Lander + Generator), got {production}"
         );
+    }
+
+    // Item 204 (balance report 2026-11-06, l2rgeo_9): the only L2R
+    // colony with heatstroke deaths had both LifeSupports 3 tiles
+    // apart in a corner while leisure sprawled 17-22 tiles away; the
+    // other 11 L2R colonies anchored the pair at the habitat heart.
+    // The clustered geometry is the WEST annex: the primary unit sits
+    // west of center at (-1, 0), so an annex 4 west is only 3 from it,
+    // while east and north annexes are 5 away. The annex selection
+    // must reject a clustered plan when a separated plan is viable.
+    fn l2r_test_annex_plan(
+        center: GridPosition,
+        dir: (i32, i32),
+    ) -> (GridPosition, GridPosition, GridPosition, [GridPosition; 3]) {
+        let (ux, uy) = dir;
+        let (px, py) = (-uy, ux);
+        let at = |k: i32, p: i32| GridPosition {
+            x: center.x + ux * k + px * p,
+            y: center.y + uy * k + py * p,
+        };
+        (
+            at(2, 0),
+            at(3, 0),
+            at(4, 0),
+            [at(4, -1), at(4, 1), at(5, 0)],
+        )
+    }
+
+    #[test]
+    fn test_l2r_annex_separation_rejects_clustered_west_plan() {
+        let center = GridPosition { x: 35, y: 20 };
+        let primary = GridPosition {
+            x: center.x + STARTER_LIFE_SUPPORT_OFFSET.0,
+            y: center.y + STARTER_LIFE_SUPPORT_OFFSET.1,
+        };
+        // The l2rgeo_9 pair: primary (34, 20), west annex (31, 20).
+        let west = l2r_test_annex_plan(center, (-1, 0));
+        assert_eq!(west.2, GridPosition { x: 31, y: 20 });
+        assert_eq!(primary.distance_manhattan(west.2), 3);
+        assert!(
+            !l2r_annex_is_separated(primary, west.2),
+            "a 3-apart pair is the clustered l2rgeo_9 geometry and must not count as separated"
+        );
+        // East and north annexes are the heart-anchored geometries the
+        // other 11 colonies in the balance sample used.
+        let east = l2r_test_annex_plan(center, (1, 0));
+        let north = l2r_test_annex_plan(center, (0, -1));
+        assert!(l2r_annex_is_separated(primary, east.2));
+        assert!(l2r_annex_is_separated(primary, north.2));
+        // The legacy interior tile was never a separated placement.
+        let legacy = GridPosition {
+            x: center.x,
+            y: center.y + 1,
+        };
+        assert!(!l2r_annex_is_separated(primary, legacy));
+    }
+
+    #[test]
+    fn test_l2r_annex_selection_prefers_separated_plan_over_clustered() {
+        let center = GridPosition { x: 35, y: 20 };
+        let primary = GridPosition {
+            x: center.x - 1,
+            y: center.y,
+        };
+        let west = l2r_test_annex_plan(center, (-1, 0));
+        let north = l2r_test_annex_plan(center, (0, -1));
+        // Direction order is east, west, north: west is encountered
+        // before north, but a clustered plan must not win while a
+        // separated plan is viable.
+        let chosen =
+            select_l2r_annex_plan(vec![west, north], primary).expect("a viable plan exists");
+        assert_eq!(
+            chosen.2, north.2,
+            "selection must skip the clustered west annex for the separated north annex"
+        );
+    }
+
+    #[test]
+    fn test_l2r_annex_selection_falls_back_when_no_separated_plan_viable() {
+        let center = GridPosition { x: 35, y: 20 };
+        let primary = GridPosition {
+            x: center.x - 1,
+            y: center.y,
+        };
+        // Constrained map: only the clustered west annex is viable.
+        // Documented fallback: take it rather than losing the second
+        // LifeSupport (it still keeps the Item 110 fire separation).
+        let west = l2r_test_annex_plan(center, (-1, 0));
+        let chosen = select_l2r_annex_plan(vec![west], primary)
+            .expect("fallback must still return the only viable plan");
+        assert_eq!(chosen.2, west.2);
+        // No viable annex at all: None, and the caller falls back to
+        // the legacy interior tile.
+        assert!(select_l2r_annex_plan(Vec::new(), primary).is_none());
+    }
+
+    fn remove_second_life_support(world: &mut World) -> StarterColonyLayout {
+        let layout = world
+            .get_resource::<StarterColonyLayout>()
+            .cloned()
+            .expect("starter layout resource exists");
+        let second = world
+            .query::<(Entity, &Building, &GridPosition)>()
+            .iter(world)
+            .find(|(_, building, pos)| {
+                building.building_type == BuildingType::LifeSupport
+                    && **pos != layout.life_support_pos
+            })
+            .map(|(entity, _, pos)| (entity, *pos))
+            .expect("Layer 2 Ready starts with a second LifeSupport");
+        world.despawn(second.0);
+        world
+            .resource_mut::<OccupiedTiles>()
+            .0
+            .remove(&(second.1.x, second.1.y));
+        layout
+    }
+
+    fn set_terrain(world: &mut World, pos: GridPosition, tile: crate::layer1::TerrainType) {
+        if let (Ok(ux), Ok(uy)) = (usize::try_from(pos.x), usize::try_from(pos.y)) {
+            if let Some(mut terrain) = world.get_resource_mut::<TerrainGrid>() {
+                terrain.set(ux, uy, tile);
+            }
+        }
+    }
+
+    fn life_support_positions(world: &mut World) -> Vec<GridPosition> {
+        world
+            .query::<(&Building, &GridPosition)>()
+            .iter(world)
+            .filter(|(b, _)| b.building_type == BuildingType::LifeSupport)
+            .map(|(_, pos)| *pos)
+            .collect()
+    }
+
+    #[test]
+    fn test_l2r_reapply_places_separated_second_life_support() {
+        // Deterministic re-apply: remove the second unit, clear the
+        // east and north annex footprints to Grass, and re-run the
+        // L2R placement. Whichever annex the original world used, its
+        // leftover tunnel poles block that direction on re-apply, so
+        // a separated direction (east or north) is viable and a
+        // clustered west placement must not be chosen while it is.
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Layer2Ready,
+        });
+        let layout = remove_second_life_support(&mut world);
+        let center = layout.center;
+        for dir in [(1, 0), (0, -1)] {
+            let plan = l2r_test_annex_plan(center, dir);
+            for pos in [plan.1, plan.2].into_iter().chain(plan.3) {
+                set_terrain(&mut world, pos, crate::layer1::TerrainType::Grass);
+            }
+        }
+        apply_layer2_ready_start(&mut world, Some(&layout));
+        let positions = life_support_positions(&mut world);
+        assert_eq!(positions.len(), 2, "re-apply must restore two LifeSupports");
+        let separation = positions[0].distance_manhattan(positions[1]);
+        assert!(
+            separation >= L2R_LIFE_SUPPORT_MIN_SEPARATION_MANHATTAN,
+            "placed pair must not be clustered: separation is {separation}, positions {positions:?}"
+        );
+        for pos in &positions {
+            assert!(
+                pos.distance_manhattan(center) <= 4,
+                "LifeSupport at {pos:?} must stay within thermoregulation reach (radius 4) of the habitat heart {center:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_l2r_reapply_constrained_map_falls_back_without_losing_life_support() {
+        // Constrained map: water on every annex footprint. Placement
+        // must still succeed via the documented legacy fallback — no
+        // panic, no missing LifeSupport.
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Layer2Ready,
+        });
+        let layout = remove_second_life_support(&mut world);
+        let center = layout.center;
+        for dir in [(1, 0), (-1, 0), (0, -1)] {
+            let plan = l2r_test_annex_plan(center, dir);
+            for pos in [plan.1, plan.2].into_iter().chain(plan.3) {
+                set_terrain(&mut world, pos, crate::layer1::TerrainType::Water);
+            }
+        }
+        apply_layer2_ready_start(&mut world, Some(&layout));
+        let positions = life_support_positions(&mut world);
+        assert_eq!(
+            positions.len(),
+            2,
+            "constrained maps must still place the second LifeSupport, got {positions:?}"
+        );
+        let legacy = GridPosition {
+            x: center.x,
+            y: center.y + 1,
+        };
+        assert!(
+            positions.contains(&legacy),
+            "with every annex blocked the fallback is the legacy interior tile {legacy:?}, got {positions:?}"
+        );
+    }
+
+    #[test]
+    fn test_layer2_ready_life_supports_are_heart_anchored_and_cover_starter_buildings() {
+        let mut world = setup_world_with_config(SetupConfig {
+            headless: true,
+            scenario: StartScenarioId::Layer2Ready,
+        });
+        let layout = world
+            .get_resource::<StarterColonyLayout>()
+            .cloned()
+            .expect("starter layout resource exists");
+        let center = layout.center;
+        let positions = life_support_positions(&mut world);
+        assert_eq!(positions.len(), 2, "Layer 2 Ready keeps two LifeSupports");
+        // Heart-anchoring: each unit sits within the thermoregulation
+        // radius (Manhattan 4, temperature.rs) of the habitat heart,
+        // so the heart tile is inside both units' diamonds.
+        for pos in &positions {
+            assert!(
+                pos.distance_manhattan(center) <= 4,
+                "LifeSupport at {pos:?} is outside thermoregulation reach of the heart {center:?}"
+            );
+        }
+        // Every starter building in the heart is within
+        // thermoregulation reach of at least one LifeSupport.
+        let heart_buildings: Vec<(BuildingType, GridPosition)> = world
+            .query::<(&Building, &GridPosition)>()
+            .iter(&world)
+            .filter(|(_, pos)| pos.distance_chebyshev(center) <= 1)
+            .map(|(b, pos)| (b.building_type, *pos))
+            .collect();
+        assert!(!heart_buildings.is_empty());
+        for (kind, pos) in &heart_buildings {
+            let nearest = positions
+                .iter()
+                .map(|ls| ls.distance_manhattan(*pos))
+                .min()
+                .unwrap_or(u64::MAX);
+            assert!(
+                nearest <= 4,
+                "starter building {kind:?} at {pos:?} is outside thermoregulation reach of both LifeSupports {positions:?}"
+            );
+        }
     }
 
     #[test]
