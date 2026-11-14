@@ -83,6 +83,23 @@
 //!   system every room-quality/window/cabin-fever consumer reads),
 //!   which is not a cheap tourism-local seam, so [`BEAUTY_THRESHOLD`]
 //!   and [`global_beauty`] are deliberately left unchanged.
+//!
+//! # Item 203 — reputation Chronicle telegraphing
+//!
+//! Completed stays were Major-chronicled, but no Chronicle line named
+//! reputation itself: the recovery ([`REP_GAIN_COMPLETED_STAY`] per
+//! completed stay) and the 0.5 boom threshold were visible only in
+//! STATS / the tourists panel — the recovery was invisible on the
+//! Chronicle fairness surface. [`tourist_departure_system`] is the
+//! only place reputation mutates, so it now edge-triggers ONE Major
+//! line per crossing of [`REPUTATION_BOOM_THRESHOLD`]: falling below
+//! it (the boom closes) via
+//! [`tourism_reputation_fallen_chronicle_text`], recovering back to
+//! it via [`tourism_reputation_recovered_chronicle_text`] (which
+//! names the per-stay gain). Edge-triggering IS the hysteresis: a
+//! crossing line cannot repeat until reputation crosses back the
+//! other way, so there is no per-change spam. Text wiring only —
+//! no balance constants or behaviour changed.
 
 use crate::layer1::beauty::BeautyGrid;
 use crate::layer1::biology::symbiotic_insurgency::MindSporeInfection;
@@ -153,6 +170,46 @@ pub const TOURISM_DISEASE_TEXT: &str =
 /// Player-facing chronicle text when a tourist completes their stay.
 pub const TOURISM_COMPLETED_TEXT: &str =
     "A visitor has completed their stay and departed happy. Word travels fast out there.";
+/// Reputation at or above which visitor ships queue and the tourism
+/// boom can hold; below it attraction stops (the gate read in
+/// [`evaluate_tourist_attraction_system`]). Named so the item-203
+/// Chronicle telegraphing reads the same value the gate uses — the
+/// gate itself is unchanged.
+pub const REPUTATION_BOOM_THRESHOLD: f32 = 0.5;
+
+/// Player-facing chronicle text when tourism reputation falls below
+/// [`REPUTATION_BOOM_THRESHOLD`] (item 203): names the new value and
+/// the threshold it crossed.
+#[must_use]
+pub fn tourism_reputation_fallen_chronicle_text(reputation: f32) -> String {
+    let threshold = REPUTATION_BOOM_THRESHOLD;
+    format!(
+        "Tourism reputation has fallen to {reputation:.2}, below the {threshold:.2} boom threshold. The tourism boom is over until completed stays rebuild it."
+    )
+}
+
+/// Player-facing chronicle text when tourism reputation recovers
+/// back to [`REPUTATION_BOOM_THRESHOLD`] (item 203): names the new
+/// value, the threshold it crossed, and the per-stay recovery gain
+/// (read from [`REP_GAIN_COMPLETED_STAY`], never hardcoded).
+#[must_use]
+pub fn tourism_reputation_recovered_chronicle_text(reputation: f32) -> String {
+    let threshold = REPUTATION_BOOM_THRESHOLD;
+    let gain = REP_GAIN_COMPLETED_STAY;
+    format!(
+        "Tourism reputation has recovered to {reputation:.2}, back above the {threshold:.2} boom threshold. Completed stays rebuild reputation (+{gain:.2} each) — visitors are spreading the word again."
+    )
+}
+
+/// All item-203 player-facing reputation chronicle strings, sampled
+/// at representative values, for the IP guard.
+#[must_use]
+pub fn tourism_reputation_public_strings() -> Vec<String> {
+    vec![
+        tourism_reputation_fallen_chronicle_text(0.25),
+        tourism_reputation_recovered_chronicle_text(REPUTATION_BOOM_THRESHOLD),
+    ]
+}
 
 /// The colony's food policy toward docked tourists (spec §1 dilemma).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -278,7 +335,7 @@ pub fn evaluate_tourist_attraction_system(
         return;
     }
     state.last_attraction_tick = time.tick;
-    if state.reputation < 0.5 {
+    if state.reputation < REPUTATION_BOOM_THRESHOLD {
         state.boom_active = false;
         return;
     }
@@ -444,6 +501,11 @@ pub fn tourist_self_care_system(
 /// their departure tick leaves satisfied — the colony banks the
 /// completion payment and reputation recovers by
 /// [`REP_GAIN_COMPLETED_STAY`] (capped at 1.0).
+///
+/// Item 203: this is the only system that mutates reputation, so it
+/// also edge-triggers the reputation Chronicle lines — one Major
+/// line when a mutation crosses [`REPUTATION_BOOM_THRESHOLD`] in
+/// either direction, none otherwise (see the module docs).
 pub fn tourist_departure_system(
     mut commands: Commands,
     time: Res<SimulationTime>,
@@ -455,8 +517,9 @@ pub fn tourist_departure_system(
     for (entity, tourist, needs) in &tourists {
         if needs.worst() < 0.2 {
             state.total_departed_early += 1;
+            let reputation_before = state.reputation;
             state.reputation = (state.reputation - REP_PENALTY_EARLY_DEPARTURE).max(0.0);
-            if state.reputation < 0.5 {
+            if state.reputation < REPUTATION_BOOM_THRESHOLD {
                 state.boom_active = false;
             }
             if let Some(events) = chronicle.as_deref_mut() {
@@ -465,9 +528,23 @@ pub fn tourist_departure_system(
                     importance: EventImportance::Major,
                 });
             }
+            // Item 203: name the fall across the boom threshold,
+            // once per crossing (re-arms only after a recovery
+            // crossing, so repeated early departures stay silent).
+            if reputation_before >= REPUTATION_BOOM_THRESHOLD
+                && state.reputation < REPUTATION_BOOM_THRESHOLD
+            {
+                if let Some(events) = chronicle.as_deref_mut() {
+                    events.send(AddChronicleEvent {
+                        text: tourism_reputation_fallen_chronicle_text(state.reputation),
+                        importance: EventImportance::Major,
+                    });
+                }
+            }
             commands.entity(entity).despawn();
         } else if time.tick >= tourist.departure_tick {
             state.total_departed += 1;
+            let reputation_before = state.reputation;
             state.reputation = (state.reputation + REP_GAIN_COMPLETED_STAY).min(1.0);
             let paid = completion_payment(tourist.wealth);
             if paid > 0.0 {
@@ -481,6 +558,19 @@ pub fn tourist_departure_system(
                     text: TOURISM_COMPLETED_TEXT.to_string(),
                     importance: EventImportance::Major,
                 });
+            }
+            // Item 203: name the recovery across the boom threshold,
+            // once per crossing (the +0.10 steps below the threshold
+            // stay silent until they add up to the crossing).
+            if reputation_before < REPUTATION_BOOM_THRESHOLD
+                && state.reputation >= REPUTATION_BOOM_THRESHOLD
+            {
+                if let Some(events) = chronicle.as_deref_mut() {
+                    events.send(AddChronicleEvent {
+                        text: tourism_reputation_recovered_chronicle_text(state.reputation),
+                        importance: EventImportance::Major,
+                    });
+                }
             }
             commands.entity(entity).despawn();
         }
@@ -952,6 +1042,215 @@ mod tests {
             TOURISM_COMPLETED_TEXT,
         ];
         for s in strings {
+            let lower = s.to_lowercase();
+            for b in banned {
+                assert!(!lower.contains(b), "IP-guard: '{b}' in '{s}'");
+            }
+        }
+    }
+
+    // ---- Item 203: reputation Chronicle telegraphing (RED) ----
+    // Spec 408 reputation was Chronicle-silent: completed stays were
+    // Major-chronicled, but no line named reputation, its recovery
+    // (+0.10 per completed stay), or the 0.5 boom threshold. Only
+    // threshold *crossings* are chronicled (edge-triggered, so the
+    // line re-arms only after reputation crosses back) — no spam.
+
+    fn chronicle_texts(world: &mut World) -> Vec<(String, EventImportance)> {
+        let events = world.resource::<Events<AddChronicleEvent>>();
+        #[allow(deprecated)]
+        let mut reader = events.get_reader();
+        reader
+            .read(events)
+            .map(|e| (e.text.clone(), e.importance))
+            .collect()
+    }
+
+    fn world_with_chronicle(tick: u64, reputation: f32) -> World {
+        let mut world = World::new();
+        world.insert_resource(SimulationTime {
+            tick,
+            ..Default::default()
+        });
+        world.insert_resource(ColonyResources::default());
+        world.init_resource::<TourismState>();
+        world.init_resource::<Events<AddChronicleEvent>>();
+        world.resource_mut::<TourismState>().reputation = reputation;
+        world
+    }
+
+    fn spawn_tourist(world: &mut World, worst_need: f32, departure_tick: u64) {
+        world.spawn((
+            Tourist {
+                wealth: TOURIST_WEALTH,
+                arrival_tick: 0,
+                departure_tick,
+            },
+            Needs {
+                hunger: worst_need,
+                rest: 0.9,
+                leisure: 0.9,
+                hygiene: 0.9,
+            },
+        ));
+    }
+
+    #[test]
+    fn test_reputation_fallen_text_names_reputation_value_and_threshold() {
+        assert_eq!(REPUTATION_BOOM_THRESHOLD, 0.5, "boom gate must stay 0.5");
+        let text = tourism_reputation_fallen_chronicle_text(0.25);
+        let lower = text.to_lowercase();
+        assert!(lower.contains("reputation"), "line must name reputation: {text}");
+        assert!(text.contains("0.25"), "line must name the new value: {text}");
+        assert!(text.contains("0.50"), "line must name the boom threshold: {text}");
+        assert!(lower.contains("below"), "line must name the crossing: {text}");
+    }
+
+    #[test]
+    fn test_reputation_recovered_text_names_reputation_gain_and_threshold() {
+        let text = tourism_reputation_recovered_chronicle_text(0.50);
+        let lower = text.to_lowercase();
+        assert!(lower.contains("reputation"), "line must name reputation: {text}");
+        assert!(lower.contains("recover"), "line must name the recovery: {text}");
+        assert!(text.contains("0.50"), "line must name the boom threshold: {text}");
+        assert!(
+            text.contains(&format!("{:.2}", REP_GAIN_COMPLETED_STAY)),
+            "line must name the per-stay recovery (+{:.2}): {text}",
+            REP_GAIN_COMPLETED_STAY
+        );
+    }
+
+    #[test]
+    fn test_early_departure_crossing_below_threshold_chronicles_fall_once() {
+        let mut world = world_with_chronicle(100, 0.60);
+        world.resource_mut::<TourismState>().boom_active = true;
+        // Two early departures in one run: 0.60 -> 0.35 (crossing)
+        // -> 0.10 (already below, must NOT re-chronicle the fall).
+        spawn_tourist(&mut world, 0.1, 800);
+        spawn_tourist(&mut world, 0.1, 800);
+        world.run_system_once(tourist_departure_system).unwrap();
+        let state = world.resource::<TourismState>();
+        assert_eq!(state.total_departed_early, 2);
+        assert!((state.reputation - 0.10).abs() < 1e-6);
+        assert!(!state.boom_active);
+        let texts = chronicle_texts(&mut world);
+        assert_eq!(
+            texts.len(),
+            3,
+            "2 early-departure lines + exactly 1 reputation-fall line, got: {texts:?}"
+        );
+        let fallen: Vec<_> = texts
+            .iter()
+            .filter(|(t, _)| t.to_lowercase().contains("reputation"))
+            .collect();
+        assert_eq!(fallen.len(), 1, "fall must be chronicled once: {texts:?}");
+        assert_eq!(fallen[0].1, EventImportance::Major);
+        assert!(
+            fallen[0].0.contains("0.35"),
+            "fall line must name the value at the crossing: {}",
+            fallen[0].0
+        );
+    }
+
+    #[test]
+    fn test_early_departure_without_crossing_no_reputation_line() {
+        let mut world = world_with_chronicle(100, 1.0);
+        spawn_tourist(&mut world, 0.1, 800);
+        world.run_system_once(tourist_departure_system).unwrap();
+        assert!((world.resource::<TourismState>().reputation - 0.75).abs() < f32::EPSILON);
+        let texts = chronicle_texts(&mut world);
+        assert_eq!(texts.len(), 1, "only the early-departure line: {texts:?}");
+        assert!(
+            !texts[0].0.to_lowercase().contains("reputation"),
+            "no reputation line without a crossing: {}",
+            texts[0].0
+        );
+    }
+
+    #[test]
+    fn test_completed_stay_crossing_threshold_chronicles_recovery_once() {
+        let mut world = world_with_chronicle(800, 0.40);
+        // Two completions in one run: 0.40 -> 0.50 (crossing)
+        // -> 0.60 (already above, must NOT re-chronicle the recovery).
+        spawn_tourist(&mut world, 0.9, 800);
+        spawn_tourist(&mut world, 0.9, 800);
+        world.run_system_once(tourist_departure_system).unwrap();
+        let state = world.resource::<TourismState>();
+        assert_eq!(state.total_departed, 2);
+        assert!((state.reputation - 0.60).abs() < 1e-6);
+        let texts = chronicle_texts(&mut world);
+        assert_eq!(
+            texts.len(),
+            3,
+            "2 completed-stay lines + exactly 1 recovery line, got: {texts:?}"
+        );
+        let recovered: Vec<_> = texts
+            .iter()
+            .filter(|(t, _)| t.to_lowercase().contains("reputation"))
+            .collect();
+        assert_eq!(recovered.len(), 1, "recovery chronicled once: {texts:?}");
+        assert_eq!(recovered[0].1, EventImportance::Major);
+        assert!(
+            recovered[0].0.contains("0.50"),
+            "recovery line must name the value at the crossing: {}",
+            recovered[0].0
+        );
+    }
+
+    #[test]
+    fn test_completed_stay_below_threshold_no_recovery_line_yet() {
+        let mut world = world_with_chronicle(800, 0.0);
+        spawn_tourist(&mut world, 0.9, 800);
+        world.run_system_once(tourist_departure_system).unwrap();
+        assert!(
+            (world.resource::<TourismState>().reputation - REP_GAIN_COMPLETED_STAY).abs() < 1e-6
+        );
+        let texts = chronicle_texts(&mut world);
+        assert_eq!(texts.len(), 1, "only the completed-stay line: {texts:?}");
+        assert!(
+            !texts[0].0.to_lowercase().contains("reputation"),
+            "recovery is named at the threshold crossing, not per stay: {}",
+            texts[0].0
+        );
+    }
+
+    #[test]
+    fn test_reputation_chronicle_rearms_after_opposite_crossing() {
+        // Recovery crossing, then a fall crossing: each direction
+        // fires exactly once per crossing (hysteresis, not one-shot
+        // forever and not per-change spam).
+        let mut world = world_with_chronicle(800, 0.40);
+        spawn_tourist(&mut world, 0.9, 800);
+        world.run_system_once(tourist_departure_system).unwrap();
+        assert!((world.resource::<TourismState>().reputation - 0.50).abs() < 1e-6);
+        world.resource_mut::<SimulationTime>().tick = 100;
+        spawn_tourist(&mut world, 0.1, 800);
+        world.run_system_once(tourist_departure_system).unwrap();
+        assert!((world.resource::<TourismState>().reputation - 0.25).abs() < 1e-6);
+        let texts = chronicle_texts(&mut world);
+        let rep_lines: Vec<_> = texts
+            .iter()
+            .filter(|(t, _)| t.to_lowercase().contains("reputation"))
+            .collect();
+        assert_eq!(
+            rep_lines.len(),
+            2,
+            "one recovery line + one fall line across the cycle: {texts:?}"
+        );
+    }
+
+    /// IP guard: the new reputation chronicle texts are original/generic.
+    #[test]
+    fn test_ip_guard_tourism_reputation_chronicle_texts() {
+        let banned = [
+            "star wars", "star trek", "firefly", "serenity", "babylon 5",
+            "mass effect", "citadel", "coruscant", "tatooine", "enterprise",
+            "fhloston", "fifth element", "total recall", "mars",
+        ];
+        let mut strings = tourism_reputation_public_strings();
+        strings.push(tourism_reputation_fallen_chronicle_text(0.25));
+        strings.push(tourism_reputation_recovered_chronicle_text(0.50));
+        for s in &strings {
             let lower = s.to_lowercase();
             for b in banned {
                 assert!(!lower.contains(b), "IP-guard: '{b}' in '{s}'");
