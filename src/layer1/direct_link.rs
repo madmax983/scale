@@ -94,7 +94,13 @@ type DirectMovementQuery<'a> = (
     &'a mut DirectControlState,
     Option<&'a Role>,
 );
-type DirectMovementFilter = (With<Possessed>, Without<Building>);
+type DirectMovementFilter = (
+    With<Possessed>,
+    Without<Building>,
+    // Item 205: disjoint from the hull query in handle_direct_movement
+    // (a possessed pop is never a hull tile) — avoids B0001.
+    Without<crate::layer1::shipbreaking::HullTile>,
+);
 fn gather_input(input: &Input, state: &DirectControlState) -> (i32, i32) {
     let mut intended_dx = state.buffered_dx;
     let mut intended_dy = state.buffered_dy;
@@ -133,7 +139,11 @@ pub fn handle_direct_movement(
     mut shake: Option<ResMut<ScreenShake>>,
     mut commands: Commands,
     phased_query: Query<Entity, With<crate::layer1::culture::chronostalker::Phased>>,
+    // Item 205: standing hull tiles block direct movement too.
+    hull_query: Query<&GridPosition, With<crate::layer1::shipbreaking::HullTile>>,
 ) {
+    let hull_set: std::collections::HashSet<(i32, i32)> =
+        hull_query.iter().map(|pos| (pos.x, pos.y)).collect();
     for (entity, mut pos, speed, mut state, role) in &mut query {
         let now = wall_time.as_ref().map_or(0.0, |t| t.0);
 
@@ -210,6 +220,7 @@ pub fn handle_direct_movement(
             &terrain,
             occupied_tiles.as_deref(),
             &buildings,
+            &hull_set,
             new_x,
             new_y,
             entity,
@@ -242,6 +253,7 @@ pub fn handle_direct_movement(
                     &terrain,
                     occupied_tiles.as_deref(),
                     &buildings,
+                    &hull_set,
                     new_x,
                     pos.y,
                     entity,
@@ -251,6 +263,7 @@ pub fn handle_direct_movement(
                     &terrain,
                     occupied_tiles.as_deref(),
                     &buildings,
+                    &hull_set,
                     pos.x,
                     new_y,
                     entity,
@@ -396,7 +409,10 @@ pub fn try_player_step(
             // wreckage are only suggestions. The map edge still holds.
             nx >= 0 && ny >= 0 && terrain.get(nx as usize, ny as usize).is_some()
         } else {
-            is_tile_walkable_data(terrain, occupied, &buildings, nx, ny, entity, role)
+            // Item 205: standing hull blocks the step (phased pops
+            // above remain exempt — wreckage is a suggestion to them).
+            let hull_set = crate::layer1::shipbreaking::hull_positions(world);
+            is_tile_walkable_data(terrain, occupied, &buildings, &hull_set, nx, ny, entity, role)
         };
         (ok, nx, ny)
     };

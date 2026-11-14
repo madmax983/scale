@@ -456,6 +456,191 @@ fn test_designation_work_executes_in_live_schedule() {
     );
 }
 
+/// Item 205: the hull follow-up to the designation pipeline above.
+/// A Mine designation placed on a standing shipbreaking hull tile
+/// must travel the same live pipeline (travel -> arrive adjacent ->
+/// work executes) and complete through the shipbreaking MineEvent
+/// seam: hull breaks, designation is consumed, yields drop.
+///
+/// Arrangement notes beyond the shared ones in the module docs:
+/// * The worker carries the `Miner` tier-3 seam component — the
+///   qualification bridge shipbreaking's own tests use. Organic
+///   qualification (pickaxe + Mining XP grind) is covered by the
+///   direct-call executor tests in legacy_mining.rs.
+/// * The janitor here is hull-safe: the shared
+///   `keep_workforce_functional` tops up EVERY `Health` in the
+///   world, which would heal the hull tile back to full between
+///   ticks and make the subject unbreakable. This variant scopes
+///   the health top-up to pops, as the shared one intends.
+fn keep_workforce_functional_hull_safe(world: &mut World) {
+    let corpses: Vec<Entity> = {
+        let mut q = world.query::<(Entity, &Corpse)>();
+        q.iter(world).map(|(e, _)| e).collect()
+    };
+    for e in corpses {
+        world.despawn(e);
+    }
+    let pops: Vec<Entity> = {
+        let mut q = world.query_filtered::<Entity, With<Pop>>();
+        q.iter(world).collect()
+    };
+    for pop in pops {
+        let mut e = world.entity_mut(pop);
+        e.remove::<Panic>();
+        e.remove::<ForcedComa>();
+    }
+    world.resource_mut::<ColonyResources>().eva_suits = 0.0;
+    remove_loose_suits(world);
+    let mut q = world.query::<&mut Needs>();
+    for mut needs in q.iter_mut(world) {
+        needs.hunger = 1.0;
+        needs.rest = 1.0;
+        needs.hygiene = 1.0;
+        needs.leisure = 1.0;
+    }
+    let mut q = world.query_filtered::<&mut Health, With<Pop>>();
+    for mut health in q.iter_mut(world) {
+        health.current = health.max;
+    }
+}
+
+#[test]
+fn test_hull_designation_work_executes_in_live_schedule() {
+    use crate::layer1::shipbreaking::{hull_census, ShipType, SpawnCrashedShipEvent};
+    let mut world = test_world();
+    for _ in 0..40 {
+        run_simulation_tick(&mut world);
+    }
+
+    // Find a 3x3 anchor near the colony: every tile walkable,
+    // unoccupied, and inside the pressure envelope.
+    let anchor = {
+        let positions: Vec<GridPosition> = {
+            let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+            q.iter(&world).copied().collect()
+        };
+        let grid = world.resource::<TerrainGrid>();
+        let occupied = world.resource::<crate::layer1::building::OccupiedTiles>();
+        let mut candidates: Vec<(i32, i32, i32)> = Vec::new();
+        for cx in 2..(grid.width as i32 - 3) {
+            for cy in 2..(grid.height as i32 - 3) {
+                // Only the ring tiles and the worker's tile north of
+                // the ring are constrained: walkable terrain, not
+                // already occupied. (Pressure is deliberately not
+                // required — the janitor tops up worker health, the
+                // same isolation the sibling phases rely on; the
+                // interior tile is never entered.)
+                let mut ok = true;
+                for (dx, dy) in ShipType::Cruiser.ring_offsets() {
+                    let (x, y) = (cx + dx, cy + dy);
+                    if !grid
+                        .get(x as usize, y as usize)
+                        .is_some_and(TerrainType::is_walkable)
+                        || occupied.0.contains(&(x, y))
+                    {
+                        ok = false;
+                    }
+                }
+                let (wx, wy) = (cx + 1, cy - 1);
+                if !grid
+                    .get(wx as usize, wy as usize)
+                    .is_some_and(TerrainType::is_walkable)
+                    || occupied.0.contains(&(wx, wy))
+                {
+                    ok = false;
+                }
+                if ok {
+                    let d = positions
+                        .iter()
+                        .map(|pp| (pp.x - cx).abs() + (pp.y - cy).abs())
+                        .min()
+                        .unwrap_or(i32::MAX);
+                    candidates.push((d, cx, cy));
+                }
+            }
+        }
+        candidates.sort();
+        let (_, cx, cy) = candidates
+            .first()
+            .copied()
+            .expect("a clear 3x3 crash site inside the envelope");
+        (cx, cy)
+    };
+    let (cx, cy) = anchor;
+    let hull_tile = (cx + 1, cy); // north edge of the Cruiser ring
+    world.send_event(SpawnCrashedShipEvent {
+        location: GridPosition { x: cx, y: cy },
+        ship_type: ShipType::Cruiser,
+    });
+    run_simulation_tick(&mut world);
+    let before = hull_census(&mut world);
+    assert_eq!(before.tiles, 8, "crash must land a full Cruiser ring");
+
+    // One fresh worker just north of the ring, qualified via the
+    // Miner seam, with the decider's Work plan pinned like the
+    // sibling designation test.
+    fresh_workforce(&mut world, 1, (cx + 1, cy - 1));
+    let worker = {
+        let mut q = world.query_filtered::<Entity, With<Pop>>();
+        q.iter(&world).next().expect("one fresh worker")
+    };
+    world
+        .entity_mut(worker)
+        .insert(crate::layer1::shipbreaking::Miner { tool_tier: 3 });
+
+    assert!(
+        try_designate(&mut world, hull_tile.0, hull_tile.1, DesignationType::Mine),
+        "Mine designation must be accepted on a hull tile"
+    );
+    let des = designation_at(
+        &mut world,
+        GridPosition { x: hull_tile.0, y: hull_tile.1 },
+    )
+    .expect("hull designation entity");
+    assign_work_plan(&mut world, worker, des, hull_tile);
+
+    for _ in 0..400 {
+        if world.get_entity(des).is_err() {
+            break;
+        }
+        keep_workforce_functional_hull_safe(&mut world);
+        suppress_repair_candidates(&mut world);
+        if world.get_entity(worker).is_ok() && world.get::<MovementTarget>(worker).is_none() {
+            assign_work_plan(&mut world, worker, des, hull_tile);
+        }
+        run_simulation_tick(&mut world);
+    }
+    assert!(
+        world.get_entity(des).is_err(),
+        "EXECUTION BREAK: a qualified pop arrived at a designated hull \
+         tile with a Work plan, but the designation was never consumed"
+    );
+    // The MineEvent seam is asynchronous by design (the headless
+    // `shipbreak` command says the same: yields land next tick):
+    // depending on intra-tick system order, the killing event is
+    // consumed the tick AFTER the designation completes. Settle a
+    // few ticks, then census.
+    for _ in 0..5 {
+        keep_workforce_functional_hull_safe(&mut world);
+        run_simulation_tick(&mut world);
+    }
+    let after = hull_census(&mut world);
+    assert_eq!(
+        after.tiles, 7,
+        "exactly the designated hull tile must be mined away ({} -> {})",
+        before.tiles, after.tiles
+    );
+    let drops: Vec<_> = world
+        .query::<&ResourceItem>()
+        .iter(&world)
+        .map(|r| r.resource_type)
+        .collect();
+    assert!(
+        drops.contains(&crate::layer1::resources::ResourceType::AncientTech),
+        "mined hull must drop its AncientTech yield as a ground item, got {drops:?}"
+    );
+}
+
 /// Gives `pop` the plan the utility AI produces for a Work verdict:
 /// a `PopAction` recording the choice and a `MovementTarget` naming
 /// the designation. Everything after this — movement, arrival,

@@ -33,7 +33,7 @@
 
 use bevy_ecs::prelude::*;
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 
 use crate::layer1::access_control::{AccessControl, AccessMode};
 use crate::layer1::building::{Building, BuildingMap, BuildingType, OccupiedTiles};
@@ -243,6 +243,12 @@ fn find_path_internal(
         }
     }
 
+    // Item 205: snapshot standing shipbreaking hull tiles once for
+    // the whole search (archetype scan over hull archetypes only —
+    // see shipbreaking::hull_positions). is_walkable then does O(1)
+    // set lookups instead of per-tile world scans.
+    let hull_tiles = crate::layer1::shipbreaking::hull_positions(world);
+
     let mut came_from: bevy::utils::HashMap<usize, u32> = bevy::utils::HashMap::default();
     let mut cost_so_far: bevy::utils::HashMap<usize, i32> = bevy::utils::HashMap::default();
     let mut open_set = BinaryHeap::new();
@@ -320,6 +326,7 @@ fn find_path_internal(
                 terrain,
                 occupied,
                 building_map,
+                &hull_tiles,
                 can_use_vents,
                 credentials,
                 next == end,
@@ -403,6 +410,7 @@ fn is_walkable(
     terrain: &TerrainGrid,
     occupied: Option<&OccupiedTiles>,
     building_map: &BuildingMap,
+    hull_tiles: &HashSet<(i32, i32)>,
     can_use_vents: bool,
     credentials: Option<&AccessCredentials>,
     _is_target: bool,
@@ -418,6 +426,14 @@ fn is_walkable(
     };
 
     if !terrain.get(ux, uy).is_some_and(TerrainType::is_walkable) {
+        return false;
+    }
+
+    // 1b. Item 205: standing shipbreaking hull is solid wreckage.
+    // Hull tiles sit in OccupiedTiles with no BuildingMap entry,
+    // which step 3 below treats as passable — check the hull set
+    // explicitly, before the occupancy early-return.
+    if hull_tiles.contains(&pos) {
         return false;
     }
 

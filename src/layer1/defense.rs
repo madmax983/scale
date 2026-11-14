@@ -65,6 +65,21 @@ pub fn is_walkable(world: &mut World, x: i32, y: i32) -> bool {
         return false; // Out of bounds
     }
 
+    // 1b. Item 205: standing shipbreaking hull is solid wreckage.
+    // Hull tiles sit in OccupiedTiles with no Building entry, which
+    // the building scan below treats as passable — check for a
+    // HullTile at the position explicitly (filtered query over hull
+    // archetypes only, same cost class as the building scan).
+    {
+        let mut hull_query =
+            world.query_filtered::<&GridPosition, With<crate::layer1::shipbreaking::HullTile>>();
+        for pos in hull_query.iter(world) {
+            if pos.x == x && pos.y == y {
+                return false;
+            }
+        }
+    }
+
     // 2. Check Buildings via OccupiedTiles
     if let Some(occupied) = world.get_resource::<OccupiedTiles>() {
         if occupied.0.contains(&(x, y)) {

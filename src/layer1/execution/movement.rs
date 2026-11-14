@@ -18,7 +18,7 @@ use crate::layer1::traits::{get_trait_move_speed_modifier, Traits};
 use crate::layer1::utility_types::{ActionType, StartPlan};
 use bevy_ecs::prelude::*;
 use ratatui::style::Color;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 /// Removes pops from farms/housing when they switch to a different action.
 ///
@@ -135,6 +135,11 @@ pub struct MovementContext<'w, 's> {
             Option<&'static AccessControl>,
         ),
     >,
+    /// Item 205: standing shipbreaking hull tiles (impassable).
+    /// Snapshotted once per tick in `movement_system` (the same
+    /// pre-extraction pattern as building collision data) so the
+    /// per-tile walkability checks stay O(1) set lookups.
+    hull_tiles: Query<'w, 's, &'static GridPosition, With<crate::layer1::shipbreaking::HullTile>>,
 }
 
 /// Moves pops 1 tile per tick toward their target (Manhattan-style).
@@ -156,11 +161,20 @@ pub fn movement_system(
             Option<&crate::layer1::biology::health::Health>,
             Option<&mut DetourPath>,
         ),
-        (Without<AtTarget>, Without<Building>),
+        (
+            Without<AtTarget>,
+            Without<Building>,
+            // Item 205: disjoint from MovementContext's hull query
+            // (a pop is never a hull tile) — avoids B0001.
+            Without<crate::layer1::shipbreaking::HullTile>,
+        ),
     >,
     mut ctx: MovementContext,
     mut commands: Commands,
 ) {
+    // Item 205: snapshot standing hull tiles once for the whole tick.
+    let hull_set: HashSet<(i32, i32)> =
+        ctx.hull_tiles.iter().map(|pos| (pos.x, pos.y)).collect();
     for (
         pop_entity,
         mut current_pos,
@@ -188,6 +202,7 @@ pub fn movement_system(
                 detour,
             },
             &mut ctx,
+            &hull_set,
             &mut commands,
         );
     }
@@ -202,6 +217,7 @@ struct MovementComponents<'a> {
     detour: Option<Mut<'a, DetourPath>>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_single_movement(
     pop_entity: Entity,
     current_pos: &mut GridPosition,
@@ -209,6 +225,7 @@ fn process_single_movement(
     speed_opt: &mut Option<Mut<Speed>>,
     components: MovementComponents<'_>,
     ctx: &mut MovementContext,
+    hull_tiles: &HashSet<(i32, i32)>,
     commands: &mut Commands,
 ) {
     let MovementComponents {
@@ -253,6 +270,7 @@ fn process_single_movement(
         &ctx.terrain,
         ctx.occupied_tiles.as_deref(),
         &ctx.buildings,
+        hull_tiles,
         pop_entity,
         role.copied(),
     ) {
@@ -283,6 +301,7 @@ fn process_single_movement(
         &ctx.terrain,
         ctx.occupied_tiles.as_deref(),
         &ctx.buildings,
+        hull_tiles,
         pop_entity,
         role.copied(),
     );
@@ -293,6 +312,7 @@ fn process_single_movement(
             &ctx.terrain,
             ctx.occupied_tiles.as_deref(),
             &ctx.buildings,
+            hull_tiles,
             pop_entity,
             role.copied(),
         );
@@ -303,6 +323,7 @@ fn process_single_movement(
             &ctx.terrain,
             ctx.occupied_tiles.as_deref(),
             &ctx.buildings,
+            hull_tiles,
             pop_entity,
             role.copied(),
         );
@@ -322,6 +343,7 @@ fn process_single_movement(
             &ctx.terrain,
             ctx.occupied_tiles.as_deref(),
             &ctx.buildings,
+            hull_tiles,
             pop_entity,
             role.copied(),
         ) {
@@ -404,6 +426,7 @@ fn process_single_movement(
         &ctx.terrain,
         ctx.occupied_tiles.as_deref(),
         &ctx.buildings,
+        hull_tiles,
         pop_entity,
         role.copied(),
     ) {
@@ -425,6 +448,7 @@ pub(crate) fn check_work_adjacency(
         Option<&Gate>,
         Option<&AccessControl>,
     )>,
+    hull_tiles: &HashSet<(i32, i32)>,
     pop_entity: Entity,
     pop_role: Option<Role>,
 ) -> bool {
@@ -440,6 +464,7 @@ pub(crate) fn check_work_adjacency(
         terrain,
         occupied,
         buildings,
+        hull_tiles,
         target_pos.x,
         target_pos.y,
         pop_entity,
@@ -462,6 +487,7 @@ pub(crate) fn try_get_walkable_pos(
         Option<&Gate>,
         Option<&AccessControl>,
     )>,
+    hull_tiles: &HashSet<(i32, i32)>,
     pop_entity: Entity,
     pop_role: Option<Role>,
 ) -> Option<GridPosition> {
@@ -470,6 +496,7 @@ pub(crate) fn try_get_walkable_pos(
         terrain,
         occupied_tiles,
         buildings,
+        hull_tiles,
         p.x,
         p.y,
         pop_entity,
@@ -509,10 +536,12 @@ impl BuildingCollisionInfo {
 ///
 /// Same rules as [`is_tile_walkable`], but takes pre-extracted building
 /// data instead of a system `Query`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn is_tile_walkable_data(
     terrain: &TerrainGrid,
     occupied: Option<&OccupiedTiles>,
     buildings: &[BuildingCollisionInfo],
+    hull_tiles: &HashSet<(i32, i32)>,
     x: i32,
     y: i32,
     pop_entity: Entity,
@@ -530,6 +559,14 @@ pub(crate) fn is_tile_walkable_data(
         .get(x_idx, y_idx)
         .is_some_and(TerrainType::is_walkable)
     {
+        return false;
+    }
+
+    // Item 205: standing shipbreaking hull is solid wreckage. Hull
+    // tiles sit in OccupiedTiles with no Building entry, which the
+    // building loop below treats as passable — so the hull set is
+    // checked explicitly, before the occupancy early-return.
+    if hull_tiles.contains(&(x, y)) {
         return false;
     }
 
@@ -570,6 +607,7 @@ pub(crate) fn is_tile_walkable_data(
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn is_tile_walkable(
     terrain: &TerrainGrid,
     occupied: Option<&OccupiedTiles>,
@@ -579,6 +617,7 @@ pub(crate) fn is_tile_walkable(
         Option<&Gate>,
         Option<&AccessControl>,
     )>,
+    hull_tiles: &HashSet<(i32, i32)>,
     x: i32,
     y: i32,
     pop_entity: Entity,
@@ -590,7 +629,7 @@ pub(crate) fn is_tile_walkable(
             BuildingCollisionInfo::from_query_item(pos, building, access_opt)
         })
         .collect();
-    is_tile_walkable_data(terrain, occupied, &info, x, y, pop_entity, pop_role)
+    is_tile_walkable_data(terrain, occupied, &info, hull_tiles, x, y, pop_entity, pop_role)
 }
 
 #[allow(clippy::missing_const_for_fn, clippy::unnecessary_wraps)]
@@ -636,6 +675,7 @@ pub(crate) fn calculate_next_positions(
 /// the current movement target, when its steps are exhausted, or when
 /// the next stored step has become unwalkable; movement then falls
 /// back to greedy candidates and, if those fail, a fresh plan.
+#[allow(clippy::too_many_arguments)]
 fn follow_detour_step(
     detour: &mut Option<Mut<DetourPath>>,
     target: GridPosition,
@@ -647,6 +687,7 @@ fn follow_detour_step(
         Option<&Gate>,
         Option<&AccessControl>,
     )>,
+    hull_tiles: &HashSet<(i32, i32)>,
     pop_entity: Entity,
     pop_role: Option<Role>,
 ) -> Option<GridPosition> {
@@ -657,7 +698,7 @@ fn follow_detour_step(
         } else {
             let next = d.steps[0];
             if is_tile_walkable(
-                terrain, occupied, buildings, next.x, next.y, pop_entity, pop_role,
+                terrain, occupied, buildings, hull_tiles, next.x, next.y, pop_entity, pop_role,
             ) {
                 (false, Some(next))
             } else {
@@ -695,6 +736,7 @@ fn follow_detour_step(
 /// leaves the pop waiting exactly as before, never teleporting and
 /// never entering an unwalkable tile. The search only runs when both
 /// greedy candidates failed, so unobstructed movement pays nothing.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn detour_path(
     current: GridPosition,
     target: GridPosition,
@@ -706,6 +748,7 @@ pub(crate) fn detour_path(
         Option<&Gate>,
         Option<&AccessControl>,
     )>,
+    hull_tiles: &HashSet<(i32, i32)>,
     pop_entity: Entity,
     pop_role: Option<Role>,
 ) -> Option<Vec<GridPosition>> {
@@ -728,6 +771,7 @@ pub(crate) fn detour_path(
             terrain,
             occupied,
             &building_info,
+            hull_tiles,
             p.x,
             p.y,
             pop_entity,

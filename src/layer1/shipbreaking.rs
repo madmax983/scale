@@ -51,6 +51,7 @@
 //!   demolish / destroy designations do not target bare entities.
 
 use bevy_ecs::prelude::*;
+use std::collections::HashSet;
 
 use crate::layer1::core::chronicle::{AddChronicleEvent, EventImportance};
 use crate::layer1::core::spatial::OccupiedTiles;
@@ -391,13 +392,45 @@ pub fn hull_stats_label(world: &mut World) -> String {
 
 /// Whether a tile is covered by a standing hull tile (World form,
 /// for room-quality enclosure and other World-driven callers).
+///
+/// Item 205: implemented as an archetype scan over hull archetypes
+/// only (the pattern `pathfinding` uses for psychic stains), NOT a
+/// scan of every entity in the world — walkability checks call this
+/// family of helpers on hot paths.
 #[must_use]
 pub fn is_hull_tile(world: &World, x: i32, y: i32) -> bool {
-    world.iter_entities().any(|e| {
-        e.contains::<HullTile>()
-            && e.get::<GridPosition>()
-                .is_some_and(|p| p.x == x && p.y == y)
-    })
+    hull_positions(world).contains(&(x, y))
+}
+
+/// All standing hull-tile positions, as a set for O(1) walkability
+/// lookups (item 205).
+///
+/// This is the cheap seam the three walkability functions use: A*
+/// builds the set once per `find_path` call, the movement system
+/// snapshots it once per tick (the same pre-extraction pattern as
+/// `BuildingCollisionInfo`), and single-tile World callers use
+/// [`is_hull_tile`]. Deliberately NOT a maintained resource: hull
+/// tiles can be spawned by any path (crash system, tests, debug
+/// commands), and a resource ledger would desync from direct spawns,
+/// while this scan only ever visits archetypes that actually carry
+/// `HullTile` + `GridPosition` (a handful of entities per wreck).
+#[must_use]
+pub fn hull_positions(world: &World) -> HashSet<(i32, i32)> {
+    let mut out = HashSet::new();
+    let hull_id = world.components().component_id::<HullTile>();
+    let pos_id = world.components().component_id::<GridPosition>();
+    if let (Some(hull_id), Some(pos_id)) = (hull_id, pos_id) {
+        for archetype in world.archetypes().iter() {
+            if archetype.contains(hull_id) && archetype.contains(pos_id) {
+                for entity in archetype.entities() {
+                    if let Some(pos) = world.get::<GridPosition>(entity.id()) {
+                        out.insert((pos.x, pos.y));
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -584,6 +617,104 @@ mod tests {
         run_spawn(&mut world, 10, 10, ShipType::Cruiser);
         let on_hull = try_place_building(&mut world, 10, 10, BuildingType::Housing);
         assert!(!on_hull, "Cannot build ON a hull tile");
+    }
+
+    // Item 205 RED: standing hull must block all three walkability
+    // seams; the sheltered interior stays walkable; a broken hull
+    // tile becomes walkable again.
+    #[test]
+    fn test_hull_blocks_walkability_and_interior_stays_open() {
+        let mut world = hull_world();
+        world.insert_resource(BuildingMap::default());
+        run_spawn(&mut world, 10, 10, ShipType::Cruiser);
+        // Ring tiles: (10,10) corner, (11,10) edge. Interior: (11,11).
+        // defense::is_walkable (World form)
+        assert!(
+            !crate::layer1::defense::is_walkable(&mut world, 10, 10),
+            "standing hull must block defense walkability"
+        );
+        assert!(
+            !crate::layer1::defense::is_walkable(&mut world, 11, 10),
+            "standing hull edge must block defense walkability"
+        );
+        assert!(
+            crate::layer1::defense::is_walkable(&mut world, 11, 11),
+            "sheltered interior tile must stay walkable"
+        );
+        assert!(
+            crate::layer1::defense::is_walkable(&mut world, 9, 10),
+            "open ground next to the wreck must stay walkable"
+        );
+        // pathfinding::find_path (A*) must route around the ring and
+        // must not be able to reach the enclosed interior from outside.
+        let around = crate::layer1::pathfinding::find_path(&world, (8, 11), (13, 11))
+            .expect("a detour around the wreck must exist");
+        for ring in [(10, 10), (11, 10), (12, 10), (10, 11), (12, 11), (10, 12), (11, 12), (12, 12)] {
+            assert!(!around.contains(&ring), "A* path must not cross hull tile {ring:?}");
+        }
+        assert!(
+            crate::layer1::pathfinding::find_path(&world, (8, 11), (11, 11)).is_none(),
+            "enclosed interior must be unreachable from outside while the ring stands"
+        );
+        // movement::is_tile_walkable_data (pre-extracted form)
+        let pop = world.spawn_empty().id();
+        let hull_set = hull_positions(&world);
+        let terrain = world.resource::<TerrainGrid>();
+        let occupied = world.get_resource::<OccupiedTiles>();
+        assert!(
+            !crate::layer1::execution::movement::is_tile_walkable_data(
+                terrain, occupied, &[], &hull_set, 10, 10, pop, None
+            ),
+            "standing hull must block movement walkability"
+        );
+        assert!(
+            crate::layer1::execution::movement::is_tile_walkable_data(
+                terrain, occupied, &[], &hull_set, 11, 11, pop, None
+            ),
+            "interior must stay walkable for movement"
+        );
+        // Mutation control: with an empty hull set the same tile is
+        // walkable, proving the set is the blocking mechanism.
+        let empty: HashSet<(i32, i32)> = HashSet::new();
+        assert!(
+            crate::layer1::execution::movement::is_tile_walkable_data(
+                terrain, occupied, &[], &empty, 10, 10, pop, None
+            ),
+            "without hull data the occupied-but-buildingless tile is passable (pre-205 behaviour)"
+        );
+    }
+
+    #[test]
+    fn test_broken_hull_becomes_walkable_again() {
+        let mut world = hull_world();
+        world.insert_resource(BuildingMap::default());
+        run_spawn(&mut world, 10, 10, ShipType::Cruiser);
+        assert!(!crate::layer1::defense::is_walkable(&mut world, 11, 10));
+        // Break the (11,10) EDGE tile through the real MineEvent seam
+        // (a corner breach would leave the interior enclosed).
+        let hull_entity = {
+            let mut q = world.query::<(Entity, &GridPosition, &HullTile)>();
+            q.iter(&world)
+                .find(|(_, pos, _)| pos.x == 11 && pos.y == 10)
+                .map(|(e, _, _)| e)
+                .expect("hull tile at (11,10)")
+        };
+        let miner = world.spawn(Miner { tool_tier: 3 }).id();
+        for _ in 0..10 {
+            world.send_event(MineEvent { miner, target: hull_entity });
+        }
+        let mut schedule = Schedule::default();
+        schedule.add_systems((mine_system, hull_destroyed_system).chain());
+        schedule.run(&mut world);
+        assert!(world.get::<HullTile>(hull_entity).is_none(), "hull tile breaks after 10 qualified hits");
+        assert!(
+            crate::layer1::defense::is_walkable(&mut world, 11, 10),
+            "broken hull tile must become walkable again"
+        );
+        assert!(
+            crate::layer1::pathfinding::find_path(&world, (8, 11), (11, 11)).is_some(),
+            "with a breach in the ring, the interior becomes reachable"
+        );
     }
 
     #[test]

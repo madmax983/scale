@@ -5570,10 +5570,13 @@ fn designate_at(world: &mut World, designation_type: DesignationType, x: i32, y:
 
     let err_msg = match designation_type {
         DesignationType::Mine => {
-            if tile == Some(TerrainType::Rock) {
+            // Item 205: hull tiles are valid Mine targets too.
+            if tile == Some(TerrainType::Rock)
+                || scale::layer1::shipbreaking::is_hull_tile(world, x, y)
+            {
                 format!("Failed: already designated at ({x}, {y})")
             } else {
-                format!("Failed: ({x}, {y}) is {tile_name}, need Rock for mining")
+                format!("Failed: ({x}, {y}) is {tile_name}, need Rock or a hull tile for mining")
             }
         }
         DesignationType::Chop => {

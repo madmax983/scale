@@ -87,8 +87,14 @@ pub fn handle_mining_work(
         }
     }
 
+    // Item 205: a Mine designation on a standing shipbreaking hull
+    // tile routes through the shipbreaking MineEvent seam (below),
+    // not the Rock-only generic path.
+    let hull_target = pos.and_then(|p| hull_entity_at(world, p));
     if is_mother_lode {
         process_mother_lode(world, entity, effective_work, pos);
+    } else if let Some(hull) = hull_target {
+        process_hull_mining(world, entity, worker_entity, hull);
     } else {
         process_normal_mining(world, entity, effective_work, pos);
     }
@@ -98,6 +104,57 @@ pub fn handle_mining_work(
     }
 
     true
+}
+
+/// Finds the standing hull tile entity at `pos`, if any.
+fn hull_entity_at(world: &mut World, pos: GridPosition) -> Option<Entity> {
+    let mut query = world
+        .query_filtered::<(Entity, &GridPosition), With<crate::layer1::shipbreaking::HullTile>>();
+    query
+        .iter(world)
+        .find(|(_, p)| **p == pos)
+        .map(|(e, _)| e)
+}
+
+/// Item 205: designated hull work, routed through the existing
+/// shipbreaking seam — no parallel damage/yield system.
+///
+/// One work tick from a qualified worker sends one
+/// [`crate::layer1::shipbreaking::MineEvent`]; `mine_system` applies
+/// the tier-3 gate and the fixed 10 dmg/hit, and
+/// `hull_destroyed_system` drops the Metal/AncientTech yields and
+/// frees the tile's `OccupiedTiles` entry when the hull breaks. An
+/// unqualified worker's events are sent but deal no damage (the
+/// gate lives in `mine_system`), so the designation stays open
+/// while the worker accrues Mining XP toward qualifying.
+///
+/// Completion: when this hit will break the hull (its health is at
+/// or below one hit of damage), the designation is consumed here;
+/// the hull itself despawns through `hull_destroyed_system` on the
+/// next schedule pass, exactly as with the headless `shipbreak`
+/// command.
+fn process_hull_mining(
+    world: &mut World,
+    designation_entity: Entity,
+    worker_entity: Entity,
+    hull_entity: Entity,
+) {
+    use crate::layer1::shipbreaking::{MineEvent, HULL_MINE_DAMAGE};
+    let tier = crate::layer1::shipbreaking::effective_tool_tier_world(world, worker_entity);
+    let required = world
+        .get::<crate::layer1::shipbreaking::Mineable>(hull_entity)
+        .map_or(crate::layer1::shipbreaking::HULL_REQUIRED_TOOL_TIER, |m| {
+            m.required_tool_tier
+        });
+    if let Some(mut events) = world.get_resource_mut::<Events<MineEvent>>() {
+        events.send(MineEvent { miner: worker_entity, target: hull_entity });
+    }
+    if tier >= required {
+        let health = world.get::<Health>(hull_entity).map_or(f32::MAX, |h| h.current);
+        if health <= HULL_MINE_DAMAGE && world.get_entity(designation_entity).is_ok() {
+            world.despawn(designation_entity);
+        }
+    }
 }
 
 fn process_mother_lode(
@@ -339,6 +396,151 @@ mod tests {
             .collect();
         assert!(!resources.is_empty());
         assert_eq!(resources[0].resource_type, ResourceType::Stone);
+    }
+
+    // Item 205 RED: a Mine designation on a hull tile must complete
+    // autonomously through handle_mining_work -> shipbreaking
+    // MineEvent/mine_system (tier-3 gate, 10 dmg/hit, yields,
+    // occupancy freed). Pre-205 the generic executor only completed
+    // on Rock terrain, so designated hull mining never finished.
+    fn hull_work_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(crate::layer1::terrain::TerrainGrid {
+            width: 20,
+            height: 20,
+            tiles: vec![crate::layer1::terrain::TerrainType::Grass; 400],
+        });
+        world.insert_resource(crate::layer1::building::OccupiedTiles::default());
+        world.init_resource::<Events<crate::layer1::shipbreaking::MineEvent>>();
+        world
+    }
+
+    fn spawn_hull_designation(world: &mut World) -> (Entity, Entity) {
+        use crate::layer1::shipbreaking::{
+            HullTile, Mineable, YieldsOnMine, HULL_REQUIRED_TOOL_TIER, HULL_TILE_HEALTH,
+        };
+        let hull = world
+            .spawn((
+                HullTile,
+                Mineable { required_tool_tier: HULL_REQUIRED_TOOL_TIER },
+                Health { current: HULL_TILE_HEALTH, max: HULL_TILE_HEALTH, has_rust_lung: false },
+                YieldsOnMine(crate::layer1::shipbreaking::default_hull_yields()),
+                GridPosition { x: 5, y: 5 },
+            ))
+            .id();
+        world
+            .resource_mut::<crate::layer1::building::OccupiedTiles>()
+            .0
+            .insert((5, 5));
+        let designation = world
+            .spawn((
+                crate::layer1::designation::Designation {
+                    designation_type: crate::layer1::designation::DesignationType::Mine,
+                },
+                GridPosition { x: 5, y: 5 },
+            ))
+            .id();
+        (hull, designation)
+    }
+
+    /// The live game runs ONE persistent schedule, whose EventReader
+    /// cursors consume each MineEvent exactly once. Tests must do
+    /// the same: rebuilding the schedule per run re-reads buffered
+    /// events and multiplies damage.
+    fn ship_schedule() -> Schedule {
+        let mut schedule = Schedule::default();
+        schedule.add_systems((
+            crate::layer1::shipbreaking::mine_system,
+            crate::layer1::shipbreaking::hull_destroyed_system,
+        ).chain());
+        schedule
+    }
+
+    fn run_shipbreaking(world: &mut World) {
+        ship_schedule().run(world);
+    }
+
+    #[test]
+    fn test_designated_hull_mined_to_completion_by_qualified_worker() {
+        let mut world = hull_work_world();
+        let (hull, designation) = spawn_hull_designation(&mut world);
+        let worker = world
+            .spawn(crate::layer1::shipbreaking::Miner { tool_tier: 3 })
+            .id();
+        let pos = Some(GridPosition { x: 5, y: 5 });
+        let mut schedule = ship_schedule();
+        for _ in 0..12 {
+            if world.get_entity(designation).is_err() && world.get_entity(hull).is_err() {
+                break;
+            }
+            handle_mining_work(&mut world, designation, worker, 10.0, pos);
+            schedule.run(&mut world);
+        }
+        assert!(world.get_entity(hull).is_err(), "designated hull must be mined to destruction");
+        assert!(
+            world.get_entity(designation).is_err(),
+            "designation must complete (despawn) when the hull breaks"
+        );
+        let drops: Vec<(ResourceType, f32)> = world
+            .query::<&crate::layer1::resources::ResourceItem>()
+            .iter(&world)
+            .map(|r| (r.resource_type, r.amount))
+            .collect();
+        assert!(
+            drops.contains(&(ResourceType::Metal, 5.0)),
+            "hull yields Metal x5, got {drops:?}"
+        );
+        assert!(
+            drops.contains(&(ResourceType::AncientTech, 1.0)),
+            "hull yields AncientTech x1, got {drops:?}"
+        );
+        assert!(
+            !world.resource::<crate::layer1::building::OccupiedTiles>().0.contains(&(5, 5)),
+            "broken hull frees its OccupiedTiles entry"
+        );
+    }
+
+    #[test]
+    fn test_designated_hull_resists_unqualified_worker() {
+        let mut world = hull_work_world();
+        let (hull, designation) = spawn_hull_designation(&mut world);
+        let worker = world
+            .spawn(crate::layer1::shipbreaking::Miner { tool_tier: 1 })
+            .id();
+        let pos = Some(GridPosition { x: 5, y: 5 });
+        for _ in 0..5 {
+            handle_mining_work(&mut world, designation, worker, 10.0, pos);
+            run_shipbreaking(&mut world);
+        }
+        let health = world.get::<Health>(hull).expect("hull still standing");
+        assert_eq!(health.current, 100.0, "tier-1 worker must not dent hull (tier-3 gate)");
+        assert!(world.get_entity(designation).is_ok(), "designation stays open while hull stands");
+    }
+
+    #[test]
+    fn test_designated_hull_mined_by_real_pop_tier() {
+        // No Miner seam: pickaxe + Mining level 2 (400 XP) derives tier 3.
+        let mut world = hull_work_world();
+        let (hull, designation) = spawn_hull_designation(&mut world);
+        let pick = world
+            .spawn(crate::layer1::items::Tool {
+                tool_type: crate::layer1::items::ToolType::Pickaxe,
+                durability: 100.0,
+                max_durability: 100.0,
+            })
+            .id();
+        let mut skills = crate::layer1::skills::Skills::default();
+        skills.xp.insert(crate::layer1::skills::SkillType::Mining, 400.0);
+        let worker = world
+            .spawn((
+                crate::layer1::items::Equipment { tool: Some(pick), ..Default::default() },
+                skills,
+            ))
+            .id();
+        handle_mining_work(&mut world, designation, worker, 10.0, Some(GridPosition { x: 5, y: 5 }));
+        run_shipbreaking(&mut world);
+        let health = world.get::<Health>(hull).expect("hull still standing after one hit");
+        assert_eq!(health.current, 90.0, "one qualified hit deals HULL_MINE_DAMAGE (10)");
     }
 
     #[test]
