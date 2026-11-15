@@ -20,13 +20,17 @@
 //! ### Consumption Effects
 //! Consumption is instantaneous and applies immediate effects:
 //! *   **Stim:** +50% Speed, -2 Health (Immediate). duration: 500 ticks.
-//! *   **Sedative:** -50% Speed, -20 Stress (Immediate). duration: 500 ticks.
+//! *   **Sedative:** -50% Speed, -20 Stress (Immediate), +Mood via a
+//!     `Sedative Calm` morale modifier (Spec 417). duration: 500 ticks.
 //!
 //! ### Addiction & Withdrawal
 //! *   **Addiction Severity:** Increases by 0.1 per dose (max 1.0).
 //! *   **Withdrawal Threshold:** 1000 ticks since last dose.
 //! *   **Withdrawal Effects:**
-//!     *   **Speed:** -50% (Stacking with other penalties).
+//!     *   **Speed:** Scaled crash (Spec 417 §5): the multiplier is
+//!       `1.0 - severity`, deepening by 0.05 per 1000 ticks overdue
+//!       (capped at 0.25), floored at 0.1. Severity 0.5 at onset
+//!       reproduces the original flat -50%.
 //!     *   **Utility AI:** Forces `desire = 1.0` (Panic search).
 //!
 //! ## Usage
@@ -49,6 +53,7 @@ use crate::layer1::health::Health;
 use crate::layer1::items::ItemType;
 use crate::layer1::map::GridPosition;
 use crate::layer1::needs::Needs;
+use crate::layer1::social::morale::{MoodModifier, Morale};
 use crate::layer1::utility_eval_types::ScorableCandidate;
 use crate::layer1::utility_types::{calculate_context_score, UtilityWeights};
 use crate::shared::time::SimulationTime;
@@ -92,6 +97,74 @@ pub struct Addiction {
     pub withdrawal_threshold: u64,
     /// Whether the pop is currently suffering from withdrawal.
     pub in_withdrawal: bool,
+}
+
+/// Player-facing label for the sedative mood modifier (Spec 417).
+pub const SEDATIVE_MOOD_LABEL: &str = "Sedative Calm";
+
+/// Morale value of the sedative mood modifier (Spec 417: Sedatives = +Mood).
+pub const SEDATIVE_MOOD_VALUE: f32 = 0.15;
+
+/// Ticks the sedative mood modifier lasts (matches the 500-tick effect).
+pub const SEDATIVE_MOOD_DURATION: u32 = 500;
+
+/// Extra withdrawal speed loss per 1000 ticks spent overdue (Spec 417 §5).
+pub const WITHDRAWAL_DEEPEN_PER_1000_TICKS: f32 = 0.05;
+
+/// Cap on the time-based withdrawal deepening (Spec 417 §5).
+pub const WITHDRAWAL_DEEPEN_CAP: f32 = 0.25;
+
+/// Speed multiplier contributed by one addiction's withdrawal (Spec 417 §5:
+/// the crash scales with severity and with time spent overdue, replacing
+/// Spec 181's flat x0.5). Returns 1.0 when not in withdrawal. Severity 0.5
+/// with no overdue time reproduces the original 0.5 exactly. `current_tick`
+/// is `None` when the caller has no clock (unit contexts) — the severity
+/// scaling still applies.
+#[must_use]
+pub fn withdrawal_speed_factor(addiction: &Addiction, current_tick: Option<u64>) -> f32 {
+    if !addiction.in_withdrawal {
+        return 1.0;
+    }
+    let severity = addiction.severity.clamp(0.0, 1.0);
+    let mut factor = 1.0 - severity;
+    if let Some(tick) = current_tick {
+        let onset = addiction
+            .last_consumed_tick
+            .saturating_add(addiction.withdrawal_threshold);
+        let overdue = tick.saturating_sub(onset) as f32;
+        let deepen =
+            (overdue / 1000.0 * WITHDRAWAL_DEEPEN_PER_1000_TICKS).min(WITHDRAWAL_DEEPEN_CAP);
+        factor -= deepen;
+    }
+    factor.clamp(0.1, 1.0)
+}
+
+/// Colony-wide chemical census for STATS / the headless `chem` panel
+/// (Spec 417).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ChemicalCensus {
+    /// Total active chemical effects across all pops.
+    pub active_effects: usize,
+    /// Pops carrying at least one addiction.
+    pub addicted: usize,
+    /// Pops currently in withdrawal from at least one chemical.
+    pub in_withdrawal: usize,
+}
+
+/// Counts active effects, addicted pops, and pops in withdrawal.
+pub fn chemical_census(world: &mut World) -> ChemicalCensus {
+    let mut census = ChemicalCensus::default();
+    let mut query = world.query::<&ChemicalState>();
+    for state in query.iter(world) {
+        census.active_effects += state.active_effects.len();
+        if !state.addictions.is_empty() {
+            census.addicted += 1;
+        }
+        if state.addictions.iter().any(|a| a.in_withdrawal) {
+            census.in_withdrawal += 1;
+        }
+    }
+    census
 }
 
 /// Component storing chemical effects and addictions on a Pop.
@@ -158,19 +231,21 @@ pub fn consume_chemical(world: &mut World, entity: Entity, chem: ChemicalType) {
     let mut query = world.query::<(
         Option<&mut Health>,
         Option<&mut crate::layer1::stress::StressTracker>,
+        Option<&mut Morale>,
     )>();
 
-    if let Ok((mut health_opt, mut stress_opt)) = query.get_mut(world, entity) {
+    if let Ok((mut health_opt, mut stress_opt, mut morale_opt)) = query.get_mut(world, entity) {
         consume_chemical_logic(
             &mut state,
             chem,
             tick,
             health_opt.as_deref_mut(),
             stress_opt.as_deref_mut(),
+            morale_opt.as_deref_mut(),
         );
     } else {
         // Entity might be missing components, but we still update chemical state.
-        consume_chemical_logic(&mut state, chem, tick, None, None);
+        consume_chemical_logic(&mut state, chem, tick, None, None, None);
     }
 
     world.entity_mut(entity).insert(state);
@@ -185,6 +260,7 @@ pub fn consume_chemical_logic(
     tick: u64,
     health: Option<&mut Health>,
     stress: Option<&mut crate::layer1::stress::StressTracker>,
+    morale: Option<&mut Morale>,
 ) {
     // 1. Add/Refresh Active Effect
     if let Some(existing) = state.active_effects.iter_mut().find(|e| e.chemical == chem) {
@@ -214,6 +290,24 @@ pub fn consume_chemical_logic(
             // Immediate Stress Relief
             if let Some(s) = stress {
                 s.accumulated_stress = (s.accumulated_stress - 20.0).max(0.0);
+            }
+            // Spec 417: Sedatives = +Mood. Bridge onto the real Morale seam:
+            // refresh the same-label modifier instead of stacking doses.
+            if let Some(m) = morale {
+                if let Some(existing) = m
+                    .modifiers
+                    .iter_mut()
+                    .find(|md| md.label == SEDATIVE_MOOD_LABEL)
+                {
+                    existing.value = SEDATIVE_MOOD_VALUE;
+                    existing.duration = SEDATIVE_MOOD_DURATION;
+                } else {
+                    m.add_modifier(MoodModifier {
+                        label: SEDATIVE_MOOD_LABEL.to_string(),
+                        value: SEDATIVE_MOOD_VALUE,
+                        duration: SEDATIVE_MOOD_DURATION,
+                    });
+                }
             }
         }
     }
@@ -288,12 +382,10 @@ pub fn get_speed_modifier(world: &World, entity: Entity) -> f32 {
             }
         }
 
-        // Withdrawal Penalties
+        // Withdrawal Penalties (Spec 417 §5: scaled by severity + time)
+        let tick = world.get_resource::<SimulationTime>().map(|t| t.tick);
         for addiction in &state.addictions {
-            if addiction.in_withdrawal {
-                // Severe debuff: Halve speed for each withdrawal
-                modifier *= 0.5;
-            }
+            modifier *= withdrawal_speed_factor(addiction, tick);
         }
     }
     // Clamp modifier to sane limits to prevent physics explosion or stasis
@@ -308,6 +400,7 @@ pub fn apply_chemical_speed_modifiers_system(world: &mut World) {
         &crate::layer1::chemical::ChemicalState,
         &mut crate::layer1::pop::Speed,
     )>();
+    let tick = world.get_resource::<SimulationTime>().map(|t| t.tick);
     for (state, mut speed) in query.iter_mut(world) {
         let mut modifier = 1.0;
         // Active Effects
@@ -316,11 +409,9 @@ pub fn apply_chemical_speed_modifiers_system(world: &mut World) {
                 modifier *= effect.magnitude;
             }
         }
-        // Withdrawal Penalties
+        // Withdrawal Penalties (Spec 417 §5: scaled by severity + time)
         for addiction in &state.addictions {
-            if addiction.in_withdrawal {
-                modifier *= 0.5;
-            }
+            modifier *= withdrawal_speed_factor(addiction, tick);
         }
         let modifier = modifier.clamp(0.1, 5.0);
         if (modifier - 1.0).abs() > f32::EPSILON {
@@ -807,5 +898,260 @@ mod tests {
                 .current,
             5.0
         );
+    }
+}
+
+/// Spec 417 "Chemical Regulation" — RED tests adapted from the spec's mock
+/// sketch (`Pop`/`Stats`/`drugs` types do not exist) onto the real Spec 181
+/// seams: [`ChemicalState`], [`consume_chemical`], [`get_speed_modifier`],
+/// `Health`, `StressTracker`, and the `Morale`/`MoodModifier` pipeline.
+/// Spec 417's legs that Spec 181 left unbuilt: withdrawal scaling with
+/// severity/time (§5) and the Sedative +Mood leg (181 cut stress only).
+#[cfg(test)]
+mod spec417_tests {
+    use super::*;
+    use crate::layer1::health::Health;
+    use crate::layer1::pop::Pop;
+    use crate::layer1::social::morale::Morale;
+    use crate::layer1::stress::StressTracker;
+    use crate::shared::time::SimulationTime;
+
+    fn stim_addiction(severity: f32, in_withdrawal: bool) -> Addiction {
+        Addiction {
+            chemical: ChemicalType::Stim,
+            severity,
+            last_consumed_tick: 0,
+            withdrawal_threshold: 1000,
+            in_withdrawal,
+        }
+    }
+
+    #[test]
+    fn test_417_consume_stim_applies_buffs() {
+        // Spec RED test 1, adapted: Stats { speed_modifier, health_drain_rate }
+        // is a mock — the real expression is get_speed_modifier() > 1.0 and
+        // immediate Health damage (-2.0, Spec 181).
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        let pop = world
+            .spawn((Pop, ChemicalState::default(), Health::default()))
+            .id();
+        consume_chemical(&mut world, pop, ChemicalType::Stim);
+        let speed = get_speed_modifier(&world, pop);
+        assert!(speed > 1.0, "Stim should raise speed modifier, got {speed}");
+        let health = world.get::<Health>(pop).unwrap();
+        assert!(
+            health.current < health.max,
+            "Stim should cost health, got {}/{}",
+            health.current,
+            health.max
+        );
+    }
+
+    #[test]
+    fn test_417_addiction_development() {
+        // Spec RED test 2, adapted: severity is 0.0-1.0 (+0.1/dose), not 0-100.
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        let pop = world
+            .spawn((Pop, ChemicalState::default(), Health::default()))
+            .id();
+        for _ in 0..5 {
+            consume_chemical(&mut world, pop, ChemicalType::Stim);
+        }
+        let state = world.get::<ChemicalState>(pop).unwrap();
+        let addiction = state.get_addiction(ChemicalType::Stim).unwrap();
+        assert!(addiction.severity > 0.0);
+        assert!((addiction.severity - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_417_withdrawal_symptoms_scale_with_severity() {
+        // Spec RED test 3 + §5, adapted: mock severity 80.0 == real 0.8.
+        // The crash must scale: severe addiction crashes far below the old
+        // flat x0.5; mild addiction barely slows the pop.
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        let severe = world
+            .spawn((
+                Pop,
+                ChemicalState {
+                    active_effects: vec![],
+                    addictions: vec![stim_addiction(0.8, true)],
+                },
+            ))
+            .id();
+        let mild = world
+            .spawn((
+                Pop,
+                ChemicalState {
+                    active_effects: vec![],
+                    addictions: vec![stim_addiction(0.2, true)],
+                },
+            ))
+            .id();
+        let severe_speed = get_speed_modifier(&world, severe);
+        let mild_speed = get_speed_modifier(&world, mild);
+        assert!(severe_speed < 1.0, "withdrawal must debuff speed");
+        assert!(
+            severe_speed < 0.5,
+            "severity 0.8 crash should beat the flat 0.5, got {severe_speed}"
+        );
+        assert!(
+            mild_speed > severe_speed,
+            "mild addiction ({mild_speed}) should crash softer than severe ({severe_speed})"
+        );
+    }
+
+    #[test]
+    fn test_417_withdrawal_scales_with_time_overdue() {
+        // §5: the longer past the withdrawal threshold, the deeper the crash
+        // (capped). Severity 0.5 at onset == the old flat 0.5 baseline.
+        let mut world = World::new();
+        world.insert_resource(SimulationTime {
+            tick: 1000,
+            ..Default::default()
+        });
+        let pop = world
+            .spawn((
+                Pop,
+                ChemicalState {
+                    active_effects: vec![],
+                    addictions: vec![stim_addiction(0.5, true)],
+                },
+            ))
+            .id();
+        let at_onset = get_speed_modifier(&world, pop);
+        assert!(
+            (at_onset - 0.5).abs() < f32::EPSILON,
+            "onset should match the Spec 181 baseline 0.5, got {at_onset}"
+        );
+        world.insert_resource(SimulationTime {
+            tick: 6000,
+            ..Default::default()
+        });
+        let later = get_speed_modifier(&world, pop);
+        assert!(
+            later < at_onset - 0.2,
+            "5000 ticks overdue should deepen the crash: {at_onset} -> {later}"
+        );
+    }
+
+    #[test]
+    fn test_417_sedative_applies_mood_buff_and_slowdown() {
+        // Spec 417 headline: Sedatives = +Mood, -Speed. Spec 181 delivered
+        // -Speed and -20 Stress but never touched the real Morale seam.
+        let mut world = World::new();
+        world.insert_resource(SimulationTime::default());
+        let pop = world
+            .spawn((
+                Pop,
+                ChemicalState::default(),
+                Morale::default(),
+                StressTracker {
+                    accumulated_stress: 50.0,
+                },
+            ))
+            .id();
+        consume_chemical(&mut world, pop, ChemicalType::Sedative);
+        let speed = get_speed_modifier(&world, pop);
+        assert!(speed < 1.0, "Sedative should slow speed, got {speed}");
+        let stress = world.get::<StressTracker>(pop).unwrap();
+        assert!((stress.accumulated_stress - 30.0).abs() < f32::EPSILON);
+        let morale = world.get::<Morale>(pop).unwrap();
+        let calm: Vec<_> = morale
+            .modifiers
+            .iter()
+            .filter(|m| m.label == SEDATIVE_MOOD_LABEL)
+            .collect();
+        assert_eq!(calm.len(), 1, "sedative should add one mood modifier");
+        assert!(
+            calm[0].value > 0.0,
+            "sedative mood modifier must be positive"
+        );
+        // Second dose refreshes the modifier instead of stacking it.
+        consume_chemical(&mut world, pop, ChemicalType::Sedative);
+        let morale = world.get::<Morale>(pop).unwrap();
+        assert_eq!(
+            morale
+                .modifiers
+                .iter()
+                .filter(|m| m.label == SEDATIVE_MOOD_LABEL)
+                .count(),
+            1,
+            "repeat doses refresh, never stack, the mood modifier"
+        );
+    }
+
+    #[test]
+    fn test_417_dose_resets_withdrawal() {
+        // Spec §7: WithdrawalTimer resets on a fresh dose of the same drug.
+        let mut world = World::new();
+        world.insert_resource(SimulationTime {
+            tick: 5000,
+            ..Default::default()
+        });
+        let pop = world
+            .spawn((
+                Pop,
+                ChemicalState {
+                    active_effects: vec![],
+                    addictions: vec![stim_addiction(0.8, true)],
+                },
+                Health::default(),
+            ))
+            .id();
+        assert!(world
+            .get::<ChemicalState>(pop)
+            .unwrap()
+            .is_in_withdrawal(ChemicalType::Stim));
+        consume_chemical(&mut world, pop, ChemicalType::Stim);
+        let state = world.get::<ChemicalState>(pop).unwrap();
+        assert!(!state.is_in_withdrawal(ChemicalType::Stim));
+        assert_eq!(
+            state
+                .get_addiction(ChemicalType::Stim)
+                .unwrap()
+                .last_consumed_tick,
+            5000
+        );
+    }
+
+    #[test]
+    fn test_417_withdrawal_factor_ignores_sober_addiction() {
+        // No withdrawal flag -> no penalty, whatever the severity.
+        let addiction = stim_addiction(0.9, false);
+        assert!((withdrawal_speed_factor(&addiction, Some(999_999)) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_417_ip_guard_public_strings_original() {
+        let public_strings = [
+            SEDATIVE_MOOD_LABEL,
+            "Stim",
+            "Sedative",
+            "Chemical Regulation",
+        ];
+        let banned = [
+            "morphine",
+            "heroin",
+            "cocaine",
+            "methamphetamine",
+            "adderall",
+            "ritalin",
+            "xanax",
+            "valium",
+            "oxycodone",
+            "fentanyl",
+        ];
+        for s in public_strings {
+            let lower = s.to_lowercase();
+            for term in banned {
+                assert!(
+                    !lower.contains(term),
+                    "IP-guard: banned term '{term}' in public string '{s}'"
+                );
+            }
+        }
     }
 }

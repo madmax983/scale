@@ -54,6 +54,7 @@ pub fn arrival_handler_system(
             Option<&mut crate::layer1::chemical::ChemicalState>,
             Option<&mut crate::layer1::health::Health>,
             Option<&mut crate::layer1::stress::StressTracker>,
+            Option<&mut crate::layer1::social::morale::Morale>,
             Option<&crate::layer1::social::grievances::Ostracized>,
         ),
         With<AtTarget>,
@@ -69,6 +70,7 @@ pub fn arrival_handler_system(
         mut chem_opt,
         mut health_opt,
         mut stress_opt,
+        mut morale_opt,
         ostracized_opt,
     ) in &mut arrivals
     {
@@ -82,6 +84,7 @@ pub fn arrival_handler_system(
             &mut chem_opt,
             &mut health_opt,
             &mut stress_opt,
+            &mut morale_opt,
             &mut commands,
             &mut ctx,
             ostracized_opt.is_some(),
@@ -123,6 +126,7 @@ fn process_arrival(
     chemical_state_opt: &mut Option<Mut<crate::layer1::chemical::ChemicalState>>,
     health_opt: &mut Option<Mut<crate::layer1::health::Health>>,
     stress_opt: &mut Option<Mut<crate::layer1::stress::StressTracker>>,
+    morale_opt: &mut Option<Mut<crate::layer1::social::morale::Morale>>,
     commands: &mut Commands,
     ctx: &mut ArrivalContext,
     is_ostracized: bool,
@@ -155,6 +159,7 @@ fn process_arrival(
                 chemical_state_opt,
                 health_opt,
                 stress_opt,
+                morale_opt,
                 commands,
                 &ctx.time,
             );
@@ -604,6 +609,7 @@ fn handle_consume_chemical_arrival(
     chemical_state_opt: &mut Option<Mut<crate::layer1::chemical::ChemicalState>>,
     health_opt: &mut Option<Mut<crate::layer1::health::Health>>,
     stress_opt: &mut Option<Mut<crate::layer1::stress::StressTracker>>,
+    morale_opt: &mut Option<Mut<crate::layer1::social::morale::Morale>>,
     commands: &mut Commands,
     time: &Res<SimulationTime>,
 ) {
@@ -627,6 +633,7 @@ fn handle_consume_chemical_arrival(
                     tick,
                     health_opt.as_deref_mut(),
                     stress_opt.as_deref_mut(),
+                    morale_opt.as_deref_mut(),
                 );
             } else {
                 let mut state = crate::layer1::chemical::ChemicalState::default();
@@ -636,6 +643,7 @@ fn handle_consume_chemical_arrival(
                     tick,
                     health_opt.as_deref_mut(),
                     stress_opt.as_deref_mut(),
+                    morale_opt.as_deref_mut(),
                 );
                 commands.entity(pop_entity).insert(state);
             }
@@ -797,6 +805,7 @@ mod tests {
                 let mut chem_opt = None;
                 let mut health_opt = None;
                 let mut stress_opt = None;
+                let mut morale_opt = None;
                 handle_consume_chemical_arrival(
                     target,
                     pop,
@@ -804,6 +813,7 @@ mod tests {
                     &mut chem_opt,
                     &mut health_opt,
                     &mut stress_opt,
+                    &mut morale_opt,
                     &mut commands,
                     &time,
                 );

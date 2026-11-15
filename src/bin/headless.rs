@@ -705,6 +705,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "hack_sat" => handle_hack_sat_command(world, &parts),
         "shootdown" => handle_shootdown_command(world, &parts),
         "give" => handle_give_command(world, &parts),
+        "chem" => handle_chem_command(world, &parts),
         "designations" | "d" => print_designations(world),
         "find" => handle_find_command(world, &parts),
         "scan" => handle_scan_command(world, &parts),
@@ -3649,8 +3650,11 @@ fn print_stats(world: &mut World) {
     // ledger waste) — bio-waste and nutrient paste are distinct
     // ledger fields and were invisible in STATS until now.
 
+    // Spec 417: chemical census for STATS (full panel: `chem`).
+    let chem_census = scale::layer1::chemical::chemical_census(world);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{}",
         tick,
         scenario,
         pops,
@@ -3850,6 +3854,9 @@ fn print_stats(world: &mut World) {
         coghaz_max,
         coghaz_hallucinations,
         coghaz_over,
+        chem_census.active_effects,
+        chem_census.addicted,
+        chem_census.in_withdrawal,
     );
 }
 
@@ -7242,6 +7249,7 @@ fn print_help() {
                 ("drainwallets", "", "Debug lever (Spec 1387): zero every pop's credits"),
                 ("scrip", "", "Company Scrip panel (Spec 415): prices, wage table, wallet census, scrip ledger"),
                 ("coghaz", "", "Cognitive Hazards panel (Spec 416): insanity census, hallucination ledger"),
+                ("chem [dose <id> <stim|sedative>]", "", "Chemical Regulation panel (Spec 417): active effects, addictions, withdrawal; dose administers via the real consumption pipeline"),
                 ("horror [n]", "", "Debug (Spec 416): place n horror loci on the first pop — nearby pops accumulate insanity"),
                 ("insanity [level]", "", "Debug (Spec 416): set every pop's insanity (default 95) — over 80 hallucinates false alerts"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
@@ -13416,6 +13424,121 @@ fn handle_coredrill_command(world: &mut World, parts: &[&str]) {
 }
 
 /// Debug: list core drills and planetary stability (Spec 375).
+/// Spec 417: Chemical Regulation panel + debug dosing.
+///
+/// `chem` prints the colony chemical census and every pop carrying a
+/// chemical state; `chem dose <pop_id> <stim|sedative>` administers a dose
+/// through the real `consume_chemical` pipeline (effects, addiction,
+/// withdrawal reset, sedative mood modifier).
+fn handle_chem_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::chemical::{consume_chemical, ChemicalType};
+    if parts.get(1).copied() == Some("dose") {
+        let (Some(id_str), Some(chem_str)) = (parts.get(2), parts.get(3)) else {
+            print_dashboard_panel(
+                "ERROR",
+                "Usage: chem dose <pop_id> <stim|sedative>  (list ids with `pops`)",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        };
+        let Ok(id) = id_str.parse::<u32>() else {
+            print_dashboard_panel(
+                "ERROR",
+                &format!("Invalid pop id: '{id_str}'"),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        };
+        let chem = match chem_str.to_ascii_lowercase().as_str() {
+            "stim" => ChemicalType::Stim,
+            "sedative" => ChemicalType::Sedative,
+            other => {
+                print_dashboard_panel(
+                    "ERROR",
+                    &format!("Unknown chemical: '{other}'. Try: stim, sedative"),
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return;
+            }
+        };
+        let Some((entity, name)) = find_pop_by_id(world, id) else {
+            print_dashboard_panel(
+                "ERROR",
+                &format!("No pop with id {id}. List candidates with `pops`."),
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+            return;
+        };
+        consume_chemical(world, entity, chem);
+        print_dashboard_panel(
+            "CHEMICAL REGULATION",
+            &format!("Dosed {name} (id {id}) with {chem_str}."),
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+        return;
+    }
+    print_chem_report(world);
+}
+
+/// Spec 417: chemical census panel (the `chem` command without arguments).
+fn print_chem_report(world: &mut World) {
+    use scale::layer1::chemical::{chemical_census, ChemicalState};
+    let census = chemical_census(world);
+    let mut lines = vec![format!(
+        "{} active effect(s) - {} addicted pop(s) - {} in withdrawal",
+        census.active_effects, census.addicted, census.in_withdrawal
+    )];
+    let mut rows: Vec<(u32, String, String)> = Vec::new();
+    {
+        let mut query = world.query::<(Entity, &PopName, &ChemicalState)>();
+        for (entity, name, state) in query.iter(world) {
+            if state.active_effects.is_empty() && state.addictions.is_empty() {
+                continue;
+            }
+            let effects = state
+                .active_effects
+                .iter()
+                .map(|e| format!("{:?} {}t x{:.2}", e.chemical, e.duration, e.magnitude))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let addictions = state
+                .addictions
+                .iter()
+                .map(|a| {
+                    format!(
+                        "{:?} sev={:.2} last={} withdrawal={}",
+                        a.chemical, a.severity, a.last_consumed_tick, a.in_withdrawal
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            rows.push((
+                entity.index(),
+                name.0.clone(),
+                format!("effects=[{effects}] addictions=[{addictions}]"),
+            ));
+        }
+    }
+    rows.sort_by_key(|(id, _, _)| *id);
+    for (id, name, detail) in rows {
+        lines.push(format!("{name} (id {id}): {detail}"));
+    }
+    if census.addicted == 0 && census.active_effects == 0 {
+        lines.push("No chemical use recorded. Dose with: chem dose <pop_id> <stim|sedative>".to_string());
+    }
+    print_dashboard_panel(
+        "CHEMICAL REGULATION",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 fn print_coredrills(world: &mut World) {
     use scale::layer1::tech::core_tapping::{
         core_drill_counts, core_failed, planetary_stability_level,
