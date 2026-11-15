@@ -280,6 +280,15 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Environment),
     );
 
+    // Spec 420 Ephemeral Architecture: ice melts, salt dissolves, packed
+    // mud washes away — environmental decay on the real Structure pool,
+    // in Environment alongside entropy/fire (own block: the entropy
+    // tuple above is at the arity comfort limit).
+    schedule.add_systems(
+        (crate::layer1::architecture::ephemeral::ephemeral_decay_system,)
+            .in_set(Layer1SystemSet::Environment),
+    );
+
     schedule.add_systems(
         (crate::layer1::social::empty_room::update_sanctuary_system,)
             .in_set(Layer1SystemSet::Environment),

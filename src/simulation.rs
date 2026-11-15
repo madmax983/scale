@@ -747,6 +747,9 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 1384 EVA suits: status snapshot + scenario issue floor
     // (init only — never clobber a scenario-granted value).
     world.init_resource::<crate::layer1::eva_suit::ColonySuitStatus>();
+    // Spec 420 Ephemeral Architecture: dissolution ledger (first-tick
+    // pattern — the decay system increments it from tick one).
+    world.init_resource::<crate::layer1::architecture::ephemeral::EphemeralLedger>();
     // Spec 406 Quarantine Protocols: designation/breach ledger
     // (first-tick pattern — the designation system reads it tick one).
     world.init_resource::<crate::layer1::quarantine::QuarantineState>();

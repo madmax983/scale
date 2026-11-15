@@ -74,6 +74,8 @@ pub mod chrono_vault;
 pub use chrono_vault::*;
 pub mod gravity_engineering;
 pub use gravity_engineering::*;
-pub mod potemkin;
 pub mod construction_sabotage;
+/// Ephemeral architecture: ice/salt/packed-mud decay (Spec 420).
+pub mod ephemeral;
+pub mod potemkin;
 pub use potemkin::*;

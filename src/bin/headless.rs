@@ -499,6 +499,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "exterminate" => handle_exterminate_command(world, &parts),
         "seniority" => handle_seniority_command(world, &parts),
         "elders" => handle_elders_command(world, &parts),
+        "ephemeral" => handle_ephemeral_command(world, &parts),
         "howl" => handle_howl_command(world, &parts),
         "calm" => handle_calm_command(world),
         "crystal" => handle_crystal_command(world, &parts),
@@ -3657,8 +3658,11 @@ fn print_stats(world: &mut World) {
     // Spec 418: lifecycle census for STATS (full panel: `elders`).
     let lifecycle_census = scale::layer1::lifecycle::lifecycle_census(world);
 
+    // Spec 420: ephemeral census for STATS (full panel: `ephemeral`).
+    let ephemeral_census = scale::layer1::architecture::ephemeral::ephemeral_census(world);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={}",
         tick,
         scenario,
         pops,
@@ -3863,6 +3867,8 @@ fn print_stats(world: &mut World) {
         chem_census.in_withdrawal,
         lifecycle_census.elders,
         lifecycle_census.buffed_workers,
+        ephemeral_census.total,
+        ephemeral_census.dissolved,
     );
 }
 
@@ -7257,6 +7263,7 @@ fn print_help() {
                 ("coghaz", "", "Cognitive Hazards panel (Spec 416): insanity census, hallucination ledger"),
                 ("chem [dose <id> <stim|sedative>]", "", "Chemical Regulation panel (Spec 417): active effects, addictions, withdrawal; dose administers via the real consumption pipeline"),
                 ("elders", "", "Lifecycle & Retirement panel (Spec 418): life-stage census, elder wisdom auras, elder ration edict state"),
+                ("ephemeral [spawn <ice|salt|mud> [x] [y] | rain | storm | clear | heat <c> | chill]", "", "Ephemeral Architecture panel (Spec 420): ice/salt/packed-mud structures, live decay rates, dissolved ledger; subcommands raise an ephemeral Wall and force weather/temperature for testing"),
                 ("horror [n]", "", "Debug (Spec 416): place n horror loci on the first pop — nearby pops accumulate insanity"),
                 ("insanity [level]", "", "Debug (Spec 416): set every pop's insanity (default 95) — over 80 hallucinates false alerts"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
@@ -13492,6 +13499,202 @@ fn handle_elders_command(world: &mut World, _parts: &[&str]) {
     }
     print_dashboard_panel(
         "LIFECYCLE & RETIREMENT",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 420: Ephemeral Architecture panel + debug levers.
+///
+/// `ephemeral` prints the census and every live ephemeral structure
+/// with its current environmental decay rate. `ephemeral spawn
+/// <ice|salt|mud> [x] [y]` raises a Wall of that material through the
+/// real construction seam. `ephemeral rain|storm|clear` forces the
+/// colony WeatherState and `ephemeral heat <c>` / `ephemeral chill`
+/// force the TemperatureGrid, so melt/dissolve can be exercised on
+/// demand (the `howl`/`calm` debug-lever precedent).
+fn handle_ephemeral_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::architecture::ephemeral::{spawn_ephemeral_wall, EphemeralMaterial};
+    use scale::layer1::weather::{WeatherState, WeatherType};
+
+    match parts.get(1).copied() {
+        Some("spawn") => {
+            let Some(mat_name) = parts.get(2).copied() else {
+                print_dashboard_panel(
+                    "ERROR",
+                    "Usage: ephemeral spawn <ice|salt|mud> [x] [y]",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return;
+            };
+            let Some(material) = EphemeralMaterial::parse(mat_name) else {
+                print_dashboard_panel(
+                    "ERROR",
+                    &format!("Unknown material: '{mat_name}'. Try: ice, salt, mud"),
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+                return;
+            };
+            let (mut x, mut y) = (40, 25);
+            if let (Some(px), Some(py)) = (parts.get(3), parts.get(4)) {
+                if let (Ok(px), Ok(py)) = (px.parse::<i32>(), py.parse::<i32>()) {
+                    x = px;
+                    y = py;
+                }
+            } else {
+                // Fallback: beside the first pop with a position.
+                let mut q = world.query_filtered::<&GridPosition, With<Pop>>();
+                if let Some(pos) = q.iter(world).next() {
+                    x = pos.x + 2;
+                    y = pos.y;
+                }
+            }
+            let entity = spawn_ephemeral_wall(world, material, x, y);
+            print_dashboard_panel(
+                "EPHEMERAL ARCHITECTURE",
+                &format!(
+                    "{} Wall #{} raised at ({x}, {y}). It is cheap, it is fast, and the environment will take it back — watch STATS ephemeral= or the `ephemeral` panel.",
+                    material.label(),
+                    entity.index()
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some(mode @ ("rain" | "storm" | "clear")) => {
+            let weather = match mode {
+                "rain" => WeatherType::Rain,
+                "storm" => WeatherType::Storm,
+                _ => WeatherType::Clear,
+            };
+            if let Some(mut state) = world.get_resource_mut::<WeatherState>() {
+                state.current_weather = weather;
+                state.duration_remaining = 100_000;
+            }
+            print_dashboard_panel(
+                "EPHEMERAL ARCHITECTURE",
+                &format!("Weather forced to {} for testing.", weather.name()),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("heat") | Some("chill") => {
+            let target = if parts.get(1).copied() == Some("chill") {
+                -5.0
+            } else {
+                parts.get(2).and_then(|s| s.parse::<f32>().ok()).unwrap_or(30.0)
+            };
+            if let Some(mut grid) =
+                world.get_resource_mut::<scale::layer1::temperature::TemperatureGrid>()
+            {
+                grid.ambient = target;
+                for v in grid.values.iter_mut() {
+                    *v = target;
+                }
+                for v in grid.scratch.iter_mut() {
+                    *v = target;
+                }
+                print_dashboard_panel(
+                    "EPHEMERAL ARCHITECTURE",
+                    &format!("Temperature grid forced to {target:.1}C for testing."),
+                    Some(comfy_table::Color::Cyan),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            } else {
+                print_dashboard_panel(
+                    "ERROR",
+                    "No TemperatureGrid in this world.",
+                    Some(comfy_table::Color::Red),
+                    Some(comfy_table::Attribute::Bold),
+                );
+            }
+        }
+        _ => print_ephemeral_report(world),
+    }
+}
+
+/// Spec 420: ephemeral census panel (the `ephemeral` command bare).
+fn print_ephemeral_report(world: &mut World) {
+    use scale::layer1::architecture::ephemeral::{
+        decay_rate_for, ephemeral_census, EphemeralMaterial,
+    };
+    use scale::layer1::weather::{WeatherState, WeatherType};
+
+    let census = ephemeral_census(world);
+    let weather = world
+        .get_resource::<WeatherState>()
+        .map_or(WeatherType::Clear, |w| w.current_weather);
+    let season_label = world
+        .get_resource::<scale::layer1::seasons::SeasonState>()
+        .map_or("Spring", |s| s.current_season.name());
+    let mut lines = vec![
+        format!(
+            "Live: {} (ice {} / salt {} / mud {}) | Dissolved so far: {}",
+            census.total, census.ice, census.salt, census.mud, census.dissolved
+        ),
+        format!(
+            "Environment: season {}, weather {}",
+            season_label,
+            weather.name()
+        ),
+    ];
+    // Collect rows first (the query borrows world mutably), then do the
+    // temperature lookups with a separate shared borrow.
+    let rows: Vec<(u32, String, i32, i32, f32, f32, EphemeralMaterial)> = {
+        let mut query = world.query::<(
+            Entity,
+            &Building,
+            &scale::layer1::structure::Structure,
+            &EphemeralMaterial,
+            &GridPosition,
+        )>();
+        query
+            .iter(world)
+            .map(|(entity, building, structure, mat, pos)| {
+                (
+                    entity.index(),
+                    building.building_type.label().to_string(),
+                    pos.x,
+                    pos.y,
+                    structure.current_hp,
+                    structure.max_hp,
+                    *mat,
+                )
+            })
+            .collect()
+    };
+    for (id, label, x, y, hp, max_hp, mat) in rows {
+        let temp = world
+            .get_resource::<scale::layer1::temperature::TemperatureGrid>()
+            .map_or_else(
+                || {
+                    world
+                        .get_resource::<scale::layer1::seasons::SeasonState>()
+                        .map_or(15.0, |s| s.current_season.base_temperature())
+                },
+                |grid| grid.get_safe(x, y),
+            );
+        let rate = decay_rate_for(mat, temp, weather);
+        lines.push(format!(
+            "#{id} {} {} at ({x}, {y}) — HP {hp:.1}/{max_hp:.1}, tile {temp:.1}C, decay {rate:.2}/tick",
+            mat.label(),
+            label
+        ));
+    }
+    if census.total == 0 {
+        lines.push(
+            "No ephemeral structures standing. Raise one: ephemeral spawn <ice|salt|mud> [x] [y]"
+                .to_string(),
+        );
+    }
+    lines.push(
+        "Ice melts above 0C, salt dissolves in rain, packed mud washes out and slowly crumbles. Dissolved structures leave nothing to salvage and free their tile.".to_string(),
+    );
+    print_dashboard_panel(
+        "EPHEMERAL ARCHITECTURE",
         &lines.join("\n"),
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
