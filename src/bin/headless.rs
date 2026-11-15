@@ -16132,6 +16132,24 @@ fn print_rings(world: &mut World) {
         "Planetary rings: {} ringed planet(s) | densest: {:.2} | colony ring: {} | Layer 1 shadow: {:.2} | band drop: {:.1}C",
         census.rings, census.max_density, census.colony_ring, census.shadow, census.band_drop
     );
+    // Item 206: the shadow band drifts with the year — show the
+    // current phase / tilt / centre and, when a temperature grid is
+    // present, the actual band rows for this map.
+    let band_rows = world
+        .get_resource::<scale::layer1::temperature::TemperatureGrid>()
+        .map(|grid| {
+            let state = world.get_resource::<scale::layer2::planetary_rings::PlanetaryRingState>();
+            let band = state.map_or_else(
+                || scale::layer2::planetary_rings::ring_shadow_band(grid.height),
+                |s| s.band_for_height(grid.height),
+            );
+            format!("rows {}..{} of {}", band.start, band.end, grid.height)
+        })
+        .unwrap_or_else(|| "rows n/a (no temperature grid)".to_string());
+    println!(
+        "  shadow band drift: year phase {:.2} | tilt {:+.2} | band centre {:.2} | band {}",
+        census.year_phase, census.band_tilt, census.band_centre, band_rows
+    );
     let mut q = world.query::<(Entity, &PlanetaryRing)>();
     for (entity, ring) in q.iter(world) {
         println!(

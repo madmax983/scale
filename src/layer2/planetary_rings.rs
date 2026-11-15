@@ -56,6 +56,15 @@
 //!   planet's ring shadows the colony (other planets' rings are too
 //!   far away to shade this surface) — generation rings are still
 //!   mining / hazard zones.
+//! * **Seasonal drift (item 206, spec 407 §1 deferred leg).** The
+//!   shadow band's POSITION drifts with the year (axial tilt /
+//!   seasonal rotation in the spec's words): a pure sinusoid of year
+//!   phase moves the band centre across the map and back over
+//!   [`TICKS_PER_YEAR`] ticks. The ledger carries phase / tilt /
+//!   centre, `update_temperature_system` derives the band from the
+//!   ledger's tilt for BOTH of its legs (so they never disagree),
+//!   and worlds without a time source stay at phase 0 — the original
+//!   centred band. Width and shadow depth are unchanged.
 //! * **Visuals (spec §5 REFACTOR).** The Layer 2 renderer
 //!   (`layer2::render::render_system_view`) already walks
 //!   `OrbitalBody` entities; ringed bodies additionally draw a faint
@@ -65,7 +74,9 @@
 
 use bevy_ecs::prelude::*;
 
+use crate::layer1::balance::TICKS_PER_YEAR;
 use crate::layer1::chronicle::{AddChronicleEvent, EventImportance};
+use crate::shared::time::SimulationTime;
 use crate::layer1::resources::ResourceType;
 use crate::layer2::asteroid_redirect::Position;
 use crate::layer2::fleet::{Fleet, FleetHealth, InOrbit, MovementSpeed};
@@ -204,6 +215,101 @@ pub fn in_ring_shadow_band(y: usize, height: usize) -> bool {
     ring_shadow_band(height).contains(&y)
 }
 
+// ---------------------------------------------------------------------------
+// Item 206: seasonal / tilt drift of the shadow band (spec 407 §1).
+//
+// Spec 407 §1 says the ring shadow falls "based on the planet's axial
+// tilt and seasonal rotation", but the landed band was fixed at rows
+// 40–60% of map height. The band now DRIFTS with the year: its centre
+// oscillates across the map over one year (a pure sinusoid of year
+// phase) and returns to the centred position after a full year. Band
+// WIDTH (the [`ring_shadow_band`] width for the height) and shadow
+// DEPTH (`ring_shadow_factor` / `ring_band_temp_drop`) are unchanged —
+// only the band POSITION moves. Zero balance retunes.
+// ---------------------------------------------------------------------------
+
+/// Fraction of the year elapsed at `tick` (0.0 at a year boundary,
+/// wrapping every [`TICKS_PER_YEAR`] ticks).
+#[must_use]
+#[allow(clippy::cast_possible_truncation)]
+pub fn ring_year_phase(tick: u64) -> f32 {
+    (tick % TICKS_PER_YEAR) as f32 / TICKS_PER_YEAR as f32
+}
+
+/// Tilt of the shadow band for a year `phase`: a pure sinusoid in
+/// -1.0..=1.0 — 0.0 at phase 0 (and at the half year), +1.0 at the
+/// quarter year, -1.0 at the three-quarter year.
+#[must_use]
+pub fn ring_band_tilt(phase: f32) -> f32 {
+    (phase.rem_euclid(1.0) * std::f32::consts::TAU).sin()
+}
+
+/// Centre of the drifted band as a fraction of map height for a year
+/// `phase` (0.5 = map middle, as today; swings by the room the centred
+/// band has on either side, so the band can just touch each edge).
+#[must_use]
+pub fn ring_band_centre_fraction(phase: f32) -> f32 {
+    let centre = f32::midpoint(RING_BAND_START_FRACTION, RING_BAND_END_FRACTION);
+    let amplitude = RING_BAND_START_FRACTION.min(1.0 - RING_BAND_END_FRACTION);
+    centre + ring_band_tilt(phase) * amplitude
+}
+
+/// Rows inside the ring shadow band for a map of the given height at
+/// a given band `tilt` (-1.0..=1.0, see [`ring_band_tilt`]). The band
+/// keeps the centred band's width exactly and is clamped so it stays
+/// fully on-map for every height and tilt.
+#[must_use]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap
+)]
+pub fn ring_shadow_band_drifted(height: usize, tilt: f32) -> std::ops::Range<usize> {
+    if height == 0 {
+        return 0..0;
+    }
+    let base = ring_shadow_band(height);
+    let width = base.end - base.start;
+    if width >= height {
+        return 0..height;
+    }
+    let tilt = tilt.clamp(-1.0, 1.0);
+    // Positive tilt slides the band toward higher rows, negative tilt
+    // toward lower rows; each direction is scaled by the room the
+    // centred band actually has on that side, so extremes touch (but
+    // never cross) the map edge even on asymmetric small heights.
+    let offset = if tilt >= 0.0 {
+        tilt * (height - base.end) as f32
+    } else {
+        tilt * base.start as f32
+    };
+    let max_start = (height - width) as i32;
+    let start = (base.start as f32 + offset).round() as i32;
+    let start = start.clamp(0, max_start) as usize;
+    start..start + width
+}
+
+/// Rows inside the ring shadow band for a map of the given height at
+/// year `phase` (see [`ring_year_phase`]). Phase 0 is exactly
+/// [`ring_shadow_band`] — today's centred band.
+#[must_use]
+pub fn ring_shadow_band_at_phase(height: usize, phase: f32) -> std::ops::Range<usize> {
+    ring_shadow_band_drifted(height, ring_band_tilt(phase))
+}
+
+/// Rows inside the ring shadow band for a map of the given height at
+/// simulation `tick` (the drifted band for the tick's year phase).
+#[must_use]
+pub fn ring_shadow_band_for_tick(height: usize, tick: u64) -> std::ops::Range<usize> {
+    ring_shadow_band_at_phase(height, ring_year_phase(tick))
+}
+
+/// Whether map row `y` is shadowed at year `phase`.
+#[must_use]
+pub fn in_ring_shadow_band_at_phase(y: usize, height: usize, phase: f32) -> bool {
+    ring_shadow_band_at_phase(height, phase).contains(&y)
+}
+
 /// Layer 1 shadow ledger for the colony planet's ring: the mirror
 /// the real temperature system reads (the spec-403 `DysonianState`
 /// pattern). All-zero when the colony planet has no ring.
@@ -219,6 +325,17 @@ pub struct PlanetaryRingState {
     pub band_temp_drop: f32,
     /// One-shot: the first-shadow chronicle was written.
     pub shadow_chronicled: bool,
+    /// Item 206: fraction of the year elapsed at the last ledger
+    /// update (0.0 when no simulation time was available — the
+    /// phase-0 fallback, i.e. today's centred band).
+    pub year_phase: f32,
+    /// Item 206: current band tilt, -1.0..=1.0 (see
+    /// [`ring_band_tilt`]). Both temperature legs derive the band
+    /// from this single value, so they can never disagree.
+    pub band_tilt: f32,
+    /// Item 206: current band centre as a fraction of map height
+    /// (0.5 = centred, as before the drift).
+    pub band_centre_fraction: f32,
 }
 
 impl Default for PlanetaryRingState {
@@ -229,7 +346,21 @@ impl Default for PlanetaryRingState {
             shadow_factor: 0.0,
             band_temp_drop: 0.0,
             shadow_chronicled: false,
+            year_phase: 0.0,
+            band_tilt: 0.0,
+            band_centre_fraction: ring_band_centre_fraction(0.0),
         }
+    }
+}
+
+impl PlanetaryRingState {
+    /// The current (drifted) shadow band for a map of the given
+    /// height, derived from the ledger's tilt. At the default tilt
+    /// (0.0 — phase 0 or no time source) this is exactly
+    /// [`ring_shadow_band`].
+    #[must_use]
+    pub fn band_for_height(&self, height: usize) -> std::ops::Range<usize> {
+        ring_shadow_band_drifted(height, self.band_tilt)
     }
 }
 
@@ -322,6 +453,7 @@ pub fn update_ring_shadow_state_system(
     rings: Query<&PlanetaryRing>,
     colony_rings: Query<&PlanetaryRing, With<ColonyLocation>>,
     state: Option<ResMut<PlanetaryRingState>>,
+    time: Option<Res<SimulationTime>>,
     mut chronicle: EventWriter<AddChronicleEvent>,
 ) {
     let ring_count = rings.iter().count();
@@ -332,6 +464,15 @@ pub fn update_ring_shadow_state_system(
     state.colony_density = colony_density;
     state.shadow_factor = shadow;
     state.band_temp_drop = ring_band_temp_drop(shadow);
+    // Item 206: the band drifts with the year. Without a time source
+    // the tick is 0 — phase 0, the centred band, exactly as before.
+    // No per-season chronicle: the drift is continuous and visible in
+    // the `rings` panel / STATS; only the first-shadow line above
+    // ever chronicles.
+    let tick = time.as_deref().map_or(0, |t| t.tick);
+    state.year_phase = ring_year_phase(tick);
+    state.band_tilt = ring_band_tilt(state.year_phase);
+    state.band_centre_fraction = ring_band_centre_fraction(state.year_phase);
     if shadow > 0.0 && !state.shadow_chronicled {
         state.shadow_chronicled = true;
         chronicle.send(AddChronicleEvent {
@@ -358,6 +499,12 @@ pub struct PlanetaryRingCensus {
     pub shadow: f32,
     /// Current band temperature drop (Celsius).
     pub band_drop: f32,
+    /// Item 206: year phase at the last ledger update (0.0 = centred).
+    pub year_phase: f32,
+    /// Item 206: current band tilt, -1.0..=1.0.
+    pub band_tilt: f32,
+    /// Item 206: current band centre as a fraction of map height.
+    pub band_centre: f32,
 }
 
 /// Census of rings, colony-ring presence, and shadow.
@@ -378,29 +525,49 @@ pub fn planetary_ring_census(world: &mut World) -> PlanetaryRingCensus {
     };
     // Prefer the live ledger when present (it is what temperature
     // actually applies); fall back to the derived colony shadow.
-    let (shadow, band_drop) = world.get_resource::<PlanetaryRingState>().map_or_else(
-        || {
-            let shadow = ring_shadow_factor(colony_density);
-            (shadow, ring_band_temp_drop(shadow))
-        },
-        |s| (s.shadow_factor, s.band_temp_drop),
-    );
+    let (shadow, band_drop, year_phase, band_tilt, band_centre) =
+        world.get_resource::<PlanetaryRingState>().map_or_else(
+            || {
+                let shadow = ring_shadow_factor(colony_density);
+                (
+                    shadow,
+                    ring_band_temp_drop(shadow),
+                    0.0,
+                    0.0,
+                    ring_band_centre_fraction(0.0),
+                )
+            },
+            |s| {
+                (
+                    s.shadow_factor,
+                    s.band_temp_drop,
+                    s.year_phase,
+                    s.band_tilt,
+                    s.band_centre_fraction,
+                )
+            },
+        );
     PlanetaryRingCensus {
         rings,
         colony_ring: colony_density > 0.0,
         max_density,
         shadow,
         band_drop,
+        year_phase,
+        band_tilt,
+        band_centre,
     }
 }
 
-/// Compact STATS label, e.g. `2rings/0.80max/0.48shadow`. No spaces.
+/// Compact STATS label, e.g. `2rings/0.80max/0.48shadow/band0.50`.
+/// The `band` segment is the drifted band centre as a fraction of
+/// map height (item 206; 0.50 = centred). No spaces.
 #[must_use]
 pub fn rings_stats_label(world: &mut World) -> String {
     let census = planetary_ring_census(world);
     format!(
-        "{}rings/{:.2}max/{:.2}shadow",
-        census.rings, census.max_density, census.shadow
+        "{}rings/{:.2}max/{:.2}shadow/band{:.2}",
+        census.rings, census.max_density, census.shadow, census.band_centre
     )
 }
 
@@ -824,6 +991,160 @@ mod tests {
         assert!(!in_ring_shadow_band(5, 50));
     }
 
+    // -- Item 206: ring shadow seasonal / tilt drift (deferred from
+    //    spec 407 §1). The band POSITION drifts with year phase; width
+    //    and shadow depth are unchanged. --
+
+    #[test]
+    fn test_ring_drift_phase_zero_is_centred_band() {
+        // Phase 0 (and the no-time fallback) is exactly today's band.
+        assert_eq!(ring_shadow_band_at_phase(50, 0.0), 20..30);
+        assert_eq!(ring_shadow_band_at_phase(50, 0.0), ring_shadow_band(50));
+        assert_eq!(ring_shadow_band_for_tick(50, 0), 20..30);
+        assert!((ring_year_phase(0) - 0.0).abs() < f32::EPSILON);
+        assert!((ring_band_tilt(0.0) - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_ring_drift_quarter_year_extremes_opposite() {
+        // Quarter year: band pushed to one edge; three-quarter year:
+        // pushed to the opposite edge (h=50, width 10, amplitude 20).
+        assert_eq!(ring_shadow_band_at_phase(50, 0.25), 40..50);
+        assert_eq!(ring_shadow_band_at_phase(50, 0.75), 0..10);
+        assert_eq!(ring_shadow_band_for_tick(50, 250), 40..50);
+        assert_eq!(ring_shadow_band_for_tick(50, 750), 0..10);
+        assert!((ring_band_tilt(0.25) - 1.0).abs() < 1e-4);
+        assert!((ring_band_tilt(0.75) + 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_ring_drift_full_year_returns_to_centre() {
+        assert_eq!(ring_shadow_band_at_phase(50, 1.0), 20..30);
+        assert_eq!(ring_shadow_band_for_tick(50, 1000), 20..30);
+        assert_eq!(ring_shadow_band_for_tick(50, 1250), 40..50);
+        assert!((ring_year_phase(1250) - 0.25).abs() < 1e-4);
+        // Half year is back through the centre (sinusoid midpoint).
+        assert_eq!(ring_shadow_band_at_phase(50, 0.5), 20..30);
+    }
+
+    #[test]
+    fn test_ring_drift_width_preserved_and_bounds_clamped() {
+        for height in [1usize, 3, 7, 10, 50, 51] {
+            let width = ring_shadow_band(height).len();
+            for step in 0..=20u32 {
+                let phase = f32::from(step as u16) / 20.0;
+                let band = ring_shadow_band_at_phase(height, phase);
+                assert_eq!(
+                    band.len(),
+                    width.min(height),
+                    "width must be preserved: h={height} phase={phase} band={band:?}"
+                );
+                assert!(
+                    band.end <= height && band.start < band.end,
+                    "band must stay fully on-map: h={height} phase={phase} band={band:?}"
+                );
+            }
+        }
+        // Small / odd heights at the extremes.
+        assert_eq!(ring_shadow_band_at_phase(1, 0.25), 0..1);
+        assert_eq!(ring_shadow_band_at_phase(3, 0.25), 2..3);
+        assert_eq!(ring_shadow_band_at_phase(3, 0.75), 0..1);
+        assert_eq!(ring_shadow_band_at_phase(7, 0.25), 5..7);
+        assert_eq!(ring_shadow_band_at_phase(7, 0.75), 0..2);
+    }
+
+    #[test]
+    fn test_ring_drift_ledger_follows_tick() {
+        use crate::shared::time::SimulationTime;
+        let mut app = App::new();
+        app.add_event::<AddChronicleEvent>();
+        app.insert_resource(PlanetaryRingState::default());
+        app.insert_resource(SimulationTime::default());
+        app.add_systems(Update, update_ring_shadow_state_system);
+        app.world_mut().spawn((
+            SystemBody,
+            ColonyLocation,
+            PlanetaryRing::new(5.0, 10.0, 0.8),
+        ));
+        // Tick 0: centred, shadow 0.48.
+        app.update();
+        {
+            let state = app.world().resource::<PlanetaryRingState>();
+            assert!((state.shadow_factor - 0.48).abs() < 1e-4);
+            assert_eq!(state.band_for_height(50), 20..30);
+        }
+        // Tick 250 (quarter year): band at one edge, shadow unchanged.
+        app.world_mut().resource_mut::<SimulationTime>().tick = 250;
+        app.update();
+        {
+            let state = app.world().resource::<PlanetaryRingState>();
+            assert!((state.year_phase - 0.25).abs() < 1e-4);
+            assert!((state.band_tilt - 1.0).abs() < 1e-4);
+            assert!((state.shadow_factor - 0.48).abs() < 1e-4, "depth unchanged");
+            assert_eq!(state.band_for_height(50), 40..50);
+        }
+        // Tick 750 (three-quarter year): opposite edge.
+        app.world_mut().resource_mut::<SimulationTime>().tick = 750;
+        app.update();
+        {
+            let state = app.world().resource::<PlanetaryRingState>();
+            assert_eq!(state.band_for_height(50), 0..10);
+            assert!((state.shadow_factor - 0.48).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn test_ring_drift_temperature_band_moves() {
+        // A row shadowed at one phase is unshadowed at the opposite
+        // phase and vice versa; the drifted ledger band is what the
+        // real temperature system applies.
+        use crate::layer1::nature::temperature::{update_temperature_system, TemperatureGrid};
+        use crate::layer1::seasons::SeasonState;
+        use crate::layer1::terrain::{TerrainGrid, TerrainType};
+        use bevy_ecs::system::RunSystemOnce;
+
+        fn run(phase: f32, shadow: f32) -> (f32, f32, f32) {
+            let mut world = World::new();
+            world.insert_resource(TemperatureGrid::new(10, 10, 15.0));
+            world.insert_resource(SeasonState::default());
+            world.insert_resource(crate::layer1::day_night::DayNightCycle::default());
+            world.insert_resource(TerrainGrid {
+                width: 10,
+                height: 10,
+                tiles: vec![TerrainType::Grass; 100],
+            });
+            if shadow > 0.0 {
+                world.insert_resource(PlanetaryRingState {
+                    shadow_factor: shadow,
+                    band_temp_drop: ring_band_temp_drop(shadow),
+                    year_phase: phase,
+                    band_tilt: ring_band_tilt(phase),
+                    band_centre_fraction: ring_band_centre_fraction(phase),
+                    ..Default::default()
+                });
+            }
+            world.run_system_once(update_temperature_system).unwrap();
+            let grid = world.resource::<TemperatureGrid>();
+            // Row 9 (band at phase 0.25: 8..10), row 1 (band at phase
+            // 0.75: 0..2), row 5 (band only at phase 0: 4..6).
+            (grid.get(5, 9), grid.get(5, 1), grid.get(5, 5))
+        }
+
+        let (south_q1, north_q1, _) = run(0.25, 0.48);
+        let (south_q3, north_q3, _) = run(0.75, 0.48);
+        let (south_clear, north_clear, _) = run(0.25, 0.0);
+        // Row 9 cools at quarter year, untouched at three-quarter.
+        assert!(south_q1 < south_clear - 0.3, "row 9 shadowed at 0.25: {south_q1} vs {south_clear}");
+        assert!((south_q3 - south_clear).abs() < 1e-4, "row 9 unshadowed at 0.75: {south_q3} vs {south_clear}");
+        // Row 1 is the mirror image.
+        assert!(north_q3 < north_clear - 0.3, "row 1 shadowed at 0.75: {north_q3} vs {north_clear}");
+        assert!((north_q1 - north_clear).abs() < 1e-4, "row 1 unshadowed at 0.25: {north_q1} vs {north_clear}");
+        // Zero shadow is an exact no-op at any phase.
+        let (z9, z1, z5) = run(0.75, 0.0);
+        let (c9, c1, c5) = run(0.0, 0.0);
+        assert!((z9 - c9).abs() < 1e-4 && (z1 - c1).abs() < 1e-4 && (z5 - c5).abs() < 1e-4);
+    }
+
     #[test]
     fn test_shadow_state_tracks_colony_ring_only() {
         let mut app = App::new();
@@ -909,7 +1230,10 @@ mod tests {
     #[test]
     fn test_census_and_stats_label() {
         let mut world = World::new();
-        assert_eq!(rings_stats_label(&mut world), "0rings/0.00max/0.00shadow");
+        assert_eq!(
+            rings_stats_label(&mut world),
+            "0rings/0.00max/0.00shadow/band0.50"
+        );
         let planet = spawn_ringed_planet(&mut world, 0.8);
         world.entity_mut(planet).insert(ColonyLocation);
         let census = planetary_ring_census(&mut world);
@@ -917,7 +1241,27 @@ mod tests {
         assert!(census.colony_ring);
         assert!((census.max_density - 0.8).abs() < f32::EPSILON);
         assert!((census.shadow - 0.48).abs() < 1e-4);
-        assert_eq!(rings_stats_label(&mut world), "1rings/0.80max/0.48shadow");
+        assert_eq!(
+            rings_stats_label(&mut world),
+            "1rings/0.80max/0.48shadow/band0.50"
+        );
+    }
+
+    #[test]
+    fn test_ring_drift_public_strings_have_no_banned_ip() {
+        // Item 206 player-facing strings (STATS band segment + drift
+        // panel wording) use generic terms only.
+        let mut world = World::new();
+        let label = rings_stats_label(&mut world);
+        for banned in [
+            concat!("Sat", "urn"),
+            concat!("Jup", "iter"),
+            concat!("Rin", "gworld"),
+            concat!("Halo", " Array"),
+        ] {
+            assert!(!label.contains(banned), "banned term {banned:?} in {label:?}");
+        }
+        assert!(label.contains("band0.50"), "phase-0 label centred: {label}");
     }
 
     #[test]

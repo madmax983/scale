@@ -403,12 +403,21 @@ pub fn update_temperature_system(
     let (ring_shadow, ring_band_drop) = rings.as_deref().map_or((0.0, 0.0), |s| {
         (s.shadow_factor, s.band_temp_drop)
     });
+    // Item 206: the band drifts with the year. Derive it ONCE from
+    // the ledger's tilt and use that single range for BOTH legs
+    // below (solar heat + post-diffusion relaxation), so the legs
+    // can never disagree. No ledger = phase 0 = the centred band
+    // (`ring_shadow_band`), exactly as before the drift.
+    let ring_band = rings.as_deref().map_or_else(
+        || crate::layer2::planetary_rings::ring_shadow_band(grid.height),
+        |s| s.band_for_height(grid.height),
+    );
     if solar_heat > 0.0 {
         // Apply solar heat to all tiles; band tiles receive only
         // the fraction of insolation the ring lets through.
         if ring_shadow > 0.0 {
             let width = grid.width.max(1);
-            let band = crate::layer2::planetary_rings::ring_shadow_band(grid.height);
+            let band = ring_band.clone();
             for (idx, value) in grid.values.iter_mut().enumerate() {
                 let y = idx / width;
                 *value += if band.contains(&y) {
@@ -586,8 +595,7 @@ pub fn update_temperature_system(
     // through the normal heat-source legs above.
     if ring_band_drop > 0.0 {
         let target = grid.ambient - ring_band_drop;
-        let band = crate::layer2::planetary_rings::ring_shadow_band(grid.height);
-        for y in band {
+        for y in ring_band {
             for x in 0..grid.width {
                 let current = grid.get(x, y);
                 grid.set(x, y, current + (target - current) * 0.2);
