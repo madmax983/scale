@@ -35,7 +35,6 @@ use crate::layer1::gut_biome::GutBiome;
 use crate::layer1::health::{Dead, Health};
 use crate::layer1::hygiene::Filth;
 use crate::layer1::items::{Equipment, ItemType};
-use crate::layer1::social::social_mimicry::Preferences;
 use crate::layer1::language::{Dialect, Linguistics};
 use crate::layer1::lifecycle::Age;
 use crate::layer1::map::{GridPosition, ScreenShake};
@@ -44,11 +43,12 @@ use crate::layer1::morale::Morale;
 use crate::layer1::needs::Needs;
 use crate::layer1::palette_fatigue::DietaryHistory;
 use crate::layer1::rumor::Knowledge;
-use crate::layer1::skills::Skills;
+use crate::layer1::skills::{Skills, XpMultiplier};
 use crate::layer1::social::debt::SocialDebt;
-use crate::layer1::social::Relationships;
 use crate::layer1::social::old_guard::Arrival;
 use crate::layer1::social::sartorial_rebellion::Appearance;
+use crate::layer1::social::social_mimicry::Preferences;
+use crate::layer1::social::Relationships;
 use crate::layer1::terrain::{TerrainGrid, TerrainType};
 use crate::layer1::traits::Traits;
 use crate::layer1::utility_types::AssignmentType;
@@ -310,6 +310,8 @@ pub struct PopBundle {
     pub edict_compliance: crate::layer1::social::generational_dissonance::EdictCompliance,
     /// Skill levels.
     pub skills: Skills,
+    /// XP-gain multiplier (Spec 418 Wisdom aura; derived every tick).
+    pub xp_multiplier: XpMultiplier,
     /// Appearance signifiers for Sartorial Rebellion.
     pub appearance: Appearance,
     /// Movement speed.
@@ -403,6 +405,7 @@ impl PopBundle {
             edict_compliance:
                 crate::layer1::social::generational_dissonance::EdictCompliance::default(),
             skills: Skills::default(),
+            xp_multiplier: XpMultiplier::default(),
             appearance: Appearance::default(),
             speed: Speed::default(),
             action: PopAction::default(),

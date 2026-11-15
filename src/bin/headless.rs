@@ -498,6 +498,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "infest" => handle_infest_command(world, &parts),
         "exterminate" => handle_exterminate_command(world, &parts),
         "seniority" => handle_seniority_command(world, &parts),
+        "elders" => handle_elders_command(world, &parts),
         "howl" => handle_howl_command(world, &parts),
         "calm" => handle_calm_command(world),
         "crystal" => handle_crystal_command(world, &parts),
@@ -3653,8 +3654,11 @@ fn print_stats(world: &mut World) {
     // Spec 417: chemical census for STATS (full panel: `chem`).
     let chem_census = scale::layer1::chemical::chemical_census(world);
 
+    // Spec 418: lifecycle census for STATS (full panel: `elders`).
+    let lifecycle_census = scale::layer1::lifecycle::lifecycle_census(world);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={}",
         tick,
         scenario,
         pops,
@@ -3857,6 +3861,8 @@ fn print_stats(world: &mut World) {
         chem_census.active_effects,
         chem_census.addicted,
         chem_census.in_withdrawal,
+        lifecycle_census.elders,
+        lifecycle_census.buffed_workers,
     );
 }
 
@@ -7250,6 +7256,7 @@ fn print_help() {
                 ("scrip", "", "Company Scrip panel (Spec 415): prices, wage table, wallet census, scrip ledger"),
                 ("coghaz", "", "Cognitive Hazards panel (Spec 416): insanity census, hallucination ledger"),
                 ("chem [dose <id> <stim|sedative>]", "", "Chemical Regulation panel (Spec 417): active effects, addictions, withdrawal; dose administers via the real consumption pipeline"),
+                ("elders", "", "Lifecycle & Retirement panel (Spec 418): life-stage census, elder wisdom auras, elder ration edict state"),
                 ("horror [n]", "", "Debug (Spec 416): place n horror loci on the first pop — nearby pops accumulate insanity"),
                 ("insanity [level]", "", "Debug (Spec 416): set every pop's insanity (default 95) — over 80 hallucinates false alerts"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
@@ -11228,7 +11235,7 @@ fn handle_edict_command(world: &mut World, parts: &[&str]) {
             print_dashboard_panel(
                 "COLONY EDICTS",
                 &format!(
-                    "Unknown edict '{}'. Try: double_rations, martial_law, night_shifts.",
+                    "Unknown edict '{}'. Try: double_rations, martial_law, night_shifts, elder_rations.",
                     parts[1]
                 ),
                 Some(comfy_table::Color::Red),
@@ -11265,6 +11272,14 @@ fn handle_edict_command(world: &mut World, parts: &[&str]) {
             format!("{}: {} — {}", edict_short_name(*p), state, effect)
         })
         .collect();
+    let elder_state = if policies.is_active(Policy::ElderHalfRations) {
+        "ACTIVE"
+    } else {
+        "off"
+    };
+    lines.push(format!(
+        "elder_rations: {elder_state} — elder hunger decay x0.5, elder morale -0.10 (Spec 418)"
+    ));
     let unrest = world
         .get_resource::<scale::layer1::social::unrest::Unrest>()
         .map_or(0.0, |u| u.level);
@@ -11273,7 +11288,7 @@ fn handle_edict_command(world: &mut World, parts: &[&str]) {
         average_liberty(world)
     ));
     lines.push(
-        "Usage: edict <double_rations|martial_law|night_shifts> [on|off]".to_string(),
+        "Usage: edict <double_rations|martial_law|night_shifts|elder_rations> [on|off]".to_string(),
     );
     print_dashboard_panel("COLONY EDICTS", &lines.join("\n"), None, None);
 }
@@ -13424,6 +13439,65 @@ fn handle_coredrill_command(world: &mut World, parts: &[&str]) {
 }
 
 /// Debug: list core drills and planetary stability (Spec 375).
+/// Spec 418: Lifecycle & Retirement panel.
+///
+/// `elders` prints the life-stage census and one line per elder: age,
+/// accumulated skill levels, the Wisdom bonus they radiate, and their
+/// current XP multiplier state, plus the elder-rations edict state.
+fn handle_elders_command(world: &mut World, _parts: &[&str]) {
+    use scale::layer1::administration::edicts::{ColonyPolicies, Policy};
+    use scale::layer1::balance::TICKS_PER_YEAR;
+    use scale::layer1::lifecycle::{lifecycle_census, wisdom_bonus_for, LifeStage};
+    use scale::layer1::pop::PopName;
+    use scale::layer1::skills::XpMultiplier;
+
+    let census = lifecycle_census(world);
+    let edict_on = world
+        .get_resource::<ColonyPolicies>()
+        .is_some_and(|p| p.is_active(Policy::ElderHalfRations));
+    let mut lines: Vec<String> = vec![format!(
+        "Children: {} | Adults: {} | Elders: {} | Wisdom-buffed workers: {}",
+        census.children, census.adults, census.elders, census.buffed_workers
+    )];
+    lines.push(format!(
+        "Elder Half Rations edict: {} (toggle: edict elder_rations on|off)",
+        if edict_on { "ACTIVE" } else { "off" }
+    ));
+    let mut query = world.query::<(
+        &PopName,
+        &scale::layer1::lifecycle::Age,
+        &scale::layer1::skills::Skills,
+        Option<&XpMultiplier>,
+    )>();
+    let mut elders: Vec<String> = Vec::new();
+    for (name, age, skills, _mult) in query.iter(world) {
+        if age.stage != LifeStage::Elder {
+            continue;
+        }
+        let years = age.ticks_alive / TICKS_PER_YEAR;
+        let levels = scale::layer1::lifecycle::total_skill_levels(skills);
+        elders.push(format!(
+            "{}: age {}y, {} skill levels, wisdom +{:.2} XP within radius {}",
+            name.0,
+            years,
+            levels,
+            wisdom_bonus_for(skills),
+            scale::layer1::lifecycle::WISDOM_AURA_RADIUS
+        ));
+    }
+    if elders.is_empty() {
+        lines.push("No elders in the colony yet.".to_string());
+    } else {
+        lines.extend(elders);
+    }
+    print_dashboard_panel(
+        "LIFECYCLE & RETIREMENT",
+        &lines.join("\n"),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
 /// Spec 417: Chemical Regulation panel + debug dosing.
 ///
 /// `chem` prints the colony chemical census and every pop carrying a

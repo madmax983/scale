@@ -12,9 +12,7 @@ pub(crate) fn evaluate_sabotage(
     // sabotage is cold, breaks are hot.
     let best_utility = if data.is_nostalgic {
         100.0
-    } else if data.dissatisfaction_total
-        >= crate::layer1::social::dissatisfaction::BAND_BITTER
-    {
+    } else if data.dissatisfaction_total >= crate::layer1::social::dissatisfaction::BAND_BITTER {
         60.0 + 40.0 * data.dissatisfaction_total
     } else {
         return None;
@@ -64,6 +62,7 @@ mod tests {
             libraries: vec![],
             refining: vec![],
             work_designations: vec![],
+            light_work_designations: Vec::new(),
             repair_designations: vec![],
             tame_designations: vec![],
             items: vec![],

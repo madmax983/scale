@@ -928,6 +928,7 @@ mod tests {
                 libraries: vec![],
                 refining: vec![],
                 work_designations: vec![],
+                light_work_designations: Vec::new(),
                 repair_designations: vec![],
                 tame_designations: vec![],
                 items: vec![],

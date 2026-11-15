@@ -160,6 +160,11 @@ pub enum Policy {
     CitizenInformant,
     /// Spec 387: Safety Protocols — global edict: hazard risk x0.5 colony-wide, work speed -0.10.
     SafetyProtocols,
+    /// Spec 418: Elder Half Rations — elders eat at half rate (their
+    /// hunger decay is halved in `decay_needs_system`) at the cost of
+    /// an elder-only morale scar for as long as the edict stands. The
+    /// famine choice from the spec fantasy, on the real 054 edict lane.
+    ElderHalfRations,
 }
 
 #[derive(Event, Debug)]
@@ -269,6 +274,15 @@ pub const SPEC_393_EDICTS: [Policy; 3] = [
 
 /// Morale-modifier label for Double Rations (refresh-never-stack lane).
 pub const DOUBLE_RATIONS_LABEL: &str = "Edict: Double Rations";
+/// Spec 418: morale-modifier label for the elder ration cut
+/// (refresh-never-stack lane, elders only).
+pub const ELDER_RATIONS_LABEL: &str = "Edict: Elder Rations Cut";
+/// Spec 418: elder hunger-decay multiplier while Elder Half Rations
+/// stands — elders consume at half the normal rate.
+pub const ELDER_RATIONS_HUNGER_MULTIPLIER: f32 = 0.5;
+/// Spec 418: elder morale modifier while Elder Half Rations stands
+/// (0.0..=1.0 morale scale). The colony survives; the elders remember.
+pub const ELDER_RATIONS_MORALE_PENALTY: f32 = -0.10;
 /// Morale-modifier label for Night Shifts (refresh-never-stack lane).
 pub const NIGHT_SHIFTS_LABEL: &str = "Edict: Night Shifts";
 /// Double Rations morale bonus (0.0..=1.0 morale scale; the spec
@@ -316,17 +330,11 @@ impl Default for Liberty {
 /// one. Accepts snake_case and concatenated spellings.
 #[must_use]
 pub fn parse_edict(name: &str) -> Option<Policy> {
-    match name
-        .trim()
-        .to_ascii_lowercase()
-        .replace('-', "_")
-        .as_str()
-    {
+    match name.trim().to_ascii_lowercase().replace('-', "_").as_str() {
         "double_rations" | "doublerations" => Some(Policy::DoubleRations),
+        "elder_rations" | "elder_half_rations" | "elderrations" => Some(Policy::ElderHalfRations),
         "martial_law" | "martiallaw" | "martial" => Some(Policy::MartialLaw),
-        "night_shifts" | "nightshifts" | "night_shift" | "nightshift" => {
-            Some(Policy::NightShifts)
-        }
+        "night_shifts" | "nightshifts" | "night_shift" | "nightshift" => Some(Policy::NightShifts),
         _ => None,
     }
 }
@@ -336,6 +344,7 @@ pub fn parse_edict(name: &str) -> Option<Policy> {
 #[must_use]
 pub fn edict_short_name(policy: Policy) -> &'static str {
     match policy {
+        Policy::ElderHalfRations => "elder_rations",
         Policy::DoubleRations => "double_rations",
         Policy::MartialLaw => "martial_law",
         Policy::NightShifts => "night_shifts",
@@ -401,6 +410,7 @@ pub fn apply_edict_modifiers(
     mut query: Query<(
         &mut crate::layer1::social::morale::Morale,
         Option<&mut Liberty>,
+        Option<&crate::layer1::lifecycle::Age>,
     )>,
 ) {
     if let Some(mut unrest) = unrest {
@@ -411,7 +421,18 @@ pub fn apply_edict_modifiers(
     let double_rations = policies.is_active(Policy::DoubleRations);
     let night_shifts = policies.is_active(Policy::NightShifts);
     let martial_law = policies.is_active(Policy::MartialLaw);
-    for (mut morale, liberty) in query.iter_mut() {
+    let elder_rations = policies.is_active(Policy::ElderHalfRations);
+    for (mut morale, liberty, age) in query.iter_mut() {
+        // Spec 418: the ration cut scars elders only, and only while
+        // the edict stands (refresh-never-stack, like every edict
+        // modifier here — repeal heals the modifier, not the memory).
+        refresh_edict_modifier(
+            &mut morale,
+            ELDER_RATIONS_LABEL,
+            ELDER_RATIONS_MORALE_PENALTY,
+            elder_rations
+                && age.is_some_and(|a| a.stage == crate::layer1::lifecycle::LifeStage::Elder),
+        );
         refresh_edict_modifier(
             &mut morale,
             DOUBLE_RATIONS_LABEL,
@@ -923,6 +944,20 @@ pub fn get_hunger_decay_modifier(policies: &ColonyPolicies) -> f32 {
     modifier
 }
 
+/// Spec 418: per-pop hunger-decay multiplier for the Elder Half
+/// Rations edict. Pull-based like the global modifier above:
+/// `decay_needs_system` multiplies an elder hunger decay by 0.5
+/// while the edict stands, 1.0 for everyone else (and for elders
+/// once the edict is repealed).
+#[must_use]
+pub fn get_elder_hunger_modifier(policies: &ColonyPolicies, is_elder: bool) -> f32 {
+    if is_elder && policies.is_active(Policy::ElderHalfRations) {
+        ELDER_RATIONS_HUNGER_MULTIPLIER
+    } else {
+        1.0
+    }
+}
+
 /// Calculates the global work speed modifier based on active policies.
 ///
 ///
@@ -1315,8 +1350,7 @@ mod tests {
             bevy_app::Update,
             (
                 apply_edict_modifiers,
-                crate::layer1::social::unrest::calculate_unrest_system
-                    .after(apply_edict_modifiers),
+                crate::layer1::social::unrest::calculate_unrest_system.after(apply_edict_modifiers),
             ),
         );
 
@@ -1340,7 +1374,9 @@ mod tests {
 
         // Martial Law suppresses unrest to 0 (even after the unrest
         // system recomputes it from the low average morale)...
-        let unrest = app.world().resource::<crate::layer1::social::unrest::Unrest>();
+        let unrest = app
+            .world()
+            .resource::<crate::layer1::social::unrest::Unrest>();
         assert_eq!(unrest.level, 0.0, "Martial Law should reduce Unrest to 0");
         assert!(is_unrest_suppressed(
             app.world().resource::<ColonyPolicies>()
@@ -1350,7 +1386,10 @@ mod tests {
         // application still read exactly 80, never 60/40/... (the
         // spec sketch's per-tick `-20` would accumulate permanently).
         let liberty = app.world().get::<Liberty>(pop).unwrap();
-        assert!(liberty.current < 100.0, "Martial Law should decrease Liberty");
+        assert!(
+            liberty.current < 100.0,
+            "Martial Law should decrease Liberty"
+        );
         assert!(
             (liberty.current - 80.0).abs() < f32::EPSILON,
             "Liberty must be recomputed from base, not accumulated: {}",
@@ -1460,7 +1499,11 @@ mod tests {
         assert_eq!(parse_edict("martial_law"), Some(Policy::MartialLaw));
         assert_eq!(parse_edict("night_shifts"), Some(Policy::NightShifts));
         assert_eq!(parse_edict("bogus"), None);
-        for policy in [Policy::DoubleRations, Policy::MartialLaw, Policy::NightShifts] {
+        for policy in [
+            Policy::DoubleRations,
+            Policy::MartialLaw,
+            Policy::NightShifts,
+        ] {
             assert_eq!(parse_edict(edict_short_name(policy)), Some(policy));
         }
     }

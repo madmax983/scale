@@ -387,6 +387,7 @@ fn populate_showers(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
 fn populate_buffer_designations(world: &mut World, buffer: &mut UtilityAIBuffer) {
     // Designations (Work, Repair, Tame)
     buffer.work_designations.clear();
+    buffer.light_work_designations.clear();
     buffer.repair_designations.clear();
     buffer.tame_designations.clear();
     let mut des_query = world.query::<(Entity, &GridPosition, &Designation)>();
@@ -395,7 +396,13 @@ fn populate_buffer_designations(world: &mut World, buffer: &mut UtilityAIBuffer)
         match des.designation_type {
             DesignationType::Repair => buffer.repair_designations.push(candidate),
             DesignationType::Tame => buffer.tame_designations.push(candidate),
-            _ => buffer.work_designations.push(candidate),
+            kind => {
+                // Spec 418: elders see only the light subset.
+                if !crate::layer1::lifecycle::is_heavy_designation(kind) {
+                    buffer.light_work_designations.push(candidate.clone());
+                }
+                buffer.work_designations.push(candidate);
+            }
         }
     }
 }
@@ -458,14 +465,11 @@ fn populate_stockpiles(world: &mut World, buffer: &mut Vec<ScorableCandidate>) {
     buffer.clear();
     buffer.extend(
         world
-            .query_filtered::<
-                (
-                    Entity,
-                    &GridPosition,
-                    Option<&crate::layer1::inventory::Inventory>,
-                ),
-                With<Stockpile>,
-            >()
+            .query_filtered::<(
+                Entity,
+                &GridPosition,
+                Option<&crate::layer1::inventory::Inventory>,
+            ), With<Stockpile>>()
             .iter(world)
             .filter(|(_, pos, _)| !blocked.contains(*pos))
             .map(|(e, pos, inv)| match inv {

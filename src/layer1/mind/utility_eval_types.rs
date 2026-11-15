@@ -55,11 +55,11 @@ use crate::layer1::memetics::MemeticCarrier;
 use crate::layer1::needs::Needs;
 use crate::layer1::pop::Job;
 use crate::layer1::resources::{Carrying, ColonyResources, ResourceType};
+use crate::layer1::social::feral_outpost::CulturalDrift;
 use crate::layer1::stress::{Breakdown, StressTracker, BREAKDOWN_TICKS_REQUIRED};
 use crate::layer1::taboo::TabooState;
-use crate::layer1::traits::Traits;
-use crate::layer1::social::feral_outpost::CulturalDrift;
 use crate::layer1::tech::machine_awakening::{Awakened, Bot};
+use crate::layer1::traits::Traits;
 use crate::layer1::unrest::MentalState;
 use crate::layer1::utility_types::{
     calculate_context_score, ActionType, HobbyType, PopAction, UtilityWeights,
@@ -115,10 +115,10 @@ pub struct PopEvaluationQuery {
         Option<&'static crate::layer1::economy::existential_audit::ExistentialCrisis>,
     pub temporal_fugue: Option<&'static crate::layer1::mind::temporal_fugue::TemporalFugue>,
     pub cultural_drift: Option<&'static CulturalDrift>,
-    pub dissatisfaction:
-        Option<&'static crate::layer1::social::dissatisfaction::Dissatisfaction>,
+    pub dissatisfaction: Option<&'static crate::layer1::social::dissatisfaction::Dissatisfaction>,
     pub bot: Option<&'static Bot>,
     pub awakened: Option<&'static Awakened>,
+    pub age: Option<&'static crate::layer1::lifecycle::Age>,
 }
 
 impl PopEvalData {
@@ -159,6 +159,9 @@ impl PopEvalData {
             dissatisfaction_total: item.dissatisfaction.map_or(0.0, |d| d.total()),
             is_bot: item.bot.is_some(),
             is_awakened_bot: item.bot.is_some() && item.awakened.is_some(),
+            is_elder: item
+                .age
+                .is_some_and(|a| a.stage == crate::layer1::lifecycle::LifeStage::Elder),
         }
     }
 }
@@ -251,6 +254,10 @@ pub struct PopEvalData {
     pub dissatisfaction_total: f32,
     /// Whether the pop is a constructed Bot (Spec 411).
     pub is_bot: bool,
+    /// Whether the pop is an Elder (Spec 418): decided once at gather
+    /// time from the real `Age` component, mirroring the Spec 411
+    /// awakened-bot seam. Elders refuse heavy work designations.
+    pub is_elder: bool,
     /// Whether the pop is a constructed Bot that has Awakened
     /// (Spec 411: `Bot` + `Awakened`). Read by the utility AI's
     /// hazard-refusal gate via `awakened_accepts_hazard`.
@@ -295,6 +302,7 @@ impl PopEvalData {
             dissatisfaction_total: 0.0,
             is_bot: false,
             is_awakened_bot: false,
+            is_elder: false,
         }
     }
 }
@@ -481,6 +489,10 @@ pub struct UtilityAIBuffer {
     pub unpollinated_crops: Vec<ScorableCandidate>,
     /// Buffer for work designation candidates.
     pub work_designations: Vec<ScorableCandidate>,
+    /// Spec 418: the light subset of work designations (everything
+    /// except heavy labor) — the only Work candidates an Elder
+    /// pop may be assigned.
+    pub light_work_designations: Vec<ScorableCandidate>,
     /// Buffer for repair designation candidates.
     pub repair_designations: Vec<ScorableCandidate>,
     /// Buffer for tame designation candidates.

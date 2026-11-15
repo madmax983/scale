@@ -163,13 +163,24 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Consumption),
     );
 
+    // Spec 418: Wisdom aura — elders radiate an XP multiplier to
+    // nearby workers. Separate add_systems call (arity discipline,
+    // as with Spec 386 below); runs after aging so a pop that just
+    // crossed into Elder starts radiating the same tick.
+    schedule.add_systems(
+        (crate::layer1::lifecycle::wisdom_aura_system.after(aging_system),)
+            .in_set(Layer1SystemSet::Consumption),
+    );
+
     // Spec 386 Social Mimicry: per-pop consumable preferences spread from
     // high-status pops to nearby lower-status pops. Separate add_systems
     // call (the trend tuple above is a sibling block; arity discipline as
     // with Spec 276).
     schedule.add_systems(
-        (crate::layer1::social::social_mimicry::preference_mimicry_system
-            .after(consume_food_system),)
+        (
+            crate::layer1::social::social_mimicry::preference_mimicry_system
+                .after(consume_food_system),
+        )
             .in_set(Layer1SystemSet::Consumption),
     );
 
@@ -177,8 +188,10 @@ pub fn register(schedule: &mut Schedule) {
     // drains Needs.leisure for nearby mismatched pops. Separate
     // add_systems call (arity discipline, as with Spec 386 above).
     schedule.add_systems(
-        (crate::layer1::social::social_stratification::apply_class_friction_system
-            .after(decay_needs_system),)
+        (
+            crate::layer1::social::social_stratification::apply_class_friction_system
+                .after(decay_needs_system),
+        )
             .in_set(Layer1SystemSet::Consumption),
     );
 

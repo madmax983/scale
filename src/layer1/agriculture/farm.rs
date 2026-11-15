@@ -1,18 +1,19 @@
 #![allow(clippy::cast_sign_loss, clippy::unnecessary_map_or)]
 #![allow(clippy::collapsible_if, clippy::type_complexity)]
 use crate::layer1::actions::AssignmentType;
+use crate::layer1::agriculture::compost::CompostSoil;
 use crate::layer1::balance::{
     FOOD_HUNGER_THRESHOLD, FOOD_PER_MEAL, FOOD_PER_WORKER_PER_TICK, HUNGER_PER_MEAL,
 };
 use crate::layer1::building::{Building, BuildingType};
+use crate::layer1::culture::sovereign::FarmProductionLedger;
+use crate::layer1::economy::recall::UseItemEvent;
 use crate::layer1::economy::{get_wage_for_job, ColonyPrices, Wallet};
 use crate::layer1::energy::PowerConsumer;
 use crate::layer1::eureka::{check_for_eureka, EurekaConfig};
 use crate::layer1::factions::{FactionMember, FactionState, Factions};
 use crate::layer1::fauna::{Fauna, FaunaType};
 use crate::layer1::fertility::FertilityGrid;
-use crate::layer1::agriculture::compost::CompostSoil;
-use crate::layer1::economy::recall::UseItemEvent;
 use crate::layer1::husbandry::Tame;
 use crate::layer1::items::ItemType;
 use crate::layer1::morale::{MoodModifier, Morale};
@@ -23,14 +24,13 @@ use crate::layer1::pop::Pop;
 use crate::layer1::resources::ColonyResources;
 use crate::layer1::seasons::{Season, SeasonState};
 use crate::layer1::skills::{get_skill_efficiency, SkillType, Skills};
-use crate::layer1::social_mimicry::JustConsumed;
 use crate::layer1::social::flesh_famine::Blighted;
+use crate::layer1::social_mimicry::JustConsumed;
 use crate::layer1::tech::Tech;
 use crate::layer1::traits::Trait;
 use crate::layer1::utility_ai::{ActionType, PopAction};
 use crate::layer1::GridPosition;
 use bevy_ecs::prelude::*;
-use crate::layer1::culture::sovereign::FarmProductionLedger;
 use rand::seq::SliceRandom;
 
 /// Water cost per tick per worker for Hydroponics.
@@ -110,6 +110,7 @@ pub fn produce_food_system(
             Option<&crate::layer1::traits::Traits>,
             Option<&mut Wallet>,
             Option<&Job>,
+            Option<&crate::layer1::skills::XpMultiplier>,
         ),
         With<Pop>,
     >,
@@ -152,8 +153,17 @@ pub fn produce_food_system(
         })
         .collect();
 
-    for (_, pos, action, skills_opt, faction_member_opt, traits, mut wallet_opt, job_opt) in
-        &mut pop_query
+    for (
+        _,
+        pos,
+        action,
+        skills_opt,
+        faction_member_opt,
+        traits,
+        mut wallet_opt,
+        job_opt,
+        xp_mult_opt,
+    ) in &mut pop_query
     {
         if action.current != ActionType::Farm {
             continue;
@@ -192,6 +202,7 @@ pub fn produce_food_system(
                 current_season,
                 ledger.as_deref_mut(),
                 scrip_ledger.as_deref_mut(),
+                xp_mult_opt.map_or(1.0, |m| m.value),
             );
         }
     }
@@ -219,6 +230,8 @@ fn process_single_farmer(
     ledger: Option<&mut FarmProductionLedger>,
     // Spec 415: scrip ledger for the inline farm wage (None = don't track).
     scrip_ledger: Option<&mut crate::layer1::economy::scrip::ScripSystem>,
+    // Spec 418: Wisdom-aura XP multiplier for this farmer (1.0 = none).
+    xp_multiplier: f32,
 ) {
     // Tech Corruption Check
     if let Some(tech) = building_type.required_tech() {
@@ -233,9 +246,9 @@ fn process_single_farmer(
     // Calculate efficiency
     let efficiency = get_skill_efficiency(skills_opt.as_deref(), skill_type);
 
-    // Add XP
+    // Add XP (Spec 418: scaled by the Wisdom-aura multiplier).
     if let Some(ref mut skills) = skills_opt {
-        skills.add_xp(skill_type, 1.0);
+        skills.add_xp(skill_type, xp_multiplier);
     }
 
     let crop_stats = get_crop_stats(selected_crop);

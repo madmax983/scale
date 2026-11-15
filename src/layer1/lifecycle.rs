@@ -4,7 +4,141 @@
 //! and natural death due to old age.
 
 use crate::layer1::balance::{AGE_ADULT, AGE_ELDER, TICKS_PER_YEAR};
+use crate::layer1::designation::DesignationType;
+use crate::layer1::map::GridPosition;
 use crate::layer1::pop::Speed;
+use crate::layer1::skills::{Skills, XpMultiplier};
+use crate::layer1::utility_types::AssignmentType;
+
+pub use crate::layer1::administration::edicts::ELDER_RATIONS_LABEL;
+
+/// Spec 418: Chebyshev radius of an elder Wisdom aura (matches the
+/// manual aura radius-5 neighbourhood in `institutional_memory`).
+pub const WISDOM_AURA_RADIUS: u32 = 5;
+/// Spec 418: Wisdom bonus per accumulated skill level across all of
+/// the elder skills (section 5: the aura scales with a lifetime of
+/// skill, it is not the sketch flat +0.2).
+pub const WISDOM_PER_SKILL_LEVEL: f32 = 0.02;
+/// Spec 418: hard cap on the Wisdom bonus (+50% XP at most).
+pub const WISDOM_MAX_BONUS: f32 = 0.50;
+
+/// Total skill levels accumulated across every skill a pop has XP in.
+#[must_use]
+pub fn total_skill_levels(skills: &Skills) -> u32 {
+    skills.xp.keys().map(|s| skills.get_level(*s)).sum()
+}
+
+/// Spec 418 section 5: the Wisdom bonus an elder radiates, scaled by
+/// their accumulated skill levels and capped at [`WISDOM_MAX_BONUS`].
+/// A skill-less elder radiates nothing.
+#[must_use]
+pub fn wisdom_bonus_for(skills: &Skills) -> f32 {
+    #[allow(clippy::cast_precision_loss)]
+    let raw = total_skill_levels(skills) as f32 * WISDOM_PER_SKILL_LEVEL;
+    raw.min(WISDOM_MAX_BONUS)
+}
+
+/// Designations that count as heavy labor for Spec 418 job validation:
+/// mining, felling, demolition and destructive extraction. Everything
+/// else (Repair, JuryRig, ClearFlora, CollectSample, light errands) is
+/// light work an elder may still do.
+#[must_use]
+pub const fn is_heavy_designation(kind: DesignationType) -> bool {
+    matches!(
+        kind,
+        DesignationType::Mine
+            | DesignationType::Chop
+            | DesignationType::Demolish
+            | DesignationType::Destroy
+            | DesignationType::Cannibalize
+            | DesignationType::ExcavateDust
+    )
+}
+
+/// Spec 418 section 5 job validation, adapted to the real types (the
+/// sketch JobType Mining/Teaching/Socializing variants do not exist;
+/// the real work lane is `DesignationType`, and socializing is an
+/// action the utility AI never gates). Elders refuse heavy labor;
+/// every other stage may perform every designation.
+#[must_use]
+pub const fn elder_can_perform(stage: LifeStage, kind: DesignationType) -> bool {
+    !matches!(stage, LifeStage::Elder) || !is_heavy_designation(kind)
+}
+
+/// Spec 418 section 5 assignment validation: elders refuse the one
+/// heavy assignment in the real `AssignmentType` enum (DeepMining);
+/// light postings such as LibraryWorker stay open to them.
+#[must_use]
+pub const fn elder_can_take_assignment(stage: LifeStage, kind: AssignmentType) -> bool {
+    !matches!(stage, LifeStage::Elder) || !matches!(kind, AssignmentType::DeepMining)
+}
+
+/// Spec 418 Wisdom aura: recomputes every worker XpMultiplier from
+/// scratch — 1.0 plus the strongest bonus of any Elder within
+/// [`WISDOM_AURA_RADIUS`] (Chebyshev, on the real `GridPosition`
+/// lane; pops have no Transform). Elders never buff each other.
+/// Derived state: moving away removes the buff on the next tick.
+pub fn wisdom_aura_system(
+    elders: Query<(&GridPosition, &Skills, &Age)>,
+    mut workers: Query<(&GridPosition, &mut XpMultiplier, Option<&Age>)>,
+) {
+    let aura: Vec<(GridPosition, f32)> = elders
+        .iter()
+        .filter(|(_, _, age)| age.stage == LifeStage::Elder)
+        .map(|(pos, skills, _)| (*pos, wisdom_bonus_for(skills)))
+        .filter(|(_, bonus)| *bonus > 0.0)
+        .collect();
+    if aura.is_empty() {
+        for (_, mut mult, _) in &mut workers {
+            mult.value = 1.0;
+        }
+        return;
+    }
+    for (pos, mut mult, age) in &mut workers {
+        if age.is_some_and(|a| a.stage == LifeStage::Elder) {
+            mult.value = 1.0;
+            continue;
+        }
+        let mut best = 0.0_f32;
+        for (elder_pos, bonus) in &aura {
+            if pos.distance_chebyshev(*elder_pos) <= WISDOM_AURA_RADIUS {
+                best = best.max(*bonus);
+            }
+        }
+        mult.value = 1.0 + best;
+    }
+}
+
+/// Spec 418 census for STATS / the `elders` headless panel.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LifecycleCensus {
+    /// Pops in the Child stage.
+    pub children: usize,
+    /// Pops in the Adult stage.
+    pub adults: usize,
+    /// Pops in the Elder stage.
+    pub elders: usize,
+    /// Non-elder pops currently carrying a Wisdom buff (> 1.0).
+    pub buffed_workers: usize,
+}
+
+/// Counts life stages and Wisdom-buffed workers across all pops.
+#[must_use]
+pub fn lifecycle_census(world: &mut World) -> LifecycleCensus {
+    let mut census = LifecycleCensus::default();
+    let mut query = world.query::<(&Age, Option<&XpMultiplier>)>();
+    for (age, mult) in query.iter(world) {
+        match age.stage {
+            LifeStage::Child => census.children += 1,
+            LifeStage::Adult => census.adults += 1,
+            LifeStage::Elder => census.elders += 1,
+        }
+        if age.stage != LifeStage::Elder && mult.is_some_and(|m| m.value > 1.0) {
+            census.buffed_workers += 1;
+        }
+    }
+    census
+}
 use crate::shared::log::MessageLog;
 use bevy_ecs::prelude::*;
 use bevy_ecs::query::QueryData;
@@ -375,5 +509,295 @@ mod tests {
 
         let age = world.get::<Age>(entity).unwrap();
         assert_eq!(age.ticks_alive, 101);
+    }
+}
+
+/// Spec 418 RED-phase tests, adapted to the real codebase (Spec 062
+/// already provides Age/LifeStage/aging_system; these tests pin the
+/// missing legs: wisdom aura, elder job validation, elder rationing).
+#[cfg(test)]
+mod spec_418_tests {
+    use super::*;
+    use crate::layer1::administration::edicts::Policy;
+    use crate::layer1::designation::DesignationType;
+    use crate::layer1::map::GridPosition;
+    use crate::layer1::skills::{SkillType, Skills, XpMultiplier};
+    use crate::layer1::utility_types::AssignmentType;
+
+    use crate::layer1::pop::Pop;
+    macro_rules! run {
+        ($world:expr, $sys:expr) => {{
+            let mut schedule = Schedule::default();
+            schedule.add_systems($sys);
+            schedule.run($world);
+        }};
+    }
+
+    // Spec RED test 1 (adapted): pops age continuously. Real Age is
+    // tick-based (TICKS_PER_YEAR per year), not the sketch float years.
+    #[test]
+    fn spec418_pop_ages_over_time() {
+        let mut world = World::new();
+        let pop = world.spawn((Pop, Age::new(20))).id();
+        run!(&mut world, aging_system);
+        let age = world.get::<Age>(pop).unwrap();
+        assert_eq!(age.ticks_alive, 20 * TICKS_PER_YEAR + 1);
+    }
+
+    // Spec RED test 2 (adapted): a 65-year-old is an Elder. The real
+    // threshold is AGE_ELDER = 60 years (Spec 062 balance, not retuned).
+    #[test]
+    fn spec418_pop_becomes_elder() {
+        assert_eq!(Age::new(65).stage, LifeStage::Elder);
+        let mut world = World::new();
+        let pop = world
+            .spawn((
+                Pop,
+                Age {
+                    ticks_alive: AGE_ELDER - 1,
+                    stage: LifeStage::Adult,
+                },
+                Speed::default(),
+            ))
+            .id();
+        run!(&mut world, aging_system);
+        assert_eq!(world.get::<Age>(pop).unwrap().stage, LifeStage::Elder);
+        // Elder speed penalty rides the real Speed pipeline (0.8x base).
+        assert!((world.get::<Speed>(pop).unwrap().base - 0.8).abs() < f32::EPSILON);
+    }
+
+    fn elder_with_mining(level_xp: f32) -> Skills {
+        let mut s = Skills::default();
+        if level_xp > 0.0 {
+            s.add_xp(SkillType::Mining, level_xp);
+        }
+        s
+    }
+
+    // Spec RED test 3 (adapted): nearby adult worker gains XpMultiplier.
+    // Real pops locate via GridPosition, not Transform.
+    #[test]
+    fn spec418_elder_wisdom_aura_buffs_workers() {
+        let mut world = World::new();
+        world.spawn((
+            Pop,
+            Age::new(70),
+            GridPosition { x: 0, y: 0 },
+            elder_with_mining(2500.0), // Mining level 5
+        ));
+        let worker = world
+            .spawn((
+                Pop,
+                Age::new(30),
+                GridPosition { x: 2, y: 0 },
+                Skills::default(),
+                XpMultiplier::default(),
+            ))
+            .id();
+        run!(&mut world, wisdom_aura_system);
+        let mult = world.get::<XpMultiplier>(worker).unwrap();
+        assert!(mult.value > 1.0, "worker near elder must be buffed");
+        // 5 total levels * 0.02 = +0.10
+        assert!((mult.value - 1.10).abs() < 0.001, "got {}", mult.value);
+    }
+
+    #[test]
+    fn spec418_wisdom_aura_expires_when_far() {
+        let mut world = World::new();
+        world.spawn((
+            Pop,
+            Age::new(70),
+            GridPosition { x: 0, y: 0 },
+            elder_with_mining(2500.0),
+        ));
+        let worker = world
+            .spawn((
+                Pop,
+                Age::new(30),
+                GridPosition { x: 2, y: 0 },
+                Skills::default(),
+                XpMultiplier::default(),
+            ))
+            .id();
+        run!(&mut world, wisdom_aura_system);
+        assert!(world.get::<XpMultiplier>(worker).unwrap().value > 1.0);
+        world.get_mut::<GridPosition>(worker).unwrap().x = 40;
+        run!(&mut world, wisdom_aura_system);
+        assert!((world.get::<XpMultiplier>(worker).unwrap().value - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn spec418_wisdom_scales_with_elder_skill_and_caps() {
+        // Unskilled elder: no wisdom to share.
+        assert!((wisdom_bonus_for(&Skills::default())).abs() < f32::EPSILON);
+        // Master elder: Mining 10 + Crafting 10 = 20 levels -> +0.40.
+        let mut master = Skills::default();
+        master.add_xp(SkillType::Mining, 10_000.0);
+        master.add_xp(SkillType::Crafting, 10_000.0);
+        assert!((wisdom_bonus_for(&master) - 0.40).abs() < 0.001);
+        // Cap: 80 levels of raw bonus (1.6) clamps to WISDOM_MAX_BONUS.
+        let mut sage = Skills::default();
+        for st in [
+            SkillType::Mining,
+            SkillType::Forestry,
+            SkillType::Farming,
+            SkillType::Construction,
+            SkillType::Crafting,
+            SkillType::Husbandry,
+            SkillType::Engineering,
+            SkillType::Science,
+        ] {
+            sage.add_xp(st, 10_000.0);
+        }
+        assert!((wisdom_bonus_for(&sage) - WISDOM_MAX_BONUS).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn spec418_elders_do_not_buff_elders() {
+        let mut world = World::new();
+        world.spawn((
+            Pop,
+            Age::new(70),
+            GridPosition { x: 0, y: 0 },
+            elder_with_mining(2500.0),
+        ));
+        let other_elder = world
+            .spawn((
+                Pop,
+                Age::new(80),
+                GridPosition { x: 1, y: 0 },
+                Skills::default(),
+                XpMultiplier::default(),
+            ))
+            .id();
+        run!(&mut world, wisdom_aura_system);
+        assert!((world.get::<XpMultiplier>(other_elder).unwrap().value - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn spec418_elder_job_validation() {
+        // Heavy labor refused for elders, allowed for adults.
+        assert!(!elder_can_perform(LifeStage::Elder, DesignationType::Mine));
+        assert!(!elder_can_perform(LifeStage::Elder, DesignationType::Chop));
+        assert!(!elder_can_perform(
+            LifeStage::Elder,
+            DesignationType::Demolish
+        ));
+        assert!(elder_can_perform(LifeStage::Adult, DesignationType::Mine));
+        // Light work remains open to elders.
+        assert!(elder_can_perform(LifeStage::Elder, DesignationType::Repair));
+        assert!(elder_can_perform(
+            LifeStage::Elder,
+            DesignationType::ClearFlora
+        ));
+        // Assignments: deep mining refused, library work allowed.
+        assert!(!elder_can_take_assignment(
+            LifeStage::Elder,
+            AssignmentType::DeepMining
+        ));
+        assert!(elder_can_take_assignment(
+            LifeStage::Elder,
+            AssignmentType::LibraryWorker
+        ));
+        assert!(elder_can_take_assignment(
+            LifeStage::Adult,
+            AssignmentType::DeepMining
+        ));
+    }
+
+    #[test]
+    fn spec418_census_counts_stages_and_buffed() {
+        let mut world = World::new();
+        world.spawn((
+            Pop,
+            Age::new(70),
+            GridPosition { x: 0, y: 0 },
+            elder_with_mining(2500.0),
+        ));
+        world.spawn((
+            Pop,
+            Age::new(30),
+            GridPosition { x: 2, y: 0 },
+            XpMultiplier { value: 1.1 },
+        ));
+        world.spawn((Pop, Age::new(10), GridPosition { x: 9, y: 9 }));
+        let census = lifecycle_census(&mut world);
+        assert_eq!(census.elders, 1);
+        assert_eq!(census.adults, 1);
+        assert_eq!(census.children, 1);
+        assert_eq!(census.buffed_workers, 1);
+    }
+
+    #[test]
+    fn spec418_ip_guard() {
+        // Player-facing strings for this spec use only generic terms.
+        let banned = ["geriatric", "senile", "boomer", "wrinkly"];
+        for s in [ELDER_RATIONS_LABEL] {
+            for b in banned {
+                assert!(
+                    !s.to_lowercase().contains(b),
+                    "{s} contains banned term {b}"
+                );
+            }
+        }
+        assert!(ELDER_RATIONS_LABEL.contains("Elder"));
+        let _ = Policy::ElderHalfRations;
+    }
+    #[test]
+    fn spec418_elder_rations_halve_elder_hunger_decay_only() {
+        crate::setup::init_task_pools();
+        use crate::layer1::administration::edicts::ColonyPolicies;
+        use crate::layer1::needs::{decay_needs_system, Needs};
+        let mut world = World::new();
+        let mut policies = ColonyPolicies::default();
+        policies.enable(Policy::ElderHalfRations);
+        world.insert_resource(policies);
+        let elder = world.spawn((Pop, Age::new(70), Needs::default())).id();
+        let adult = world.spawn((Pop, Age::new(30), Needs::default())).id();
+        run!(&mut world, decay_needs_system);
+        let elder_hunger = world.get::<Needs>(elder).unwrap().hunger;
+        let adult_hunger = world.get::<Needs>(adult).unwrap().hunger;
+        // Adult decays the full 0.001; elder decays half under the edict.
+        assert!(
+            (adult_hunger - 0.799).abs() < 0.0001,
+            "adult {adult_hunger}"
+        );
+        assert!(
+            (elder_hunger - 0.7995).abs() < 0.0001,
+            "elder {elder_hunger}"
+        );
+    }
+
+    #[test]
+    fn spec418_elder_rations_morale_scar_is_elder_only_and_reversible() {
+        use crate::layer1::administration::edicts::{apply_edict_modifiers, ColonyPolicies};
+        use crate::layer1::social::morale::Morale;
+        let mut world = World::new();
+        let mut policies = ColonyPolicies::default();
+        policies.enable(Policy::ElderHalfRations);
+        world.insert_resource(policies);
+        let elder = world.spawn((Pop, Age::new(70), Morale::default())).id();
+        let adult = world.spawn((Pop, Age::new(30), Morale::default())).id();
+        run!(&mut world, apply_edict_modifiers);
+        let elder_morale = world.get::<Morale>(elder).unwrap();
+        assert!(elder_morale
+            .modifiers
+            .iter()
+            .any(|m| m.label == ELDER_RATIONS_LABEL && m.value < 0.0));
+        let adult_morale = world.get::<Morale>(adult).unwrap();
+        assert!(!adult_morale
+            .modifiers
+            .iter()
+            .any(|m| m.label == ELDER_RATIONS_LABEL));
+        // Repeal removes the scar on the next tick (refresh-never-stack).
+        world
+            .resource_mut::<ColonyPolicies>()
+            .disable(Policy::ElderHalfRations);
+        run!(&mut world, apply_edict_modifiers);
+        let elder_morale = world.get::<Morale>(elder).unwrap();
+        assert!(!elder_morale
+            .modifiers
+            .iter()
+            .any(|m| m.label == ELDER_RATIONS_LABEL));
     }
 }

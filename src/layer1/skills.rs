@@ -280,6 +280,35 @@ impl Skills {
     }
 }
 
+/// Temporary XP-gain multiplier on a pop (Spec 418, spec section 7).
+///
+/// Derived, never accumulated: the wisdom aura system in
+/// `crate::layer1::lifecycle` recomputes `value` from scratch every
+/// tick (1.0 = no aura), so the buff appears and expires with elder
+/// proximity exactly like the spec sketch reset-to-1.0 contract.
+/// XP-granting work lanes read it via [`XpMultiplier::apply`]
+/// (designation work and farm production); lanes that do not read it
+/// yet simply grant base XP.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct XpMultiplier {
+    /// Effective multiplier (1.0 = unbuffed).
+    pub value: f32,
+}
+
+impl Default for XpMultiplier {
+    fn default() -> Self {
+        Self { value: 1.0 }
+    }
+}
+
+impl XpMultiplier {
+    /// Scales a base XP amount by this multiplier.
+    #[must_use]
+    pub fn apply(&self, amount: f32) -> f32 {
+        amount * self.value
+    }
+}
+
 /// Helper to get skill efficiency from an optional Skills component.
 /// Returns 1.0 if no component exists.
 #[must_use]

@@ -320,9 +320,8 @@ impl<'a> PopDecider<'a> {
         let is_penal = data.penal_labor.is_some();
         let is_noble = data.traits.as_ref().is_some_and(|t| t.has(Trait::Noble));
         let is_synth = data.traits.as_ref().is_some_and(|t| t.has(Trait::Synth));
-        let accepts_hazard = crate::layer1::tech::machine_awakening::awakened_accepts_hazard(
-            data.is_awakened_bot,
-        );
+        let accepts_hazard =
+            crate::layer1::tech::machine_awakening::awakened_accepts_hazard(data.is_awakened_bot);
 
         Self {
             evaluator: CandidateEvaluator::new(evaluate_idle(&data.needs), is_synth),
@@ -516,12 +515,20 @@ impl<'a> PopDecider<'a> {
         let weights = self.data.weights;
         let work_bonus = if self.is_penal { 1.0 } else { 0.0 };
 
-        // ⚡ Bolt Optimization: Removed unnecessary clone of `work_designations`
+        // Spec 418: elders refuse heavy labor — their Work candidates
+        // are the light subset gathered into the buffer (no Mine/Chop/
+        // Demolish/...), and they do not tame animals. Light work,
+        // socializing and every non-work action stay open to them.
+        let work_candidates = if self.data.is_elder {
+            &self.buffer.light_work_designations
+        } else {
+            &self.buffer.work_designations
+        };
 
         let work_utility = evaluate_simple_action(
             pop_pos,
             &weights,
-            &self.buffer.work_designations,
+            work_candidates,
             if self.data.is_nostalgic { 0.2 } else { 0.5 },
         );
         self.evaluator.evaluate_and_consider(
@@ -531,12 +538,14 @@ impl<'a> PopDecider<'a> {
             work_bonus + self.context.work_fervor + self.context.quota_fervor,
         );
 
-        self.evaluator.evaluate_and_consider(
-            evaluate_candidates(pop_pos, &weights, &self.buffer.tame_designations, 0.6),
-            ActionType::Tame,
-            self.context,
-            0.0,
-        );
+        if !self.data.is_elder {
+            self.evaluator.evaluate_and_consider(
+                evaluate_candidates(pop_pos, &weights, &self.buffer.tame_designations, 0.6),
+                ActionType::Tame,
+                self.context,
+                0.0,
+            );
+        }
     }
 
     fn evaluate_production(&mut self) {
@@ -1414,7 +1423,9 @@ mod hazard_refusal_tests {
     use crate::layer1::map::GridPosition;
     use crate::layer1::needs::Needs;
     use crate::layer1::pop::Pop;
-    use crate::layer1::tech::machine_awakening::{Awakened, Bot, BotNeeds, RebellionRisk, SentienceAccumulator};
+    use crate::layer1::tech::machine_awakening::{
+        Awakened, Bot, BotNeeds, RebellionRisk, SentienceAccumulator,
+    };
     use crate::shared::time::SimulationTime;
 
     fn hazard_world() -> World {
@@ -1435,7 +1446,10 @@ mod hazard_refusal_tests {
             GridPosition { x: 0, y: 0 },
             Needs::default(),
             UtilityWeights::default(),
-            PopAction { ticks_committed: 10, ..Default::default() },
+            PopAction {
+                ticks_committed: 10,
+                ..Default::default()
+            },
             Bot,
             BotNeeds::default(),
             SentienceAccumulator(0.0),
@@ -1449,11 +1463,77 @@ mod hazard_refusal_tests {
     }
 
     fn designate(world: &mut World, kind: DesignationType) {
-        world.spawn((Designation { designation_type: kind }, GridPosition { x: 1, y: 0 }));
+        world.spawn((
+            Designation {
+                designation_type: kind,
+            },
+            GridPosition { x: 1, y: 0 },
+        ));
     }
 
     fn action_of(world: &World, pop: Entity) -> ActionType {
         world.get::<PopAction>(pop).unwrap().current
+    }
+
+    fn spawn_aged_pop(world: &mut World, years: u64) -> Entity {
+        world
+            .spawn((
+                Pop,
+                GridPosition { x: 0, y: 0 },
+                Needs::default(),
+                UtilityWeights::default(),
+                PopAction {
+                    ticks_committed: 10,
+                    ..Default::default()
+                },
+                crate::layer1::lifecycle::Age::new(years),
+            ))
+            .id()
+    }
+
+    // Spec 418: an elder refuses a Mine designation (heavy labor) —
+    // with nothing else to do, the elder stays Idle.
+    #[test]
+    fn elder_refuses_mining_work() {
+        let mut world = hazard_world();
+        let elder = spawn_aged_pop(&mut world, 70);
+        designate(&mut world, DesignationType::Mine);
+        evaluate_actions_system(&mut world);
+        assert_ne!(
+            action_of(&world, elder),
+            ActionType::Work,
+            "elder must refuse heavy Mine work"
+        );
+        assert_eq!(action_of(&world, elder), ActionType::Idle);
+    }
+
+    // Spec 418 control: an adult takes the same Mine designation.
+    #[test]
+    fn adult_takes_mining_work() {
+        let mut world = hazard_world();
+        let adult = spawn_aged_pop(&mut world, 30);
+        designate(&mut world, DesignationType::Mine);
+        evaluate_actions_system(&mut world);
+        assert_eq!(
+            action_of(&world, adult),
+            ActionType::Work,
+            "adult must accept Mine work"
+        );
+    }
+
+    // Spec 418: light work stays open — an elder still answers a
+    // Repair designation (Repair candidates bypass the Work gate).
+    #[test]
+    fn elder_takes_repair_work() {
+        let mut world = hazard_world();
+        let elder = spawn_aged_pop(&mut world, 70);
+        designate(&mut world, DesignationType::Repair);
+        evaluate_actions_system(&mut world);
+        assert_eq!(
+            action_of(&world, elder),
+            ActionType::Repair,
+            "elder must accept light Repair work"
+        );
     }
 
     #[test]
@@ -1462,7 +1542,11 @@ mod hazard_refusal_tests {
         let bot = spawn_bot_pop(&mut world, false);
         designate(&mut world, DesignationType::Mine);
         evaluate_actions_system(&mut world);
-        assert_eq!(action_of(&world, bot), ActionType::Work, "dormant bot must accept hazard Work (danger_level > 0)");
+        assert_eq!(
+            action_of(&world, bot),
+            ActionType::Work,
+            "dormant bot must accept hazard Work (danger_level > 0)"
+        );
     }
 
     #[test]
@@ -1471,7 +1555,11 @@ mod hazard_refusal_tests {
         let bot = spawn_bot_pop(&mut world, true);
         designate(&mut world, DesignationType::Mine);
         evaluate_actions_system(&mut world);
-        assert_ne!(action_of(&world, bot), ActionType::Work, "awakened bot must refuse hazard Work via awakened_accepts_hazard");
+        assert_ne!(
+            action_of(&world, bot),
+            ActionType::Work,
+            "awakened bot must refuse hazard Work via awakened_accepts_hazard"
+        );
         assert_eq!(action_of(&world, bot), ActionType::Idle);
     }
 
@@ -1481,7 +1569,11 @@ mod hazard_refusal_tests {
         let bot = spawn_bot_pop(&mut world, false);
         designate(&mut world, DesignationType::Repair);
         evaluate_actions_system(&mut world);
-        assert_eq!(action_of(&world, bot), ActionType::Repair, "dormant bot must accept hazard Repair");
+        assert_eq!(
+            action_of(&world, bot),
+            ActionType::Repair,
+            "dormant bot must accept hazard Repair"
+        );
     }
 
     #[test]
@@ -1490,7 +1582,11 @@ mod hazard_refusal_tests {
         let bot = spawn_bot_pop(&mut world, true);
         designate(&mut world, DesignationType::Repair);
         evaluate_actions_system(&mut world);
-        assert_ne!(action_of(&world, bot), ActionType::Repair, "awakened bot must refuse hazard Repair");
+        assert_ne!(
+            action_of(&world, bot),
+            ActionType::Repair,
+            "awakened bot must refuse hazard Repair"
+        );
         assert_eq!(action_of(&world, bot), ActionType::Idle);
     }
 
@@ -1500,7 +1596,11 @@ mod hazard_refusal_tests {
         let bot = spawn_bot_pop(&mut world, false);
         designate(&mut world, DesignationType::Tame);
         evaluate_actions_system(&mut world);
-        assert_eq!(action_of(&world, bot), ActionType::Tame, "dormant bot must accept hazard Tame");
+        assert_eq!(
+            action_of(&world, bot),
+            ActionType::Tame,
+            "dormant bot must accept hazard Tame"
+        );
     }
 
     #[test]
@@ -1509,7 +1609,11 @@ mod hazard_refusal_tests {
         let bot = spawn_bot_pop(&mut world, true);
         designate(&mut world, DesignationType::Tame);
         evaluate_actions_system(&mut world);
-        assert_ne!(action_of(&world, bot), ActionType::Tame, "awakened bot must refuse hazard Tame");
+        assert_ne!(
+            action_of(&world, bot),
+            ActionType::Tame,
+            "awakened bot must refuse hazard Tame"
+        );
         assert_eq!(action_of(&world, bot), ActionType::Idle);
     }
 
@@ -1519,22 +1623,37 @@ mod hazard_refusal_tests {
         use crate::layer1::farm::Farm;
         let mut world = hazard_world();
         let bot = spawn_bot_pop(&mut world, true);
-        world.spawn((Building { building_type: BuildingType::Farm }, GridPosition { x: 1, y: 0 }, Farm::default()));
+        world.spawn((
+            Building {
+                building_type: BuildingType::Farm,
+            },
+            GridPosition { x: 1, y: 0 },
+            Farm::default(),
+        ));
         evaluate_actions_system(&mut world);
-        assert_eq!(action_of(&world, bot), ActionType::Farm, "awakened bot refuses only hazard work (danger_level > 0); Farm (danger 0) stays open");
+        assert_eq!(
+            action_of(&world, bot),
+            ActionType::Farm,
+            "awakened bot refuses only hazard work (danger_level > 0); Farm (danger 0) stays open"
+        );
     }
 
     #[test]
     fn awakened_marker_without_bot_does_not_refuse_hazard_work() {
         let mut world = hazard_world();
-        let pop = world.spawn((
-            Pop,
-            GridPosition { x: 0, y: 0 },
-            Needs::default(),
-            UtilityWeights::default(),
-            PopAction { ticks_committed: 10, ..Default::default() },
-            Awakened,
-        )).id();
+        let pop = world
+            .spawn((
+                Pop,
+                GridPosition { x: 0, y: 0 },
+                Needs::default(),
+                UtilityWeights::default(),
+                PopAction {
+                    ticks_committed: 10,
+                    ..Default::default()
+                },
+                Awakened,
+            ))
+            .id();
         designate(&mut world, DesignationType::Mine);
         evaluate_actions_system(&mut world);
         assert_eq!(action_of(&world, pop), ActionType::Work, "hazard refusal is Bot-scoped: a non-Bot pop carrying Awakened alone is not a constructed bot");

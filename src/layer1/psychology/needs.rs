@@ -241,30 +241,45 @@ type DecayNeedsFilter = (
 
 /// # Threading
 /// Uses `par_iter_mut` for parallel processing, as need decay is independent per pop.
+#[allow(clippy::type_complexity)]
 pub fn decay_needs_system(
     mut query: Query<
         (
             &mut Needs,
             Option<&Traits>,
             Option<&crate::layer1::temporal_chamber::InsideChamber>,
+            Option<&crate::layer1::lifecycle::Age>,
         ),
         DecayNeedsFilter,
     >,
     chambers: Query<&crate::layer1::temporal_chamber::TemporalChamber>,
     policies: Option<Res<ColonyPolicies>>,
 ) {
-    let hunger_mod = policies.as_ref().map_or(1.0, |p| get_hunger_decay_modifier(p));
+    let hunger_mod = policies
+        .as_ref()
+        .map_or(1.0, |p| get_hunger_decay_modifier(p));
     let base_hunger_decay = HUNGER_DECAY_PER_TICK * hunger_mod;
     // Spec 393: Night Shifts edict burns rest faster (pull-based,
     // recomputed from the base rate every tick — never accumulates).
-    let rest_mod = policies.as_ref().map_or(1.0, |p| get_rest_decay_modifier(p));
+    let rest_mod = policies
+        .as_ref()
+        .map_or(1.0, |p| get_rest_decay_modifier(p));
     let base_rest_decay = REST_DECAY_PER_TICK * rest_mod;
 
+    // Spec 418: Elder Half Rations cuts elder hunger decay only.
+    let elder_rations_active = policies
+        .as_ref()
+        .is_some_and(|p| p.is_active(crate::layer1::edicts::Policy::ElderHalfRations));
     query
         .par_iter_mut()
-        .for_each(|(mut needs, traits, inside_chamber)| {
+        .for_each(|(mut needs, traits, inside_chamber, age)| {
             let hunger_trait_mod = traits.map_or(1.0, get_trait_hunger_decay_modifier);
             let mut hunger_decay = base_hunger_decay * hunger_trait_mod;
+            if elder_rations_active
+                && age.is_some_and(|a| a.stage == crate::layer1::lifecycle::LifeStage::Elder)
+            {
+                hunger_decay *= crate::layer1::edicts::ELDER_RATIONS_HUNGER_MULTIPLIER;
+            }
 
             let leisure_trait_mod = traits.map_or(1.0, get_trait_leisure_decay_modifier);
             let mut leisure_decay = LEISURE_DECAY_PER_TICK * leisure_trait_mod;

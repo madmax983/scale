@@ -27,7 +27,7 @@ use crate::layer1::mother_lode::MotherLode;
 use crate::layer1::needs::{get_morale_efficiency, Needs};
 use crate::layer1::pop::Job;
 use crate::layer1::resources::{ColonyResources, ResourceType};
-use crate::layer1::skills::{get_skill_efficiency, SkillType, Skills};
+use crate::layer1::skills::{get_skill_efficiency, SkillType, Skills, XpMultiplier};
 use crate::layer1::social::SocialBuff;
 use crate::layer1::tech::hypno_learning::MentalFog;
 use crate::layer1::tech::Tech;
@@ -666,10 +666,12 @@ fn handle_post_work_effects(
 ) {
     let skill_type = get_skill_for_designation(designation_type);
 
-    // Add XP
+    // Add XP (Spec 418: scaled by the pop Wisdom-aura XpMultiplier,
+    // 1.0 when no aura component is present).
     if let Some(st) = skill_type {
+        let xp_mult = world.get::<XpMultiplier>(pop_entity).map_or(1.0, |m| m.value);
         if let Some(mut skills) = world.get_mut::<Skills>(pop_entity) {
-            skills.add_xp(st, 1.0);
+            skills.add_xp(st, xp_mult);
         }
     }
 
