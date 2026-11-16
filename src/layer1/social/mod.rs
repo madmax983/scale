@@ -648,6 +648,9 @@ pub use pen_pals::*;
 /// The Cadet Branch (Spec 263).
 pub mod cadet;
 pub use cadet::*;
+/// Exiled Royals (Spec 423): deposed royal sanctuary, assassination squads.
+/// No glob re-export: generic names stay namespaced.
+pub mod exiled_royals;
 pub mod indoctrination;
 pub use indoctrination::*;
 

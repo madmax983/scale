@@ -528,6 +528,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "lease" => handle_lease_command(world, &parts),
         "leases" => print_leases(world),
         "scion" => handle_scion_command(world, &parts),
+        "royal" => handle_royal_command(world, &parts),
+        "royals" => print_royals(world),
         "hive" => handle_hive_command(world, &parts),
         "traveler" => handle_traveler_command(world, &parts),
         "travelers" => print_travelers(world),
@@ -3236,6 +3238,14 @@ fn print_stats(world: &mut World) {
         use scale::layer1::social::cadet::scion_count;
         scion_count(world)
     };
+    let royals = {
+        use scale::layer1::social::exiled_royals::royal_count;
+        royal_count(world)
+    };
+    let assassins = {
+        use scale::layer1::social::exiled_royals::assassin_count;
+        assassin_count(world)
+    };
     let (shadowed, shadows) = {
         use scale::layer1::environment::orbital_shadow::{
             OrbitalShadowCasters, OrbitalShadowMap, SHADOWED_TILE_THRESHOLD,
@@ -3672,7 +3682,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={}",
         tick,
         scenario,
         pops,
@@ -3881,6 +3891,8 @@ fn print_stats(world: &mut World) {
         ephemeral_census.dissolved,
         privateer_label,
         revterra_label,
+        royals,
+        assassins,
     );
 }
 
@@ -9788,6 +9800,23 @@ fn handle_scion_command(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Yellow),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Debug: an exiled royal seeks sanctuary (Spec 423).
+fn handle_royal_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::exiled_royals::RoyalArrivalEvent;
+    let count: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+    world.init_resource::<bevy_ecs::event::Events<RoyalArrivalEvent>>();
+    world.resource_mut::<bevy_ecs::event::Events<RoyalArrivalEvent>>().send(RoyalArrivalEvent { count });
+    print_dashboard_panel("EXILED ROYALS", &format!("An exiled royal is inbound ({count}). Culture, diplomacy and credits — plus assassins."), Some(comfy_table::Color::Yellow), Some(comfy_table::Attribute::Bold));
+}
+fn print_royals(world: &mut World) {
+    use scale::layer1::social::exiled_royals::{assassin_count, royal_count, AssassinationState, ExileInfluence};
+    let royals = royal_count(world);
+    let assassins = assassin_count(world);
+    let inf = world.get_resource::<ExileInfluence>().copied().unwrap_or_default();
+    let st = world.get_resource::<AssassinationState>().map(|s| (s.raids_launched, s.gear_dropped)).unwrap_or((0, 0));
+    print_dashboard_panel("EXILED ROYALS", &format!("royals={royals} assassins={assassins} culture={:.1} diplomacy={:.1} raids={} gear={}", inf.culture, inf.diplomacy, st.0, st.1), Some(comfy_table::Color::Yellow), Some(comfy_table::Attribute::Bold));
 }
 
 /// Spec 371: `hive` panel, or `hive infect [n]` to seed latent spores.

@@ -457,6 +457,19 @@ pub fn build_simulation_schedule() -> Schedule {
     schedule.add_systems(
         crate::layer1::social::cadet::process_scion_arrival_system,
     );
+    // Spec 423 Exiled Royals: arrival, reactive bonuses, suite demands,
+    // cooldown assassination squads, assassin loot, royal death.
+    schedule.add_systems(
+        (
+            crate::layer1::social::exiled_royals::process_royal_arrival_system,
+            crate::layer1::social::exiled_royals::exile_bonus_system,
+            crate::layer1::social::exiled_royals::royal_suite_system,
+            crate::layer1::social::exiled_royals::assassination_raid_spawner,
+            crate::layer1::social::exiled_royals::assassin_loot_system,
+            crate::layer1::social::exiled_royals::royal_death_system,
+        )
+            .chain(),
+    );
     // Spec 351 The Long-Haulers: temporary colonists arrive on a fixed
     // tour and depart permanently when a trade ship arrives at/after
     // their departure tick. Arrival first, departures second.
@@ -872,6 +885,14 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::factions::subcontractor_factions::MegacorpSecuritySweepEvent>>();
     // Spec 1208 The Cadet Branch: scion arrival events.
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::cadet::ScionArrivalEvent>>();
+    // Spec 423 Exiled Royals: influence ledger, raid state, arrival event.
+    // NOTE: init_simulation_resources runs every tick — guard stateful
+    // resources so the raid cooldown/counters are not reset per tick.
+    if !world.contains_resource::<crate::layer1::social::exiled_royals::AssassinationState>() {
+        world.insert_resource(crate::layer1::social::exiled_royals::AssassinationState::default());
+    }
+    world.init_resource::<crate::layer1::social::exiled_royals::ExileInfluence>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::exiled_royals::RoyalArrivalEvent>>();
     // Spec 351 The Long-Haulers: arrival + departed events (first-tick
     // Events pattern: init before any system can read them).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::long_haulers::TravelerArrivalEvent>>();
