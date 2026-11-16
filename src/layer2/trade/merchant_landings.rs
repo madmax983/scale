@@ -221,6 +221,7 @@ pub const fn resource_label(r: ResourceType) -> &'static str {
         ResourceType::Organs => "Organs",
         ResourceType::DarkMote => "Dark Motes",
         ResourceType::AncientTech => "Ancient Tech",
+        ResourceType::CoreGem => "Core Gems",
     }
 }
 

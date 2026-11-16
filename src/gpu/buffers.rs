@@ -359,6 +359,7 @@ fn extract_resource_items(
             ResourceType::Organs => resources.organs < resources.max_organs,
             ResourceType::DarkMote => resources.dark_motes < resources.max_dark_motes,
             ResourceType::AncientTech => resources.ancient_tech < resources.max_ancient_tech,
+            ResourceType::CoreGem => resources.core_gems < resources.max_core_gems,
         };
 
         entities.push(entity);

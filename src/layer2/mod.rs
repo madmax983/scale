@@ -113,6 +113,7 @@ pub mod dysonian;
 pub mod piracy;
 pub use piracy::*;
 pub mod privateers;
+pub mod reverse_terraforming;
 pub mod fauna;
 pub use fauna::*;
 pub mod gravitational_doldrums;

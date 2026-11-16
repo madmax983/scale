@@ -582,6 +582,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "lpoints" => print_lpoints(world),
         "emissary" => handle_emissary_command(world),
         "privateer" | "privateers" => handle_privateer_command(world, &parts),
+        "stripper" | "strippers" => handle_stripper_command(world, &parts),
+        "coregems" => print_coregems(world),
         "asteroid" => handle_asteroid_command(world, &parts),
         "redirect" => handle_redirect_command(world, &parts),
         "asteroids" => print_asteroids(world),
@@ -3666,8 +3668,11 @@ fn print_stats(world: &mut World) {
     // Spec 421: privateer contract label for STATS (full panel: `privateer`).
     let privateer_label = scale::layer2::privateers::privateer_stats_label(world);
 
+    // Spec 422: reverse-terraforming label for STATS (full panel: `stripper`).
+    let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={}",
         tick,
         scenario,
         pops,
@@ -3875,6 +3880,7 @@ fn print_stats(world: &mut World) {
         ephemeral_census.total,
         ephemeral_census.dissolved,
         privateer_label,
+        revterra_label,
     );
 }
 
@@ -7271,6 +7277,7 @@ fn print_help() {
                 ("elders", "", "Lifecycle & Retirement panel (Spec 418): life-stage census, elder wisdom auras, elder ration edict state"),
                 ("ephemeral [spawn <ice|salt|mud> [x] [y] | rain | storm | clear | heat <c> | chill]", "", "Ephemeral Architecture panel (Spec 420): ice/salt/packed-mud structures, live decay rates, dissolved ledger; subcommands raise an ephemeral Wall and force weather/temperature for testing"),
                 ("privateer [hire | pay | refuse | autopay [on|off]]", "", "Pirate Emissary panel (Spec 421): privateer contract state, wealth-scaled tribute demand, payment ledger; hire signs, pay settles the outstanding demand, refuse breaches (they raid the capital), autopay toggles the standing order. `emissary` summons a Pending emissary."),
+                ("stripper [deploy | recall | harvest]", "", "Reverse Terraforming panel (Spec 422): Atmo-Stripper deployment degrades habitability tick by tick, strips flora, exposes Core-Gem deposits on rock; harvest pays one Core-Gem from the first deposit into the colony ledger. Toxic air damages unsealed pops; pressurized habitat and live EVA suits protect. `coregems` lists deposits."),
                 ("horror [n]", "", "Debug (Spec 416): place n horror loci on the first pop — nearby pops accumulate insanity"),
                 ("insanity [level]", "", "Debug (Spec 416): set every pop's insanity (default 95) — over 80 hallucinates false alerts"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
@@ -17161,4 +17168,96 @@ fn print_black_box(world: &mut World) {
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Spec 422: `stripper` prints the reverse-terraforming panel;
+/// `stripper deploy|recall|harvest` drive it. `coregems` lists deposits.
+fn handle_stripper_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::reverse_terraforming::{
+        deploy_atmo_stripper, harvest_next_core_gem, recall_atmo_strippers,
+        ReverseTerraformState,
+    };
+    world.init_resource::<ReverseTerraformState>();
+    match parts.get(1).copied() {
+        Some("deploy") => {
+            let id = deploy_atmo_stripper(world);
+            println!(
+                "An Atmo-Stripper takes station in orbit (entity {}). The sky will thin tick by tick; watch STATS revterra= — or `stripper` for the panel.",
+                id.index()
+            );
+        }
+        Some("recall") => {
+            let n = recall_atmo_strippers(world);
+            if n > 0 {
+                println!("{n} Atmo-Stripper(s) recalled. The damage already done stays done.");
+            } else {
+                println!("No Atmo-Strippers in orbit to recall.");
+            }
+        }
+        Some("harvest") => {
+            if harvest_next_core_gem(world) {
+                println!("One Core-Gem harvested into the colony ledger. Watch STATS revterra=.");
+            } else {
+                println!("Nothing harvested — no live deposit, or the Core-Gem ledger is full. See `coregems`.");
+            }
+        }
+        _ => print_stripper_report(world),
+    }
+}
+
+fn print_stripper_report(world: &mut World) {
+    use scale::layer1::environment::terraforming::PlanetaryAtmosphere;
+    use scale::layer2::reverse_terraforming::{
+        habitability_for, reverse_terraform_census, ReverseTerraformState,
+    };
+    world.init_resource::<ReverseTerraformState>();
+    let census = reverse_terraform_census(world);
+    let state = world.resource::<ReverseTerraformState>();
+    let (toxicity, habitability) = world
+        .get_resource::<PlanetaryAtmosphere>()
+        .map_or((0.0, 100.0), |a| (a.toxicity, habitability_for(a.toxicity)));
+    let gems = world
+        .get_resource::<scale::layer1::resources::ColonyResources>()
+        .map_or(0.0, |r| {
+            r.get_amount(scale::layer1::resources::ResourceType::CoreGem)
+        });
+    println!(
+        "Reverse Terraforming: {} stripper(s) in orbit | toxicity {:.2} | habitability {:.0} | exposed {}",
+        census.strippers,
+        toxicity,
+        habitability,
+        if state.exposed { "YES" } else { "no" },
+    );
+    println!(
+        "Ledger: deployed {} | recalled {} | stripping ticks {} | tiles stripped {} | fauna dispersed {} | deposits exposed {} | gems harvested {:.0} | gems stockpiled {:.0} | gems in ground {:.0} across {} deposit(s)",
+        state.deployed,
+        state.recalled,
+        state.stripping_ticks,
+        state.tiles_stripped,
+        state.fauna_dispersed,
+        state.deposits_exposed,
+        state.gems_harvested,
+        gems,
+        census.gems_in_ground,
+        census.deposits,
+    );
+    if census.strippers == 0 && !state.exposed {
+        println!("No strippers yet. `stripper deploy` begins the long poisoning — for the gems underneath.");
+    }
+}
+
+fn print_coregems(world: &mut World) {
+    use scale::layer2::reverse_terraforming::{reverse_terraform_census, CoreGemDeposit};
+    let census = reverse_terraform_census(world);
+    println!(
+        "Core-Gem deposits: {} live, {:.0} gems in the ground",
+        census.deposits, census.gems_in_ground
+    );
+    let mut query = world.query::<(&CoreGemDeposit, &GridPosition)>();
+    for (deposit, pos) in query.iter(world) {
+        println!("  deposit at ({}, {}) — {:.0} Core-Gems", pos.x, pos.y, deposit.amount);
+    }
+    if census.deposits == 0 {
+        println!("No deposits exposed. Deploy an Atmo-Stripper (`stripper deploy`) and let toxicity reach the exposure threshold.");
+    }
 }

@@ -447,6 +447,11 @@ fn default_max_ancient_tech() -> f32 {
     50.0
 }
 
+/// Default Core-Gem cap for saves written before Spec 422.
+fn default_max_core_gems() -> f32 {
+    50.0
+}
+
 /// Every `ColonyResources` field, mirrored 1:1.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[allow(missing_docs)]
@@ -516,6 +521,12 @@ pub struct ColonyResourcesSave {
     /// Spec 370: ancient tech storage cap.
     #[serde(default = "default_max_ancient_tech")]
     pub max_ancient_tech: f32,
+    /// Spec 422: Core-Gems from reverse terraforming.
+    #[serde(default)]
+    pub core_gems: f32,
+    /// Spec 422: Core-Gem storage cap.
+    #[serde(default = "default_max_core_gems")]
+    pub max_core_gems: f32,
     /// Spec 1384: colony EVA suit pool.
     pub eva_suits: f32,
     /// Spec 1384: colony EVA suit pool cap.
@@ -586,6 +597,8 @@ impl From<&ColonyResources> for ColonyResourcesSave {
             max_dark_motes: r.max_dark_motes,
             ancient_tech: r.ancient_tech,
             max_ancient_tech: r.max_ancient_tech,
+            core_gems: r.core_gems,
+            max_core_gems: r.max_core_gems,
             eva_suits: r.eva_suits,
             max_eva_suits: r.max_eva_suits,
         }
@@ -656,6 +669,8 @@ impl From<&ColonyResourcesSave> for ColonyResources {
             max_dark_motes: s.max_dark_motes,
             ancient_tech: s.ancient_tech,
             max_ancient_tech: s.max_ancient_tech,
+            core_gems: s.core_gems,
+            max_core_gems: s.max_core_gems,
             eva_suits: s.eva_suits,
             max_eva_suits: s.max_eva_suits,
         }

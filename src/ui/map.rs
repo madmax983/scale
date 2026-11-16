@@ -1005,6 +1005,7 @@ pub const fn get_resource_char(resource: ResourceType) -> &'static str {
         ResourceType::Organs => "Q",
         ResourceType::DarkMote => "*",
         ResourceType::AncientTech => "A",
+        ResourceType::CoreGem => "G",
     }
 }
 
@@ -1042,6 +1043,7 @@ pub const fn get_resource_color(resource: ResourceType) -> Color {
         ResourceType::Organs => Color::Rgb(220, 20, 60),          // Crimson
         ResourceType::DarkMote => Color::Rgb(75, 0, 130),         // Indigo
         ResourceType::AncientTech => Color::Rgb(212, 175, 55),      // Antique gold
+        ResourceType::CoreGem => Color::Rgb(185, 242, 255), // Ice-blue gem
     }
 }
 

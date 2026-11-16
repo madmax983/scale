@@ -89,6 +89,10 @@ pub enum ResourceType {
     /// fleet (Spec 370); highly valuable, deliberately untradeable
     /// and unusable as a building cost (the Organs/DarkMote pattern).
     AncientTech,
+    /// Deep crustal gems exposed by reverse terraforming
+    /// (Spec 422); deliberately untradeable and unusable as a
+    /// building cost (the Organs/DarkMote/AncientTech pattern).
+    CoreGem,
 }
 
 /// Event emitted when a resource is mined.
@@ -269,6 +273,10 @@ pub struct ColonyResources {
     pub dark_motes: f32,
     /// Pristine ancient tech recovered from the fossilized fleet (Spec 370).
     pub ancient_tech: f32,
+    /// Core-Gems exposed by reverse terraforming (Spec 422).
+    pub core_gems: f32,
+    /// Maximum Core-Gem storage capacity.
+    pub max_core_gems: f32,
     /// Maximum dark mote storage capacity.
     pub max_dark_motes: f32,
     /// Maximum ancient tech storage capacity.
@@ -349,6 +357,8 @@ impl Default for ColonyResources {
             max_dark_motes: 50.0,
             ancient_tech: 0.0,
             max_ancient_tech: 50.0,
+            core_gems: 0.0,
+            max_core_gems: 50.0,
             eva_suits: 0.0,
             max_eva_suits: 50.0,
         }
@@ -422,6 +432,8 @@ impl Mul<f32> for ColonyResources {
             max_dark_motes: self.max_dark_motes,
             ancient_tech: (self.ancient_tech * rhs).ceil(),
             max_ancient_tech: self.max_ancient_tech,
+            core_gems: (self.core_gems * rhs).ceil(),
+            max_core_gems: self.max_core_gems,
             eva_suits: (self.eva_suits * rhs).ceil(),
             max_eva_suits: self.max_eva_suits,
         }
@@ -497,6 +509,8 @@ impl ColonyResources {
             max_dark_motes: 0.0,
             ancient_tech: 0.0,
             max_ancient_tech: 0.0,
+            core_gems: 0.0,
+            max_core_gems: 0.0,
             eva_suits: 0.0,
             max_eva_suits: 0.0,
         }
@@ -666,6 +680,13 @@ impl ColonyResources {
     pub fn add_ancient_tech(&mut self, amount: f32) {
         if amount.is_finite() {
             self.ancient_tech = (self.ancient_tech + amount).clamp(0.0, self.max_ancient_tech);
+        }
+    }
+
+    /// Adds Core-Gems, clamping to the maximum capacity (Spec 422).
+    pub fn add_core_gems(&mut self, amount: f32) {
+        if amount.is_finite() {
+            self.core_gems = (self.core_gems + amount).clamp(0.0, self.max_core_gems);
         }
     }
 
@@ -908,6 +929,9 @@ impl ColonyResources {
             ResourceType::AncientTech => {
                 self.ancient_tech = (self.ancient_tech - amount).max(0.0);
             }
+            ResourceType::CoreGem => {
+                self.core_gems = (self.core_gems - amount).max(0.0);
+            }
         }
     }
 
@@ -938,6 +962,7 @@ impl ColonyResources {
             ResourceType::Organs => self.max_organs,
             ResourceType::DarkMote => self.max_dark_motes,
             ResourceType::AncientTech => self.max_ancient_tech,
+            ResourceType::CoreGem => self.max_core_gems,
         }
     }
 
@@ -966,6 +991,7 @@ impl ColonyResources {
             ResourceType::Organs => self.organs,
             ResourceType::DarkMote => self.dark_motes,
             ResourceType::AncientTech => self.ancient_tech,
+            ResourceType::CoreGem => self.core_gems,
         }
     }
 
@@ -1016,6 +1042,7 @@ impl ColonyResources {
             ResourceType::Organs => self.organs < self.max_organs,
             ResourceType::DarkMote => self.dark_motes < self.max_dark_motes,
             ResourceType::AncientTech => self.ancient_tech < self.max_ancient_tech,
+            ResourceType::CoreGem => self.core_gems < self.max_core_gems,
         }
     }
 
@@ -1053,6 +1080,7 @@ impl ColonyResources {
                 self.dark_motes = (self.dark_motes + amount).min(self.max_dark_motes)
             }
             ResourceType::AncientTech => self.add_ancient_tech(amount),
+            ResourceType::CoreGem => self.add_core_gems(amount),
         }
     }
 

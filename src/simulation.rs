@@ -143,6 +143,16 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 422 Reverse Terraforming: strippers degrade the real
+    // PlanetaryAtmosphere and strip the real TerrainGrid, then the
+    // acute toxicity leg damages unsealed pops through Health.
+    schedule.add_systems(
+        (
+            crate::layer2::reverse_terraforming::reverse_terraforming_system,
+            crate::layer2::reverse_terraforming::toxicity_damage_system,
+        )
+            .chain(),
+    );
     // Spec 401 Asteroid Redirect: redirect -> drift -> kinetic impact.
     schedule.add_systems(
         (
@@ -1175,6 +1185,9 @@ fn init_simulation_resources(world: &mut World) {
     if world.get_resource::<crate::layer2::privateers::PrivateerState>().is_none() {
         world.insert_resource(crate::layer2::privateers::PrivateerState::new());
     }
+    // Spec 422 Reverse Terraforming: ledger (first-tick pattern —
+    // the degradation system reads it from tick one).
+    world.init_resource::<crate::layer2::reverse_terraforming::ReverseTerraformState>();
     // Spec 403 Dysonian Swarms: ledger + seed (first-tick pattern).
     world.init_resource::<crate::layer2::dysonian::DysonianState>();
     // Spec 407 Planetary Rings: shadow ledger (first-tick pattern —
