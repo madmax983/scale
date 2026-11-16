@@ -134,6 +134,15 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 421 The Pirate Emissary: tribute clock (demand -> auto-pay
+    // or grace -> breach) -> trade escort bonuses while protected.
+    schedule.add_systems(
+        (
+            crate::layer2::privateers::privateer_tribute_system,
+            crate::layer2::privateers::privateer_trade_escort_system,
+        )
+            .chain(),
+    );
     // Spec 401 Asteroid Redirect: redirect -> drift -> kinetic impact.
     schedule.add_systems(
         (
@@ -1158,6 +1167,14 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer2::trade::merchant_landings::TradeEvent>>();
     // Spec 400 Lagrange Point Hubs: ledger + seed (first-tick pattern).
     world.init_resource::<crate::layer2::lagrange::LagrangeState>();
+    // Spec 421 The Pirate Emissary: ledger + auto-pay standing order
+    // (first-tick pattern — the tribute system and raid bridge read it
+    // from tick one). init_resource would clobber the default with
+    // auto_pay=false, so insert the policy-carrying default explicitly
+    // only when absent.
+    if world.get_resource::<crate::layer2::privateers::PrivateerState>().is_none() {
+        world.insert_resource(crate::layer2::privateers::PrivateerState::new());
+    }
     // Spec 403 Dysonian Swarms: ledger + seed (first-tick pattern).
     world.init_resource::<crate::layer2::dysonian::DysonianState>();
     // Spec 407 Planetary Rings: shadow ledger (first-tick pattern —

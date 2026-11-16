@@ -1891,8 +1891,24 @@ pub fn beacon_pirate_raid_bridge(
     mut resources: ResMut<crate::layer1::economy::resources::ColonyResources>,
     mut pops: Query<&mut crate::layer1::morale::Morale, With<crate::layer1::pop::Pop>>,
     mut chronicle_events: EventWriter<crate::layer1::core::chronicle::AddChronicleEvent>,
+    mut privateer_state: Option<ResMut<crate::layer2::privateers::PrivateerState>>,
 ) {
     for _ in events.read() {
+        // SPEC 421: an Active privateer contract turns the raid away at
+        // the route — no theft, no morale hit, ledger-counted. Breached
+        // or absent contracts fall through to the normal resolution
+        // below, which is also how a breached fleet's own raid lands.
+        if let Some(state) = privateer_state.as_deref_mut() {
+            if state.protection_active {
+                state.raids_repelled += 1;
+                chronicle_events.send(crate::layer1::core::chronicle::AddChronicleEvent {
+                    text: "Privateer escorts repelled a pirate raid on the capital."
+                        .to_string(),
+                    importance: crate::layer1::core::chronicle::EventImportance::Major,
+                });
+                continue;
+            }
+        }
         // Pirates steal resources
         // WINTER-ECONOMY PASS (2026-10-03): the flat 50-food theft erased a
         // small colony's entire stockpile in one raid (starter food is 10),

@@ -580,6 +580,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "hub" => handle_hub_command(world),
         "lpirate" => handle_lpirate_command(world),
         "lpoints" => print_lpoints(world),
+        "emissary" => handle_emissary_command(world),
+        "privateer" | "privateers" => handle_privateer_command(world, &parts),
         "asteroid" => handle_asteroid_command(world, &parts),
         "redirect" => handle_redirect_command(world, &parts),
         "asteroids" => print_asteroids(world),
@@ -3661,8 +3663,11 @@ fn print_stats(world: &mut World) {
     // Spec 420: ephemeral census for STATS (full panel: `ephemeral`).
     let ephemeral_census = scale::layer1::architecture::ephemeral::ephemeral_census(world);
 
+    // Spec 421: privateer contract label for STATS (full panel: `privateer`).
+    let privateer_label = scale::layer2::privateers::privateer_stats_label(world);
+
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={}",
         tick,
         scenario,
         pops,
@@ -3869,6 +3874,7 @@ fn print_stats(world: &mut World) {
         lifecycle_census.buffed_workers,
         ephemeral_census.total,
         ephemeral_census.dissolved,
+        privateer_label,
     );
 }
 
@@ -7264,6 +7270,7 @@ fn print_help() {
                 ("chem [dose <id> <stim|sedative>]", "", "Chemical Regulation panel (Spec 417): active effects, addictions, withdrawal; dose administers via the real consumption pipeline"),
                 ("elders", "", "Lifecycle & Retirement panel (Spec 418): life-stage census, elder wisdom auras, elder ration edict state"),
                 ("ephemeral [spawn <ice|salt|mud> [x] [y] | rain | storm | clear | heat <c> | chill]", "", "Ephemeral Architecture panel (Spec 420): ice/salt/packed-mud structures, live decay rates, dissolved ledger; subcommands raise an ephemeral Wall and force weather/temperature for testing"),
+                ("privateer [hire | pay | refuse | autopay [on|off]]", "", "Pirate Emissary panel (Spec 421): privateer contract state, wealth-scaled tribute demand, payment ledger; hire signs, pay settles the outstanding demand, refuse breaches (they raid the capital), autopay toggles the standing order. `emissary` summons a Pending emissary."),
                 ("horror [n]", "", "Debug (Spec 416): place n horror loci on the first pop — nearby pops accumulate insanity"),
                 ("insanity [level]", "", "Debug (Spec 416): set every pop's insanity (default 95) — over 80 hallucinates false alerts"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
@@ -16148,6 +16155,124 @@ fn handle_lpirate_command(world: &mut World) {
         scale::layer2::lagrange::PIRATE_BASE_STRENGTH,
         census.pirate_bases
     );
+}
+
+/// Spec 421: `emissary` summons a pirate emissary (a Pending contract
+/// on a real pirate fleet). `privateer` prints the panel;
+/// `privateer hire|pay|refuse|autopay` drive the contract.
+fn handle_emissary_command(world: &mut World) {
+    use scale::layer2::privateers::{privateer_census, spawn_emissary};
+    let census = privateer_census(world);
+    if census.pending + census.active > 0 {
+        println!("An emissary is already here — see `privateer` for the contract state.");
+        return;
+    }
+    let fleet = spawn_emissary(world);
+    println!(
+        "A pirate emissary has arrived under a flag of parley (fleet entity {}). The offer: privateer protection for tribute that scales with colony wealth. `privateer hire` signs; walking away costs nothing — yet. Watch STATS privateers=.",
+        fleet.index()
+    );
+}
+
+fn handle_privateer_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::privateers::{
+        hire_privateers, pay_tribute_now, refuse_tribute, PrivateerState,
+    };
+    if world.get_resource::<PrivateerState>().is_none() {
+        world.insert_resource(PrivateerState::new());
+    }
+    match parts.get(1).copied() {
+        Some("hire") => {
+            if hire_privateers(world) {
+                println!("The privateer contract is signed. Protection is live; tribute falls due every 500 ticks and scales with colony wealth. Watch STATS privateers=.");
+            } else {
+                println!("No signing happened — a contract is already Active, or only a breached fleet remains. See `privateer`.");
+            }
+        }
+        Some("pay") => {
+            if pay_tribute_now(world) {
+                println!("Tribute paid. The privateers stay bought — until the next, larger demand.");
+            } else {
+                println!("Nothing was paid — either no demand is outstanding, or the treasury cannot cover it. See `privateer`.");
+            }
+        }
+        Some("refuse") => {
+            if refuse_tribute(world) {
+                println!("Tribute refused. The contract is breached and the fleet is coming for the capital — the raid resolves through the ordinary raid pipeline.");
+            } else {
+                println!("No live contract to refuse. See `privateer`.");
+            }
+        }
+        Some("autopay") => {
+            let target = match parts.get(2).copied() {
+                Some("on") => Some(true),
+                Some("off") => Some(false),
+                _ => None,
+            };
+            let mut state = world.resource_mut::<PrivateerState>();
+            state.auto_pay = target.unwrap_or(!state.auto_pay);
+            println!(
+                "Privateer standing order: auto-pay {}. {}",
+                if state.auto_pay { "ON" } else { "OFF" },
+                if state.auto_pay {
+                    "Demands settle automatically when the treasury can afford them."
+                } else {
+                    "Every demand waits for an explicit `privateer pay` — miss the grace window and they breach."
+                }
+            );
+        }
+        _ => print_privateer_report(world),
+    }
+}
+
+fn print_privateer_report(world: &mut World) {
+    use scale::layer2::privateers::{
+        colony_wealth, privateer_census, tribute_demand_for, PrivateerState,
+        PRIVATEER_FACTION_ID,
+    };
+    if world.get_resource::<PrivateerState>().is_none() {
+        world.insert_resource(PrivateerState::new());
+    }
+    let census = privateer_census(world);
+    let state = world.resource::<PrivateerState>();
+    let (credits, wealth) = world
+        .get_resource::<scale::layer1::resources::ColonyResources>()
+        .map_or((0.0, 0.0), |r| (r.credits, colony_wealth(r)));
+    let relations = world
+        .get_resource::<
+            scale::layer3::diplomacy::system_sovereignty::FactionRelations,
+        >()
+        .and_then(|r| r.scores.get(&PRIVATEER_FACTION_ID).copied());
+    println!(
+        "Privateers: {} pending / {} active / {} breached | protection {} | auto-pay {}",
+        census.pending,
+        census.active,
+        census.breached,
+        if state.protection_active { "LIVE" } else { "off" },
+        if state.auto_pay { "on" } else { "off" },
+    );
+    println!(
+        "Treasury: {:.0} credits | colony wealth {:.0} | next demand at current wealth {:.0} credits | outstanding {:.0}",
+        credits,
+        wealth,
+        tribute_demand_for(wealth),
+        census.outstanding,
+    );
+    println!(
+        "Ledger: tribute paid {:.0} ({} payments) | breaches {} | raids repelled {} | convoys escorted {} (+{:.0} credits) | pirate relations {}",
+        state.total_tribute_paid,
+        state.payments,
+        state.breaches,
+        state.raids_repelled,
+        state.convoys_escorted,
+        state.escort_income,
+        relations.map_or("unknown".to_string(), |s| s.to_string()),
+    );
+    if census.pending > 0 {
+        println!("An emissary waits. `privateer hire` signs the contract.");
+    } else if census.active == 0 && census.breached == 0 {
+        println!("No emissary yet. `emissary` summons one under a flag of parley.");
+    }
 }
 
 fn print_lpoints(world: &mut World) {
