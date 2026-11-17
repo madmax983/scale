@@ -69,7 +69,12 @@ pub fn handle_explosion_system(
     mut commands: Commands,
     mut events: EventReader<ExplosionEvent>,
     mut structures: Query<(&GridPosition, &mut Structure)>,
-    mut healths: Query<(Entity, &GridPosition, &mut Health)>,
+    mut healths: Query<(
+        Entity,
+        &GridPosition,
+        &mut Health,
+        Option<&crate::layer1::traits::Traits>,
+    )>,
     time: Option<Res<crate::shared::time::SimulationTime>>,
 ) {
     let tick = time.map_or(0, |t| t.tick);
@@ -82,9 +87,10 @@ pub fn handle_explosion_system(
         }
 
         // Damage Living Entities (Pops, Fauna, etc.)
-        for (entity, pos, mut health) in &mut healths {
+        // Spec 427: ThickSkin/BrittleBones scale physical explosion damage.
+        for (entity, pos, mut health, traits) in &mut healths {
             if event.center.distance_chebyshev(*pos) <= event.radius {
-                health.take_damage(event.damage);
+                health.take_damage(crate::layer1::traits::adjusted_damage(event.damage, traits));
                 // Item 84: attribute the damage source at the moment of damage.
                 if event.damage > 0.0 {
                     crate::layer1::biology::death_attribution::record_damage(
@@ -101,6 +107,54 @@ pub fn handle_explosion_system(
 
 #[cfg(test)]
 mod tests {
+    use bevy_ecs::system::RunSystemOnce;
+
+    #[test]
+    fn test_explosion_damage_respects_mutant_traits() {
+        // Spec 427 Leg 2: ThickSkin takes less explosion damage,
+        // BrittleBones takes more, through the real explosion pipeline.
+        let mut world = World::new();
+        world.init_resource::<Events<ExplosionEvent>>();
+        world.insert_resource(SimulationTime::default());
+        let mut thick_traits = crate::layer1::traits::Traits::default();
+        thick_traits.add(crate::layer1::traits::Trait::ThickSkin);
+        let mut brittle_traits = crate::layer1::traits::Traits::default();
+        brittle_traits.add(crate::layer1::traits::Trait::BrittleBones);
+        let thick = world
+            .spawn((Health::default(), GridPosition { x: 5, y: 5 }, thick_traits))
+            .id();
+        let brittle = world
+            .spawn((
+                Health::default(),
+                GridPosition { x: 5, y: 5 },
+                brittle_traits,
+            ))
+            .id();
+        let plain = world
+            .spawn((Health::default(), GridPosition { x: 5, y: 5 }))
+            .id();
+        world
+            .resource_mut::<Events<ExplosionEvent>>()
+            .send(ExplosionEvent {
+                center: GridPosition { x: 5, y: 5 },
+                damage: 20.0,
+                radius: 1,
+            });
+        world.run_system_once(handle_explosion_system).unwrap();
+        let thick_hp = world.get::<Health>(thick).unwrap().current;
+        let brittle_hp = world.get::<Health>(brittle).unwrap().current;
+        let plain_hp = world.get::<Health>(plain).unwrap().current;
+        assert!((plain_hp - 80.0).abs() < f32::EPSILON, "plain: {plain_hp}");
+        assert!(
+            (thick_hp - 85.0).abs() < f32::EPSILON,
+            "thick skin should take 15, hp: {thick_hp}"
+        );
+        assert!(
+            (brittle_hp - 75.0).abs() < f32::EPSILON,
+            "brittle bones should take 25, hp: {brittle_hp}"
+        );
+    }
+
     use super::*;
     use crate::layer1::map::GridPosition;
     use crate::shared::time::SimulationTime;

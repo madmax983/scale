@@ -278,7 +278,13 @@ pub fn execute_attack(world: &mut World, attacker: Entity, target: Entity) {
     } else {
         damage
     };
-    let actual_damage = (final_damage - defense_bonus).max(0.0);
+    // Spec 427: the target's ThickSkin/BrittleBones mutant traits scale
+    // incoming physical damage (applied after the fossil-fleet defense
+    // bonus, like every other flat reduction).
+    let target_damage_modifier = world
+        .get::<crate::layer1::traits::Traits>(target)
+        .map_or(1.0, crate::layer1::traits::get_trait_damage_modifier);
+    let actual_damage = (final_damage - defense_bonus).max(0.0) * target_damage_modifier;
 
     let Some(mut health) = world.get_mut::<crate::layer1::health::Health>(target) else {
         return;

@@ -214,6 +214,10 @@ pub fn register(schedule: &mut Schedule) {
                 .after(apply_weather_effects_system),
             crate::layer1::nature::mutagenic_rain::clear_mutation_immunity_system
                 .after(crate::layer1::nature::mutagenic_rain::apply_mutagenic_rain_system),
+            // Spec 427: Photosynthesis mutant trait feeds pops in light
+            // (layer1 wiring; the experimental copy is nova-gated).
+            crate::layer1::nature::mutagenic_rain::photosynthesis_nourishment_system
+                .after(apply_weather_effects_system),
             // Spec 345: keep the centralized GlobalModifiers resource in
             // sync with PlanetaryTraits before the quirk application.
             crate::layer1::quirks::update_global_modifiers_system

@@ -99,7 +99,12 @@ pub fn diffuse_geome_hazards_system(
 pub fn environmental_damage_system(
     mut commands: Commands,
     mut health_query: Query<
-        (Entity, &GridPosition, &mut crate::layer1::health::Health),
+        (
+            Entity,
+            &GridPosition,
+            &mut crate::layer1::health::Health,
+            Option<&crate::layer1::traits::Traits>,
+        ),
         (
             Without<crate::layer1::hive_mind_integration::IntegratedCollective>,
             // The phased Chronostalker walks between moments: nothing
@@ -127,9 +132,10 @@ pub fn environmental_damage_system(
         *hazard_map.entry(*pos).or_insert(0.0) += hazard.damage_per_tick;
     }
 
-    for (entity, health_pos, mut health) in health_query.iter_mut() {
+    for (entity, health_pos, mut health, traits) in health_query.iter_mut() {
         if let Some(damage) = hazard_map.get(health_pos) {
-            health.take_damage(*damage);
+            // Spec 427: ThickSkin/BrittleBones scale physical hazard damage.
+            health.take_damage(crate::layer1::traits::adjusted_damage(*damage, traits));
             // Item 84: name the terrain hazard that dealt the damage.
             let cause = match terrain.as_deref().and_then(|grid| {
                 grid.get(

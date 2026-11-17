@@ -479,7 +479,49 @@ pub fn get_trait_hunger_decay_modifier(traits: &Traits) -> f32 {
     if traits.has(Trait::Ascetic) {
         modifier -= 0.2;
     }
+    // Spec 427: the ExtremeHunger mutant trait burns hunger half again
+    // as fast through the real needs decay seam.
+    if traits.has(Trait::ExtremeHunger) {
+        modifier += EXTREME_HUNGER_DECAY_BONUS;
+    }
     modifier
+}
+
+/// Spec 427: extra hunger-decay fraction for `Trait::ExtremeHunger`
+/// (total modifier 1.5x).
+pub const EXTREME_HUNGER_DECAY_BONUS: f32 = 0.5;
+
+/// Spec 427: incoming-damage multiplier for `Trait::ThickSkin`.
+pub const THICK_SKIN_DAMAGE_MULTIPLIER: f32 = 0.75;
+
+/// Spec 427: incoming-damage multiplier for `Trait::BrittleBones`.
+pub const BRITTLE_BONES_DAMAGE_MULTIPLIER: f32 = 1.25;
+
+/// Returns the incoming physical-damage multiplier from traits.
+///
+/// Spec 427: `ThickSkin` soaks a quarter of incoming damage,
+/// `BrittleBones` amplifies it by a quarter; both stack
+/// multiplicatively. Wired into the central damage pipelines
+/// (combat `execute_attack`, explosion handling, geome environmental
+/// damage) via [`adjusted_damage`]. Direct `Health::take_damage`
+/// calls elsewhere (starvation, disease ticks, scripted story damage)
+/// deliberately bypass this — it models physical trauma only.
+#[must_use]
+pub fn get_trait_damage_modifier(traits: &Traits) -> f32 {
+    let mut modifier = 1.0;
+    if traits.has(Trait::ThickSkin) {
+        modifier *= THICK_SKIN_DAMAGE_MULTIPLIER;
+    }
+    if traits.has(Trait::BrittleBones) {
+        modifier *= BRITTLE_BONES_DAMAGE_MULTIPLIER;
+    }
+    modifier
+}
+
+/// Applies the trait damage modifier to a raw damage amount.
+#[must_use]
+pub fn adjusted_damage(amount: f32, traits: Option<&Traits>) -> f32 {
+    traits.map_or(amount, |t| amount * get_trait_damage_modifier(t))
 }
 
 /// Returns the leisure decay modifier from traits.
@@ -670,6 +712,56 @@ mod tests {
             (get_trait_hunger_decay_modifier(&normal) - 1.0).abs() < f32::EPSILON,
             "Normal should eat normally"
         );
+    }
+
+    #[test]
+    fn test_extreme_hunger_decay_modifier() {
+        // Spec 427 Leg 2: ExtremeHunger (mutant trait) drains hunger faster.
+        let extreme = {
+            let mut t = Traits::default();
+            t.add(Trait::ExtremeHunger);
+            t
+        };
+        let normal = Traits::default();
+        assert!(
+            (get_trait_hunger_decay_modifier(&extreme) - 1.5).abs() < f32::EPSILON,
+            "ExtremeHunger should multiply hunger decay by 1.5, got {}",
+            get_trait_hunger_decay_modifier(&extreme)
+        );
+        assert!((get_trait_hunger_decay_modifier(&normal) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_mutant_damage_modifiers() {
+        // Spec 427 Leg 2: ThickSkin reduces, BrittleBones increases damage.
+        let thick = {
+            let mut t = Traits::default();
+            t.add(Trait::ThickSkin);
+            t
+        };
+        let brittle = {
+            let mut t = Traits::default();
+            t.add(Trait::BrittleBones);
+            t
+        };
+        let both = {
+            let mut t = Traits::default();
+            t.add(Trait::ThickSkin);
+            t.add(Trait::BrittleBones);
+            t
+        };
+        let normal = Traits::default();
+        assert!((get_trait_damage_modifier(&thick) - 0.75).abs() < f32::EPSILON);
+        assert!((get_trait_damage_modifier(&brittle) - 1.25).abs() < f32::EPSILON);
+        assert!(
+            (get_trait_damage_modifier(&both) - 0.75 * 1.25).abs() < f32::EPSILON,
+            "both traits should stack multiplicatively"
+        );
+        assert!((get_trait_damage_modifier(&normal) - 1.0).abs() < f32::EPSILON);
+        // adjusted_damage helper: None traits = unmodified.
+        assert!((adjusted_damage(20.0, Some(&thick)) - 15.0).abs() < f32::EPSILON);
+        assert!((adjusted_damage(20.0, Some(&brittle)) - 25.0).abs() < f32::EPSILON);
+        assert!((adjusted_damage(20.0, None) - 20.0).abs() < f32::EPSILON);
     }
 
     #[test]

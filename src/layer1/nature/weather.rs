@@ -138,21 +138,31 @@ fn pick_weather_for_season(season: Season, rng: &mut impl Rng) -> WeatherType {
     let roll = rng.gen_range(0.0..1.0);
     match season {
         Season::Spring => {
+            // Spec 427: MutagenicRain takes a rare 3% slice carved from
+            // Rain's tail (Rain 30% -> 27%); Clear's 60% share is
+            // untouched so spring stays mostly fair.
             if roll < 0.6 {
                 WeatherType::Clear
-            } else if roll < 0.9 {
+            } else if roll < 0.87 {
                 WeatherType::Rain
+            } else if roll < 0.90 {
+                WeatherType::MutagenicRain
             } else {
                 WeatherType::Fog
             }
         }
         Season::Summer => {
+            // Spec 427: MutagenicRain takes a rare 2% slice carved from
+            // Storm's tail (Storm 10% -> 8%); Clear's 70% share is
+            // untouched so summer stays mostly fair.
             if roll < 0.7 {
                 WeatherType::Clear
             } else if roll < 0.85 {
                 WeatherType::Heatwave
-            } else if roll < 0.95 {
+            } else if roll < 0.93 {
                 WeatherType::Storm
+            } else if roll < 0.95 {
+                WeatherType::MutagenicRain
             } else {
                 WeatherType::MagneticStorm
             }
@@ -219,17 +229,19 @@ mod tests {
         // We dynamically find seeds that produce exact float ranges to avoid
         // hardcoding brittle seeds or trying to reverse engineer rand math.
 
-        let mut bucket_seeds = [0u64; 9];
+        let mut bucket_seeds = [0u64; 11];
         let targets = [
-            (0.0, 0.35),  // < 0.4
-            (0.4, 0.48),  // < 0.5
-            (0.5, 0.58),  // < 0.6
-            (0.6, 0.68),  // < 0.7
-            (0.7, 0.78),  // < 0.8
-            (0.81, 0.84), // < 0.85
-            (0.86, 0.89), // < 0.9
-            (0.91, 0.94), // < 0.95
-            (0.96, 0.99), // >= 0.95
+            (0.0, 0.35),    // < 0.4
+            (0.4, 0.48),    // < 0.5
+            (0.5, 0.58),    // < 0.6
+            (0.6, 0.68),    // < 0.7
+            (0.7, 0.78),    // < 0.8
+            (0.81, 0.84),   // < 0.85
+            (0.86, 0.865),  // Spring mutagenic slice is 0.87..0.90; 0.86..0.87 is Rain
+            (0.91, 0.94),   // < 0.95
+            (0.96, 0.99),   // >= 0.95
+            (0.875, 0.895), // Spring MutagenicRain (0.87..0.90)
+            (0.935, 0.945), // Summer MutagenicRain (0.93..0.95)
         ];
 
         for (i, (min, max)) in targets.iter().enumerate() {
@@ -254,10 +266,13 @@ mod tests {
             (Season::Spring, bucket_seeds[2], WeatherType::Clear), // 0.5 - 0.58
             (Season::Spring, bucket_seeds[4], WeatherType::Rain),  // 0.7 - 0.78
             (Season::Spring, bucket_seeds[8], WeatherType::Fog),   // 0.96 - 0.99
-            // Summer (Roll < 0.7, < 0.85, < 0.95)
+            // Spring MutagenicRain slice (0.87..0.90)
+            (Season::Spring, bucket_seeds[9], WeatherType::MutagenicRain),
+            // Summer (Roll < 0.7, < 0.85, < 0.93 Storm, < 0.95 MutagenicRain)
             (Season::Summer, bucket_seeds[3], WeatherType::Clear), // 0.6 - 0.68
             (Season::Summer, bucket_seeds[4], WeatherType::Heatwave), // 0.7 - 0.78
-            (Season::Summer, bucket_seeds[7], WeatherType::Storm), // 0.91 - 0.94
+            (Season::Summer, bucket_seeds[6], WeatherType::Storm), // 0.86 - 0.865
+            (Season::Summer, bucket_seeds[10], WeatherType::MutagenicRain), // 0.935 - 0.945
             (Season::Summer, bucket_seeds[8], WeatherType::MagneticStorm), // 0.96 - 0.99
             // Autumn (Roll < 0.5, < 0.8)
             (Season::Autumn, bucket_seeds[1], WeatherType::Clear), // 0.4 - 0.48
@@ -382,6 +397,35 @@ mod tests {
             .expect("Pop should have Speed component");
         // Storm modifier is 0.5. 1.0 * 0.5 = 0.5.
         assert!((speed.current - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_mutagenic_rain_is_reachable_in_spring_and_summer_only() {
+        // Spec 427 Leg 1: MutagenicRain must be rollable organically in
+        // Spring/Summer (rare, ~2-3%) and never in Autumn/Winter.
+        for season in [Season::Spring, Season::Summer] {
+            let mut count = 0usize;
+            for seed in 0..2000u64 {
+                let mut rng = StdRng::seed_from_u64(seed);
+                if pick_weather_for_season(season, &mut rng) == WeatherType::MutagenicRain {
+                    count += 1;
+                }
+            }
+            assert!(
+                (10..=200).contains(&count),
+                "{season:?} should roll MutagenicRain rarely (got {count}/2000)"
+            );
+        }
+        for season in [Season::Autumn, Season::Winter] {
+            for seed in 0..2000u64 {
+                let mut rng = StdRng::seed_from_u64(seed);
+                assert_ne!(
+                    pick_weather_for_season(season, &mut rng),
+                    WeatherType::MutagenicRain,
+                    "{season:?} must never roll MutagenicRain"
+                );
+            }
+        }
     }
 
     #[test]

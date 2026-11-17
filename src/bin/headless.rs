@@ -503,6 +503,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "seniority" => handle_seniority_command(world, &parts),
         "elders" => handle_elders_command(world, &parts),
         "ephemeral" => handle_ephemeral_command(world, &parts),
+        "mutagenic" => handle_mutagenic_command(world),
+        "mutants" => print_mutants(world),
         "howl" => handle_howl_command(world, &parts),
         "calm" => handle_calm_command(world),
         "crystal" => handle_crystal_command(world, &parts),
@@ -3696,6 +3698,14 @@ fn print_stats(world: &mut World) {
 
     // Spec 420: ephemeral census for STATS (full panel: `ephemeral`).
     let ephemeral_census = scale::layer1::architecture::ephemeral::ephemeral_census(world);
+    // Spec 427: mutant census for STATS (full panel: `mutants`).
+    let mutants_count = {
+        let mut q =
+            world.query_filtered::<&scale::layer1::traits::Traits, With<Pop>>();
+        q.iter(world)
+            .filter(|t| scale::layer1::nature::mutagenic_rain::has_mutant_trait(t))
+            .count()
+    };
 
     // Spec 421: privateer contract label for STATS (full panel: `privateer`).
     let privateer_label = scale::layer2::privateers::privateer_stats_label(world);
@@ -3704,7 +3714,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={}",
         tick,
         scenario,
         pops,
@@ -3923,6 +3933,7 @@ fn print_stats(world: &mut World) {
         windsurf_rides,
         windsurf_exposure,
         windsurf_fleets,
+        mutants_count,
     );
 }
 
@@ -7321,6 +7332,8 @@ fn print_help() {
                 ("chem [dose <id> <stim|sedative>]", "", "Chemical Regulation panel (Spec 417): active effects, addictions, withdrawal; dose administers via the real consumption pipeline"),
                 ("elders", "", "Lifecycle & Retirement panel (Spec 418): life-stage census, elder wisdom auras, elder ration edict state"),
                 ("ephemeral [spawn <ice|salt|mud> [x] [y] | rain | storm | clear | heat <c> | chill]", "", "Ephemeral Architecture panel (Spec 420): ice/salt/packed-mud structures, live decay rates, dissolved ledger; subcommands raise an ephemeral Wall and force weather/temperature for testing"),
+                ("mutagenic", "", "Debug lever (Spec 427): force Mutagenic Rain weather for testing — unroofed pops may gain mutant traits"),
+                ("mutants", "", "Mutagenic Rain panel (Spec 427): census of pops carrying mutant traits (Photosynthesis / Thick Skin / Brittle Bones / Extreme Hunger)"),
                 ("privateer [hire | pay | refuse | autopay [on|off]]", "", "Pirate Emissary panel (Spec 421): privateer contract state, wealth-scaled tribute demand, payment ledger; hire signs, pay settles the outstanding demand, refuse breaches (they raid the capital), autopay toggles the standing order. `emissary` summons a Pending emissary."),
                 ("stripper [deploy | recall | harvest]", "", "Reverse Terraforming panel (Spec 422): Atmo-Stripper deployment degrades habitability tick by tick, strips flora, exposes Core-Gem deposits on rock; harvest pays one Core-Gem from the first deposit into the colony ledger. Toxic air damages unsealed pops; pressurized habitat and live EVA suits protect. `coregems` lists deposits."),
                 ("horror [n]", "", "Debug (Spec 416): place n horror loci on the first pop — nearby pops accumulate insanity"),
@@ -13590,6 +13603,66 @@ fn handle_elders_command(world: &mut World, _parts: &[&str]) {
 /// colony WeatherState and `ephemeral heat <c>` / `ephemeral chill`
 /// force the TemperatureGrid, so melt/dissolve can be exercised on
 /// demand (the `howl`/`calm` debug-lever precedent).
+/// Spec 427 debug lever: force Mutagenic Rain (the `ephemeral rain`
+/// precedent). Unroofed pops then mutate through the real
+/// `apply_mutagenic_rain_system`; watch STATS `mutants=` / `mutants`.
+fn handle_mutagenic_command(world: &mut World) {
+    use scale::layer1::weather::{WeatherState, WeatherType};
+    if let Some(mut state) = world.get_resource_mut::<WeatherState>() {
+        state.current_weather = WeatherType::MutagenicRain;
+        state.duration_remaining = 100_000;
+    }
+    print_dashboard_panel(
+        "MUTAGENIC RAIN",
+        "Weather forced to Mutagenic Rain for testing. Unroofed pops may mutate — watch STATS mutants= or the `mutants` panel.",
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 427 panel: every pop carrying at least one mutant trait.
+fn print_mutants(world: &mut World) {
+    use scale::layer1::nature::mutagenic_rain::MUTANT_TRAITS;
+    let mut lines: Vec<String> = Vec::new();
+    {
+        let mut q = world.query_filtered::<
+            (Option<&PopName>, &scale::layer1::traits::Traits),
+            With<Pop>,
+        >();
+        for (name, traits) in q.iter(world) {
+            let held: Vec<&str> = MUTANT_TRAITS
+                .iter()
+                .filter(|t| traits.has(**t))
+                .map(|t| t.label())
+                .collect();
+            if !held.is_empty() {
+                let who = name.map_or("Unnamed", |n| n.0.as_str());
+                lines.push(format!("{who}: {}", held.join(", ")));
+            }
+        }
+    }
+    if lines.is_empty() {
+        print_dashboard_panel(
+            "MUTANTS",
+            "No mutants in the colony. Force a storm with `mutagenic` and leave some pops unroofed.",
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+    } else {
+        let body = format!(
+            "{} mutant pop(s):\n{}",
+            lines.len(),
+            lines.join("\n")
+        );
+        print_dashboard_panel(
+            "MUTANTS",
+            &body,
+            Some(comfy_table::Color::Cyan),
+            Some(comfy_table::Attribute::Bold),
+        );
+    }
+}
+
 fn handle_ephemeral_command(world: &mut World, parts: &[&str]) {
     use scale::layer1::architecture::ephemeral::{spawn_ephemeral_wall, EphemeralMaterial};
     use scale::layer1::weather::{WeatherState, WeatherType};
