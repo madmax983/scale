@@ -817,6 +817,12 @@ pub use martyrdom::*;
 pub mod feral_outpost;
 pub use feral_outpost::*;
 
+/// The Archive of Regret (Spec 426): an indestructible building records
+/// every atrocity, generates Knowledge from the record, and weighs the
+/// colony down with a permanent guilt aura.
+pub mod archive_of_regret;
+pub use archive_of_regret::*;
+
 /// The Empathy Broadcast (Spec 305): a neighbouring empire's psychic
 /// distress wave saturates every colony pop with unavoidable stress and
 /// posts a DemandIntervention grievance.

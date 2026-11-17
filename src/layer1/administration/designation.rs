@@ -203,6 +203,21 @@ fn has_component_at<T: Component>(world: &World, x: i32, y: i32) -> bool {
     })
 }
 
+/// True if an indestructible building (e.g. the Archive of Regret,
+/// Spec 426) stands at the tile. Such buildings refuse Demolish and
+/// Destroy designations outright.
+fn has_indestructible_building_at(world: &World, x: i32, y: i32) -> bool {
+    world.iter_entities().any(|e| {
+        let Some(pos) = e.get::<GridPosition>() else {
+            return false;
+        };
+        pos.x == x
+            && pos.y == y
+            && e.get::<crate::layer1::building::Building>()
+                .is_some_and(|b| b.building_type.is_indestructible())
+    })
+}
+
 fn has_designation_at(world: &World, x: i32, y: i32) -> bool {
     world.iter_entities().any(|e| {
         let Some(pos) = e.get::<GridPosition>() else {
@@ -252,6 +267,7 @@ pub fn can_designate(world: &World, x: i32, y: i32, designation_type: Designatio
                 return false;
             }
             !has_component_at::<crate::layer1::building::VacuumWelded>(world, x, y)
+                && !has_indestructible_building_at(world, x, y)
         }
         DesignationType::Chop => {
             let terrain = world.resource::<TerrainGrid>();
@@ -307,8 +323,9 @@ pub fn can_designate(world: &World, x: i32, y: i32, designation_type: Designatio
         }
         DesignationType::Destroy => {
             let occupied = world.resource::<OccupiedTiles>();
-            // Only occupied tiles can be destroyed
-            occupied.0.contains(&(x, y))
+            // Only occupied tiles can be destroyed — and indestructible
+            // buildings (the Archive of Regret) refuse even this.
+            occupied.0.contains(&(x, y)) && !has_indestructible_building_at(world, x, y)
         }
         DesignationType::CollectSample => {
             has_component_at::<crate::layer1::flora::Flora>(world, x, y)

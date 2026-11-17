@@ -772,6 +772,19 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 426 The Archive of Regret: atrocities are recorded into the
+    // Archive, the guilt aura is re-summed, Knowledge accrues from the
+    // record, and the persistent "Guilty Conscience" modifier is
+    // refreshed before the morale cache folds modifiers into values.
+    schedule.add_systems((
+        crate::layer1::social::archive_of_regret::update_archive_of_regret_system,
+        crate::layer1::social::archive_of_regret::sync_guilt_aura_system
+            .after(crate::layer1::social::archive_of_regret::update_archive_of_regret_system),
+        crate::layer1::social::archive_of_regret::generate_archive_research_system,
+        crate::layer1::social::archive_of_regret::apply_guilt_aura_system
+            .after(crate::layer1::social::archive_of_regret::sync_guilt_aura_system)
+            .before(crate::layer1::social::morale::update_morale_cache_system),
+    ));
 
     schedule
 }
@@ -968,6 +981,12 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::social::martyrdom::Martyrdom>();
     world.init_resource::<crate::layer1::social::martyrdom::LastEnemyStrike>();
     world.init_resource::<crate::layer1::social::martyrdom::IdeologicalCasusBelli>();
+
+    // Spec 426 The Archive of Regret: the guilt-aura ledger (init only —
+    // setup.rs already inits the AtrocityEvent buffer for headless
+    // worlds; init_resource here keeps bare simulation worlds safe).
+    world.init_resource::<crate::layer1::social::archive_of_regret::GlobalAura>();
+    world.init_resource::<Events<crate::layer1::social::slippery_slope::AtrocityEvent>>();
     // Spec 275 Architectural Sabotage: vetting policy, director, failure event.
     world.init_resource::<crate::layer1::architecture::construction_sabotage::VettingPolicy>();
     world.init_resource::<crate::layer1::architecture::construction_sabotage::SabotageDirector>();

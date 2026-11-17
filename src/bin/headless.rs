@@ -59,6 +59,9 @@
 //!   `blackbox`       - Show archives, the sealed box, and ruins
 //!   `ruin`           - Raise a RuinedArchive from a fallen colony
 //!   `decrypt`        - Decrypt a RuinedArchive, restoring its tech
+//!   `regret`         - Build an Archive of Regret (Spec 426)
+//!   `atrocity [sev]` - Commit a debug atrocity for the Archive to record
+//!   `regrets`        - Show the Archive of Regret ledger and guilt aura
 
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::cast_possible_truncation)]
@@ -524,6 +527,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "blackbox" => print_black_box(world),
         "ruin" => handle_ruin_command(world, &parts),
         "decrypt" => handle_decrypt_command(world, &parts),
+        "regret" => handle_regret_command(world, &parts),
+        "atrocity" => handle_atrocity_command(world, &parts),
+        "regrets" => print_regrets(world),
         "stance" => handle_stance_command(world, &parts),
         "lease" => handle_lease_command(world, &parts),
         "leases" => print_leases(world),
@@ -3635,6 +3641,9 @@ fn print_stats(world: &mut World) {
     let cryo_label = scale::layer1::cryo_shock::cryo_shock_stats_label(world);
     // Spec 414: black-box census for STATS (full panel: `blackbox`).
     let blackbox_label = scale::meta::archive::black_box_stats_label(world);
+    // Spec 426: archive-of-regret census for STATS (full panel: `regrets`).
+    let regret_label =
+        scale::layer1::social::archive_of_regret::archive_of_regret_stats_label(world);
     // Spec 415: scrip census for STATS (full panel: `scrip`).
     let (scrip_total, scrip_broke, scrip_luxury_sales) =
         scale::layer1::economy::scrip::scrip_stats(world);
@@ -3695,7 +3704,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{}",
         tick,
         scenario,
         pops,
@@ -3888,6 +3897,7 @@ fn print_stats(world: &mut World) {
         fluid_label,
         cryo_label,
         blackbox_label,
+        regret_label,
         scrip_total,
         scrip_broke,
         scrip_luxury_sales,
@@ -17282,6 +17292,96 @@ fn print_black_box(world: &mut World) {
         "THE BLACK BOX",
         &lines,
         Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 426: `regret` builds an Archive of Regret near the colony
+/// center (the debug command stands in for a colony that can afford
+/// one: it tops up stone/metal like `tether` does). The Archive is
+/// indestructible — watch STATS regret= / `regrets`.
+fn handle_regret_command(world: &mut World, _parts: &[&str]) {
+    {
+        let mut resources = world.resource_mut::<ColonyResources>();
+        resources.metal = resources.metal.max(500.0);
+        resources.stone = resources.stone.max(500.0);
+        resources.wood = resources.wood.max(200.0);
+    }
+    let mut placed = 0usize;
+    'scan: for y in 18..=30 {
+        for x in 28..=52 {
+            if placed >= 1 {
+                break 'scan;
+            }
+            if try_place_building(world, x, y, BuildingType::ArchiveOfRegret) {
+                placed += 1;
+            }
+        }
+    }
+    print_dashboard_panel(
+        "THE ARCHIVE OF REGRET",
+        &format!(
+            "Built {placed}/1 Archive of Regret near the colony center.\nIt records every atrocity, generates Knowledge from the record, and weighs the colony with a Guilty Conscience. It cannot be demolished. Run `atrocity` then `tick 1`, and watch STATS regret=."
+        ),
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 426: `atrocity [severity]` commits a debug atrocity (default
+/// severity 5). Run `tick 1` afterwards so the Archive records it (and
+/// the desensitization systems numb the colony a little more).
+fn handle_atrocity_command(world: &mut World, parts: &[&str]) {
+    let severity: f32 = parts
+        .get(1)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(5.0)
+        .max(0.0);
+    world.init_resource::<Events<scale::layer1::social::slippery_slope::AtrocityEvent>>();
+    world
+        .resource_mut::<Events<scale::layer1::social::slippery_slope::AtrocityEvent>>()
+        .send(scale::layer1::social::slippery_slope::AtrocityEvent { severity });
+    print_dashboard_panel(
+        "THE ARCHIVE OF REGRET",
+        &format!(
+            "An atrocity of severity {severity:.0} has been committed. Run `tick 1` — if an Archive of Regret stands, it will remember. Check `regrets` and the chronicle."
+        ),
+        Some(comfy_table::Color::Magenta),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 426: `regrets` panel — archives standing, what they hold, the
+/// guilt aura they exert, and the Knowledge they teach per tick.
+fn print_regrets(world: &mut World) {
+    use scale::layer1::social::archive_of_regret::{
+        archive_of_regret_stats_label, guilt_penalty, research_gain, ArchiveOfRegret,
+    };
+    let label = archive_of_regret_stats_label(world);
+    let mut lines = format!("Census: {label} (archives/atrocities/aura)\n");
+    let mut total_aura = 0.0f32;
+    let mut q = world.query::<&ArchiveOfRegret>();
+    for (i, archive) in q.iter(world).enumerate().take(8) {
+        total_aura += archive.aura_strength;
+        lines.push_str(&format!(
+            "\nArchive of Regret #{i} — {} atrocities recorded, aura {:.1}",
+            archive.stored_atrocities, archive.aura_strength
+        ));
+    }
+    if total_aura > 0.0 {
+        lines.push_str(&format!(
+            "\nGuilt aura: -{:.3} morale (Guilty Conscience) — Knowledge from regret: +{:.2}/tick",
+            guilt_penalty(total_aura),
+            research_gain(total_aura)
+        ));
+    } else {
+        lines.push_str("\nThe record is clean. For now.");
+    }
+    lines.push_str("\nThe Archive of Regret cannot be demolished.");
+    print_dashboard_panel(
+        "THE ARCHIVE OF REGRET",
+        &lines,
+        Some(comfy_table::Color::Magenta),
         Some(comfy_table::Attribute::Bold),
     );
 }

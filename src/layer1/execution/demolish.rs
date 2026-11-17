@@ -87,8 +87,18 @@ fn try_demolish_building(world: &mut World, designation_pos: GridPosition) {
         return;
     };
 
-    let is_ancient = world.get::<AncientStructure>(entity).is_some();
     let building_type = world.get::<Building>(entity).map(|b| b.building_type);
+
+    // Spec 426: indestructible buildings (the Archive of Regret) refuse
+    // demolition — the designation is consumed, the building stands.
+    if building_type.is_some_and(|t| t.is_indestructible()) {
+        if let Some(mut log) = world.get_resource_mut::<MessageLog>() {
+            log.add("The Archive of Regret cannot be demolished.".to_string());
+        }
+        return;
+    }
+
+    let is_ancient = world.get::<AncientStructure>(entity).is_some();
 
     if is_ancient {
         handle_ancient_structure(world, designation_pos, building_type);
@@ -224,6 +234,18 @@ pub fn execute_destroy(world: &mut World, designation_entity: Entity) -> bool {
         .iter(world)
         .find(|(_, pos, _)| **pos == designation_pos)
         .map(|(e, _, _)| e);
+
+    // Spec 426: indestructible buildings refuse total destruction too.
+    if let Some(entity) = building_entity {
+        let building_type = world.get::<Building>(entity).map(|b| b.building_type);
+        if building_type.is_some_and(|t| t.is_indestructible()) {
+            if let Some(mut log) = world.get_resource_mut::<MessageLog>() {
+                log.add("The Archive of Regret cannot be demolished.".to_string());
+            }
+            world.despawn(designation_entity);
+            return true;
+        }
+    }
 
     if let Some(entity) = building_entity {
         // VFX: Red explosion
@@ -380,6 +402,52 @@ mod tests {
         let designation = world.spawn_empty().id();
 
         assert!(!execute_destroy(&mut world, designation));
+    }
+
+    #[test]
+    fn test_execute_demolish_refuses_archive_of_regret() {
+        let mut world = World::new();
+        let pos = GridPosition { x: 5, y: 5 };
+
+        let building = world
+            .spawn((
+                pos,
+                Building {
+                    building_type: BuildingType::ArchiveOfRegret,
+                },
+            ))
+            .id();
+        let designation = world.spawn(pos).id();
+
+        assert!(execute_demolish(&mut world, designation));
+        assert!(
+            world.get_entity(building).is_ok(),
+            "the Archive of Regret must survive demolition"
+        );
+        assert!(world.get_entity(designation).is_err());
+    }
+
+    #[test]
+    fn test_execute_destroy_refuses_archive_of_regret() {
+        let mut world = World::new();
+        let pos = GridPosition { x: 5, y: 5 };
+
+        let building = world
+            .spawn((
+                pos,
+                Building {
+                    building_type: BuildingType::ArchiveOfRegret,
+                },
+            ))
+            .id();
+        let designation = world.spawn(pos).id();
+
+        assert!(execute_destroy(&mut world, designation));
+        assert!(
+            world.get_entity(building).is_ok(),
+            "the Archive of Regret must survive total destruction"
+        );
+        assert!(world.get_entity(designation).is_err());
     }
 
     #[test]

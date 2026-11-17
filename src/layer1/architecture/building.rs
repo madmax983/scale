@@ -374,6 +374,10 @@ pub enum BuildingType {
     /// Cross-run knowledge archive: seals tech/lore into a black box
     /// that a future colony can decrypt (Spec 414: The Black Box).
     Archive,
+    /// Indestructible archive of the colony's atrocities: generates
+    /// Knowledge from recorded sins under a permanent guilt aura
+    /// (Spec 426: The Archive of Regret).
+    ArchiveOfRegret,
 }
 
 impl BuildingType {
@@ -403,7 +407,8 @@ impl BuildingType {
             | Self::GeneBank
             | Self::CloneVat
             | Self::HypnoPod
-            | Self::HoloProjector => Some((Category::Research, Tier::HighTech)),
+            | Self::HoloProjector
+            | Self::ArchiveOfRegret => Some((Category::Research, Tier::HighTech)),
 
             _ => None,
         }
@@ -566,7 +571,7 @@ impl BuildingType {
             Self::School | Self::MediaStation => false,
             Self::Mainframe | Self::CommsRelay => false,
             Self::Billboard | Self::BiomassExtractor | Self::TradePad => false,
-            Self::Archive => true,
+            Self::Archive | Self::ArchiveOfRegret => true,
         }
     }
 
@@ -574,6 +579,15 @@ impl BuildingType {
     #[must_use]
     pub const fn seasonal_immunity(&self) -> bool {
         matches!(self, Self::Greenhouse | Self::HydroponicsBay)
+    }
+
+    /// Returns true if this building can never be demolished or
+    /// destroyed (Spec 426: the Archive of Regret stands forever).
+    /// Enforced by `can_designate` (Demolish/Destroy designations are
+    /// refused) and by the demolish/destroy executors.
+    #[must_use]
+    pub const fn is_indestructible(&self) -> bool {
+        matches!(self, Self::ArchiveOfRegret)
     }
 
     /// Returns the beauty value emitted by this building.
@@ -584,6 +598,7 @@ impl BuildingType {
             Self::Landfill => -10.0,
             Self::Recycler => -5.0, // Grim machinery
             Self::BiomassExtractor => -5.0, // Grim machinery
+            Self::ArchiveOfRegret => -5.0, // A monument to the colony's sins
             Self::Grave => -2.0,    // Graves are slightly spooky
             Self::FlowerBed => crate::layer1::beauty::FLOWER_BED_BEAUTY,
             Self::HoloProjector => 50.0, // Massive beauty boost
@@ -606,6 +621,7 @@ impl BuildingType {
             Self::Landfill => 8.0,
             Self::Recycler => 4.0,
             Self::TradeDepot => 4.0,
+            Self::ArchiveOfRegret => 4.0,
             Self::Grave | Self::Well | Self::HydroponicsBay | Self::LifeSupport => 2.0,
             Self::CloneVat => 3.0,
             Self::HypnoPod => 2.0,
@@ -739,6 +755,7 @@ impl BuildingType {
             Self::CoreDrill => "Core Drill",
             Self::TradePad => "Trade Pad",
             Self::Archive => "Archive",
+            Self::ArchiveOfRegret => "Archive of Regret",
         }
     }
 
@@ -810,6 +827,7 @@ impl BuildingType {
             Self::CoreDrill => '⊙',
             Self::TradePad => '¤',
             Self::Archive => '▤',
+            Self::ArchiveOfRegret => '▦',
         }
     }
 
@@ -1201,6 +1219,12 @@ impl BuildingType {
                 stone: 20.0,
                 ..ColonyResources::zeroed()
             },
+            Self::ArchiveOfRegret => ColonyResources {
+                metal: 50.0,
+                stone: 100.0,
+                wood: 20.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1515,6 +1539,14 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
                 crate::meta::archive::Archive::default(),
                 crate::meta::archive::UploadProgress::default(),
                 DataStorage { capacity: 25.0 },
+            ));
+        }
+        // Spec 426 The Archive of Regret: the building carries its
+        // atrocity ledger and the indestructible marker.
+        BuildingType::ArchiveOfRegret => {
+            entity.insert((
+                crate::layer1::social::archive_of_regret::ArchiveOfRegret::default(),
+                crate::layer1::social::archive_of_regret::Indestructible,
             ));
         }
     }
@@ -2883,7 +2915,8 @@ mod tests {
         );
         assert_eq!(BuildingType::CoreDrill.next(), BuildingType::TradePad);
         assert_eq!(BuildingType::TradePad.next(), BuildingType::Archive);
-        assert_eq!(BuildingType::Archive.next(), BuildingType::Housing);
+        assert_eq!(BuildingType::Archive.next(), BuildingType::ArchiveOfRegret);
+        assert_eq!(BuildingType::ArchiveOfRegret.next(), BuildingType::Housing);
     }
 
     #[test]
@@ -3145,6 +3178,8 @@ mod tests {
         assert_eq!(mode.selected, BuildingType::TradePad);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Archive);
+        mode.selected = mode.selected.next();
+        assert_eq!(mode.selected, BuildingType::ArchiveOfRegret);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Housing);
     }
