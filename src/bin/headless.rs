@@ -572,6 +572,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "quakes" => print_quakes(world),
         "megafauna" => handle_megafauna_command(world, &parts),
         "tunnels" => print_tunnels(world),
+        "windsurf" => print_windsurf(world),
+        "flare" => handle_flare_command(world, &parts),
+        "sailfleet" => handle_sailfleet_command(world, &parts),
         "eureka" => handle_eureka_command(world, &parts),
         "stability" => handle_stability_command(world, &parts),
         "schism" => handle_schism_command(world, &parts),
@@ -3335,6 +3338,9 @@ fn print_stats(world: &mut World) {
         use scale::layer1::nature::megafauna_migration::megafauna_stats_counts;
         megafauna_stats_counts(world)
     };
+    // Spec 425: stellar-wind surfing ledger for STATS (full panel: ).
+    let (windsurf_rides, windsurf_exposure, windsurf_fleets) =
+        scale::layer2::navigation::wind_surfing::wind_surf_stats_counts(world);
     // Spec 390: eureka breakthrough census for STATS (full panel: `eureka`).
     let eureka_label = scale::layer1::eureka::eureka_stats_label(world);
     // Item 165: live GeomeHazard census for STATS (burn counterplay evidence).
@@ -3689,7 +3695,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{}",
         tick,
         scenario,
         pops,
@@ -3904,6 +3910,9 @@ fn print_stats(world: &mut World) {
         megafauna_total,
         tremors_total,
         tunnel_collapses_total,
+        windsurf_rides,
+        windsurf_exposure,
+        windsurf_fleets,
     );
 }
 
@@ -17367,4 +17376,119 @@ fn print_coregems(world: &mut World) {
     if census.deposits == 0 {
         println!("No deposits exposed. Deploy an Atmo-Stripper (`stripper deploy`) and let toxicity reach the exposure threshold.");
     }
+}
+
+
+/// Debug: launch a demo sail fleet in transit (Spec 425).
+/// `sailfleet [shielding] [efficiency]` — spawns a fleet with deployed
+/// solar sails on a 100-tick transit between two marker nodes. Then
+/// `flare [intensity]` + `tick 1` rides it home instantly; radiation is
+/// intensity minus shielding, scaled by efficiency. Watch STATS
+/// `windsurf=` or the `windsurf` panel.
+fn handle_sailfleet_command(world: &mut World, parts: &[&str]) {
+    use scale::layer2::fleet::{Fleet, FleetHealth, InTransit};
+    use scale::layer2::navigation::stellar_weather::SolarSails;
+    use scale::layer2::navigation::wind_surfing::{
+        FleetRadiationExposure, FleetShielding, WindSurfLedger,
+    };
+    let shielding = parts
+        .get(1)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(10.0);
+    let efficiency = parts
+        .get(2)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(1.0);
+    world.init_resource::<WindSurfLedger>();
+    let origin = world.spawn_empty().id();
+    let dest = world.spawn_empty().id();
+    let fleet = world
+        .spawn((
+            Fleet,
+            InTransit {
+                origin,
+                destination: dest,
+                progress: 0.0,
+                duration: 100.0,
+            },
+            SolarSails {
+                deployed: true,
+                efficiency,
+            },
+            FleetShielding { shielding },
+            FleetRadiationExposure { level: 0.0 },
+            FleetHealth {
+                current: 100.0,
+                max: 100.0,
+            },
+        ))
+        .id();
+    print_dashboard_panel(
+        "SAIL FLEET",
+        &format!(
+            "A sail fleet (id {fleet:?}) is in transit on a 100-tick route (shielding {shielding:.0}, sail efficiency {efficiency:.1}).\nRun `flare` then `tick 1` — a deployed sail catches the flare and the fleet arrives instantly.\nWatch STATS windsurf= — or `windsurf` for the panel."
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Debug: trigger a solar flare (Spec 425).
+/// `flare [intensity]` — defaults to 100. Fires both the real
+/// `SolarFlareEvent` (EMP/radiation/isotope systems) and the
+/// intensity-carrying `StellarWindFlare` that sail fleets ride.
+fn handle_flare_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::nature::solar_flare_lottery::SolarFlareEvent;
+    use scale::layer2::navigation::wind_surfing::send_wind_flare;
+    let intensity = parts
+        .get(1)
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(100.0);
+    send_wind_flare(world, intensity);
+    world.init_resource::<bevy_ecs::event::Events<SolarFlareEvent>>();
+    world
+        .resource_mut::<bevy_ecs::event::Events<SolarFlareEvent>>()
+        .send(SolarFlareEvent);
+    print_dashboard_panel(
+        "SOLAR FLARE",
+        &format!(
+            "A solar flare (intensity {intensity:.0}) tears across the system.\nRun `tick 1` — sail fleets in transit ride it home; exposed crews take intensity-minus-shielding radiation.\nWatch STATS windsurf= — or `windsurf` for the panel."
+        ),
+        Some(comfy_table::Color::Yellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Panel: stellar-wind surfing ledger + per-fleet exposure (Spec 425).
+fn print_windsurf(world: &mut World) {
+    use scale::layer2::navigation::wind_surfing::{
+        wind_surf_stats_counts, FleetRadiationExposure, WindSurfLedger,
+    };
+    world.init_resource::<WindSurfLedger>();
+    let (rides, exposure, surfers) = wind_surf_stats_counts(world);
+    let last = world.resource::<WindSurfLedger>().last_intensity;
+    let mut body = format!(
+        "WINDSURF rides={rides} total_exposure={exposure:.0} surfers={surfers} last_flare={last:.0}"
+    );
+    let rows: Vec<String> = {
+        let mut query = world.query::<&FleetRadiationExposure>();
+        query
+            .iter(world)
+            .map(|e| format!("\n  fleet exposure={:.0}", e.level))
+            .collect()
+    };
+    for row in rows {
+        body.push_str(&row);
+    }
+    if rides == 0 {
+        body.push_str(
+            "\nNo flare rides yet. Launch one with `sailfleet [shielding]`, then `flare [intensity]` and `tick 1`.",
+        );
+    }
+    print_dashboard_panel(
+        "STELLAR WIND SURFING",
+        &body,
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
 }

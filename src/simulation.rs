@@ -1515,7 +1515,18 @@ fn init_simulation_resources(world: &mut World) {
         world
             .init_resource::<Events<crate::layer2::navigation::stellar_weather::FleetDamagedEvent>>(
             );
+        world
+            .init_resource::<Events<crate::layer2::navigation::wind_surfing::StellarWindFlare>>();
+        world.init_resource::<crate::layer2::navigation::wind_surfing::WindSurfLedger>();
     }
+    // Spec 425: stellar wind surfing event channel + ledger.
+    if !world
+        .contains_resource::<Events<crate::layer2::navigation::wind_surfing::StellarWindFlare>>()
+    {
+        world
+            .init_resource::<Events<crate::layer2::navigation::wind_surfing::StellarWindFlare>>();
+    }
+    world.init_resource::<crate::layer2::navigation::wind_surfing::WindSurfLedger>();
 
     world.init_resource::<Events<crate::layer1::environment::ignition::SparkEvent>>();
     world.init_resource::<Events<crate::layer1::environment::ignition::ExplosionEvent>>();
@@ -1972,6 +1983,7 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         update_event_buffer::<crate::layer1::administration::edicts::HackCentralHubEvent>,
         update_event_buffer::<crate::layer1::administration::edicts::RevokePolicyEvent>,
         update_event_buffer::<crate::layer1::nature::solar_flare_lottery::SolarFlareEvent>,
+        update_event_buffer::<crate::layer2::navigation::wind_surfing::StellarWindFlare>,
         update_event_buffer::<crate::layer1::nature::long_night::StartLongNightEvent>,
         update_event_buffer::<crate::layer1::tech::star_eater::StarEaterEvent>,
         update_event_buffer::<crate::layer1::tech::star_eater::BurnMoteEvent>,
@@ -2028,6 +2040,8 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         crate::layer2::derelict_stations::claim_station_system
             .after(crate::layer2::fleet::fleet_order_system),
         crate::layer2::gravitational_doldrums::doldrums_effects_system,
+        crate::layer2::navigation::wind_surfing::stellar_wind_surfing_system
+            .before(crate::layer2::fleet::fleet_movement_system),
         crate::layer2::fleet::fleet_movement_system
             .after(crate::layer2::fleet::fleet_order_system)
             .after(crate::layer2::gravitational_doldrums::doldrums_effects_system),

@@ -199,6 +199,8 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
 
     world.init_resource::<bevy_ecs::event::Events<crate::layer2::skyhooks::LaunchIntent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::nature::solar_flare_lottery::SolarFlareEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer2::navigation::wind_surfing::StellarWindFlare>>();
+    world.init_resource::<crate::layer2::navigation::wind_surfing::WindSurfLedger>();
     world.init_resource::<crate::layer2::cartographers_curse::MapTelemetry>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer2::cartographers_curse::SellTelemetryEvent>>();
     world.insert_resource(MenuState::default());
