@@ -153,6 +153,15 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 424 Subterranean Megafauna Migration: migrations carve
+    // tunnels + tremors first, then live tunnels age and collapse.
+    schedule.add_systems(
+        (
+            crate::layer1::nature::megafauna_migration::megafauna_migration_system,
+            crate::layer1::nature::megafauna_migration::tunnel_collapse_system,
+        )
+            .chain(),
+    );
     // Spec 401 Asteroid Redirect: redirect -> drift -> kinetic impact.
     schedule.add_systems(
         (
@@ -885,6 +894,16 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::factions::subcontractor_factions::MegacorpSecuritySweepEvent>>();
     // Spec 1208 The Cadet Branch: scion arrival events.
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::cadet::ScionArrivalEvent>>();
+    // Spec 424 Subterranean Megafauna Migration: tunnel manager +
+    // migration/tremor/collapse event buses (first-tick pattern).
+    // NOTE: init_simulation_resources runs every tick — guard the
+    // stateful manager so lifespans/counters are not reset per tick.
+    if !world.contains_resource::<crate::layer1::nature::megafauna_migration::TunnelManager>() {
+        world.insert_resource(crate::layer1::nature::megafauna_migration::TunnelManager::default());
+    }
+    world.init_resource::<Events<crate::layer1::nature::megafauna_migration::MegafaunaMigrationEvent>>();
+    world.init_resource::<Events<crate::layer1::nature::megafauna_migration::TremorEvent>>();
+    world.init_resource::<Events<crate::layer1::nature::megafauna_migration::TunnelCollapseEvent>>();
     // Spec 423 Exiled Royals: influence ledger, raid state, arrival event.
     // NOTE: init_simulation_resources runs every tick — guard stateful
     // resources so the raid cooldown/counters are not reset per tick.

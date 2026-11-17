@@ -570,6 +570,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "coredrills" => print_coredrills(world),
         "quake" => handle_quake_command(world, &parts),
         "quakes" => print_quakes(world),
+        "megafauna" => handle_megafauna_command(world, &parts),
+        "tunnels" => print_tunnels(world),
         "eureka" => handle_eureka_command(world, &parts),
         "stability" => handle_stability_command(world, &parts),
         "schism" => handle_schism_command(world, &parts),
@@ -3328,6 +3330,11 @@ fn print_stats(world: &mut World) {
         use scale::layer1::geology::total_seismic_stress;
         total_seismic_stress(world)
     };
+    // Spec 424: megafauna tunnel census for STATS (full panel: `tunnels`).
+    let (tunnels_active, megafauna_total, tremors_total, tunnel_collapses_total) = {
+        use scale::layer1::nature::megafauna_migration::megafauna_stats_counts;
+        megafauna_stats_counts(world)
+    };
     // Spec 390: eureka breakthrough census for STATS (full panel: `eureka`).
     let eureka_label = scale::layer1::eureka::eureka_stats_label(world);
     // Item 165: live GeomeHazard census for STATS (burn counterplay evidence).
@@ -3682,7 +3689,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={}",
         tick,
         scenario,
         pops,
@@ -3893,6 +3900,10 @@ fn print_stats(world: &mut World) {
         revterra_label,
         royals,
         assassins,
+        tunnels_active,
+        megafauna_total,
+        tremors_total,
+        tunnel_collapses_total,
     );
 }
 
@@ -5524,6 +5535,7 @@ fn print_map(world: &mut World, center_x: i32, center_y: i32) {
                 TerrainType::IndestructibleStump => "I".white().bold().to_string(),
                 TerrainType::Bridge => "=".yellow().to_string(),
                 TerrainType::Void => " ".black().to_string(),
+                TerrainType::Tunnel => "∩".yellow().dim().to_string(),
             };
             map_content.push_str(&s);
         }
@@ -6290,6 +6302,7 @@ const fn get_terrain_color_headless(t: TerrainType) -> comfy_table::Color {
         TerrainType::IndestructibleStump => comfy_table::Color::White,
         TerrainType::Bridge => comfy_table::Color::Yellow,
         TerrainType::Void => comfy_table::Color::Black,
+        TerrainType::Tunnel => comfy_table::Color::DarkYellow,
     }
 }
 
@@ -6315,6 +6328,7 @@ fn format_terrain_name(tile: TerrainType) -> &'static str {
         TerrainType::IndestructibleStump => "Indestructible Stump",
         TerrainType::Bridge => "Bridge",
         TerrainType::Void => "Void",
+        TerrainType::Tunnel => "Tunnel",
     }
 }
 
@@ -14041,6 +14055,70 @@ fn print_quakes(world: &mut World) {
     );
     print_dashboard_panel(
         "GEOLOGICAL INSTABILITY",
+        &body,
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+
+/// Debug: trigger a subterranean megafauna migration (Spec 424).
+/// `megafauna [x] [y] [len]` — defaults to a 5-tile horizontal path at
+/// (10, 10). The migration lands on the next `tick`: path tiles are
+/// carved into fast Tunnel terrain (300-tick lifespan), tremors deal
+/// 25 damage to the Structure + Health pools standing on them. Watch
+/// STATS `tunnels=` / `megafauna=` / `tremors=` / `tunnel_collapses=`.
+fn handle_megafauna_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::nature::megafauna_migration::{
+        horizontal_migration_path, send_migration, TunnelManager,
+    };
+
+    let x = parts.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(10);
+    let y = parts.get(2).and_then(|s| s.parse::<i32>().ok()).unwrap_or(10);
+    let len = parts
+        .get(3)
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(5)
+        .clamp(1, 50);
+
+    if !world.contains_resource::<TunnelManager>() {
+        world.insert_resource(TunnelManager::default());
+    }
+    send_migration(world, horizontal_migration_path(x, y, len));
+    print_dashboard_panel(
+        "MEGAFAUNA MIGRATION",
+        &format!(
+            "Something vast is moving beneath ({x}, {y}), boring {len} tile(s) east.\nRun `tick` and watch STATS tunnels= — the fresh tunnels are the fastest\nterrain in the colony until they collapse back into rock (~300 ticks)."
+        ),
+        Some(comfy_table::Color::DarkYellow),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Panel: live megafauna tunnels + the migration ledger (Spec 424).
+fn print_tunnels(world: &mut World) {
+    use scale::layer1::nature::megafauna_migration::{megafauna_stats_counts, TunnelManager};
+    if !world.contains_resource::<TunnelManager>() {
+        world.insert_resource(TunnelManager::default());
+    }
+    let (active, migrations, tremors, collapses) = megafauna_stats_counts(world);
+    let mut body = format!(
+        "TUNNELS active={active} migrations={migrations} tremors={tremors} collapses={collapses}"
+    );
+    {
+        let manager = world.resource::<TunnelManager>();
+        for (pos, remaining) in &manager.active_tunnels {
+            body.push_str(&format!(
+                "\n  tunnel ({}, {}) collapses in {} ticks",
+                pos.x, pos.y, remaining
+            ));
+        }
+    }
+    if active == 0 {
+        body.push_str("\nNo live tunnels. Trigger a migration with `megafauna [x] [y] [len]`.");
+    }
+    print_dashboard_panel(
+        "SUBTERRANEAN MEGAFAUNA",
         &body,
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),

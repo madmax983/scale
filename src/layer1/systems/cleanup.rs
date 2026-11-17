@@ -152,4 +152,18 @@ pub fn register(schedule: &mut Schedule) {
         )
             .in_set(Layer1SystemSet::EventCleanup),
     );
+
+    // Spec 424 Subterranean Megafauna Migration: event buffers in a
+    // separate add_systems call — the tuples above are at Bevy's
+    // arity limit.
+    schedule.add_systems(
+        (
+            update_event_buffer::<
+                crate::layer1::nature::megafauna_migration::MegafaunaMigrationEvent,
+            >,
+            update_event_buffer::<crate::layer1::nature::megafauna_migration::TremorEvent>,
+            update_event_buffer::<crate::layer1::nature::megafauna_migration::TunnelCollapseEvent>,
+        )
+            .in_set(Layer1SystemSet::EventCleanup),
+    );
 }

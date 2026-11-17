@@ -65,7 +65,7 @@ pub const RESONANCE_POWER_GAIN: f32 = 20.0;
 #[must_use]
 pub const fn terrain_height(t: TerrainType) -> i32 {
     match t {
-        TerrainType::Water | TerrainType::Crater => -1,
+        TerrainType::Water | TerrainType::Crater | TerrainType::Tunnel => -1,
         TerrainType::Grass
         | TerrainType::Bridge
         | TerrainType::Void

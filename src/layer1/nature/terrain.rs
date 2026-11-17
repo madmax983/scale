@@ -40,6 +40,9 @@ pub enum TerrainType {
     Artifact,
     /// A geological fault line that can open or close based on orbital tides.
     FaultLine(bool),
+    /// A temporary tunnel bored by subterranean megafauna (Spec 424).
+    /// Fastest terrain in the game until it collapses back into rock.
+    Tunnel,
 }
 
 impl TerrainType {
@@ -74,6 +77,7 @@ impl TerrainType {
             Self::Artifact => "Artifact",
             Self::FaultLine(true) => "Fault Line (Open)",
             Self::FaultLine(false) => "Fault Line (Closed)",
+            Self::Tunnel => "Tunnel",
         }
     }
 
@@ -83,6 +87,7 @@ impl TerrainType {
     #[must_use]
     pub const fn movement_cost(self) -> f32 {
         match self {
+            Self::Tunnel => 0.5,
             Self::Path => 0.8,
             Self::Bridge => 1.0,
             Self::Tree => 1.5,
@@ -152,6 +157,7 @@ impl TerrainType {
             | Self::Artifact
             | Self::Crater
             | Self::IndestructibleStump
+            | Self::Tunnel
             | Self::FaultLine(_) => 0.5,
             Self::Water => 0.2,
             Self::Grass

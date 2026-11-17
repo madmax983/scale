@@ -727,6 +727,7 @@ pub const fn get_terrain_char(terrain: TerrainType) -> &'static str {
         TerrainType::FaultLine(false) => "–",
         TerrainType::Bridge => "=",
         TerrainType::Void => " ",
+        TerrainType::Tunnel => "∩",
     }
 }
 
@@ -764,6 +765,7 @@ pub const fn get_terrain_color(terrain: TerrainType) -> Color {
         TerrainType::FaultLine(false) => Color::Rgb(100, 100, 110),
         TerrainType::Bridge => Color::Rgb(150, 100, 50),
         TerrainType::Void => Color::Black,
+        TerrainType::Tunnel => Color::Rgb(139, 69, 19), // Brown
     }
 }
 
