@@ -81,7 +81,7 @@
 //! * [`TRIBUTE_WEALTH_RATE`] 5% of colony wealth per demand — the
 //!   extortion curve: wealth is credits + food + wood + stone + metal
 //!   + fuel at 1:1 (see [`colony_wealth`]).
-//! * [`ESCORT_BONUS_RATE`] 10% of an arriving trade ship's cargo value.
+//! * [`ESCORT_BONUS_RATE`] 1% of an arriving trade ship's cargo value.
 //! * [`HIRE_RELATIONS`] +10 pirate relations on signing;
 //!   [`BREACH_RELATIONS`] -100 (full hostile) on breach.
 
@@ -111,7 +111,7 @@ pub const BASE_TRIBUTE: f32 = 50.0;
 pub const TRIBUTE_WEALTH_RATE: f32 = 0.05;
 /// Escort bonus: share of an arriving trade ship's cargo value paid to
 /// the colony in credits while privateers protect the routes.
-pub const ESCORT_BONUS_RATE: f32 = 0.10;
+pub const ESCORT_BONUS_RATE: f32 = 0.01;
 /// Pirate relations set when a contract is signed.
 pub const HIRE_RELATIONS: i32 = 10;
 /// Pirate relations set when a contract breaches (full hostile).
@@ -789,7 +789,7 @@ mod tests {
             });
         schedule.run(&mut world);
         assert_eq!(world.resource::<ColonyResources>().credits, 0.0);
-        // Active contract: the same arrival pays 10% in real credits.
+        // Active contract: the same arrival pays 1% in real credits.
         assert!(hire_privateers(&mut world));
         world
             .resource_mut::<Events<TradeShipArrivalEvent>>()
@@ -800,9 +800,9 @@ mod tests {
         schedule.run(&mut world);
         let state = world.resource::<PrivateerState>();
         assert_eq!(state.convoys_escorted, 1);
-        assert!((state.escort_income - 500.0).abs() < 0.01);
+        assert!((state.escort_income - 50.0).abs() < 0.01);
         assert!(
-            (world.resource::<ColonyResources>().credits - 500.0).abs() < 0.01,
+            (world.resource::<ColonyResources>().credits - 50.0).abs() < 0.01,
             "escort bonus lands in the real treasury"
         );
     }
