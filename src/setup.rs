@@ -339,6 +339,13 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<crate::layer1::economy::curio_trade::CulturalLossEvent>>();
     // Spec 343 The Rumor Web: adjacency-spread ledger.
     world.init_resource::<crate::layer1::social::rumor::RumorWebLedger>();
+    // Spec 429 The Whispering Gallery: events + echo state + ledger
+    // must exist from setup — headless `dome`/`whisper`/`gallery`
+    // run before any tick, like the Spec 343 ledger above.
+    world.init_resource::<Events<crate::layer1::social::whispering_gallery::RumorSpokenEvent>>();
+    world.init_resource::<Events<crate::layer1::social::whispering_gallery::BroadcastRumorEvent>>();
+    world.init_resource::<crate::layer1::social::whispering_gallery::WhisperingGalleryState>();
+    world.init_resource::<crate::layer1::social::whispering_gallery::WhisperingGalleryLedger>();
     // Spec 327 The Stowaway (Item 87): hidden-pop agenda tuning must exist
     // from setup, not only from init_simulation_resources on the first
     // tick — headless dispatches commands (stowaway spawn, muster) before

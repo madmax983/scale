@@ -849,6 +849,7 @@ pub const fn get_building_char(building: BuildingType) -> &'static str {
         BuildingType::TradePad => "\u{00A4}",
         BuildingType::Archive => "\u{25A4}",
         BuildingType::ArchiveOfRegret => "\u{25A6}",
+        BuildingType::GrandDome => "\u{25CE}",
     }
 }
 
@@ -939,6 +940,7 @@ pub const fn get_building_color(building: BuildingType, material: MaterialType) 
             BuildingType::TradePad => Color::Rgb(255, 200, 100),
             BuildingType::Archive => Color::Rgb(120, 200, 220),
             BuildingType::ArchiveOfRegret => Color::Rgb(200, 120, 200),
+            BuildingType::GrandDome => Color::Rgb(255, 215, 130),
         }
     }
 }

@@ -378,6 +378,9 @@ pub enum BuildingType {
     /// Knowledge from recorded sins under a permanent guilt aura
     /// (Spec 426: The Archive of Regret).
     ArchiveOfRegret,
+    /// Grand Dome whose perfect acoustics broadcast any rumor
+    /// spoken inside it to the whole colony (Spec 429).
+    GrandDome,
 }
 
 impl BuildingType {
@@ -501,6 +504,7 @@ impl BuildingType {
         match self {
             // Walls and large structures
             Self::Wall
+            | Self::GrandDome
             | Self::Window
             | Self::Gate
             | Self::Tower
@@ -599,6 +603,7 @@ impl BuildingType {
             Self::Recycler => -5.0, // Grim machinery
             Self::BiomassExtractor => -5.0, // Grim machinery
             Self::ArchiveOfRegret => -5.0, // A monument to the colony's sins
+            Self::GrandDome => 15.0, // Beautiful — and it carries every voice
             Self::Grave => -2.0,    // Graves are slightly spooky
             Self::FlowerBed => crate::layer1::beauty::FLOWER_BED_BEAUTY,
             Self::HoloProjector => 50.0, // Massive beauty boost
@@ -622,6 +627,7 @@ impl BuildingType {
             Self::Recycler => 4.0,
             Self::TradeDepot => 4.0,
             Self::ArchiveOfRegret => 4.0,
+            Self::GrandDome => 6.0,
             Self::Grave | Self::Well | Self::HydroponicsBay | Self::LifeSupport => 2.0,
             Self::CloneVat => 3.0,
             Self::HypnoPod => 2.0,
@@ -649,7 +655,7 @@ impl BuildingType {
             | Self::ServerBank
             | Self::CommandCenter
             | Self::AICore => Some(Tech::MetalWorking),
-            Self::Tavern | Self::Statue => Some(Tech::SocialStructures),
+            Self::Tavern | Self::Statue | Self::GrandDome => Some(Tech::SocialStructures),
             Self::Tower => Some(Tech::Masonry),
             Self::Observatory => Some(Tech::Astronomy),
             Self::HydroponicsBay => Some(Tech::Hydroponics),
@@ -756,6 +762,7 @@ impl BuildingType {
             Self::TradePad => "Trade Pad",
             Self::Archive => "Archive",
             Self::ArchiveOfRegret => "Archive of Regret",
+            Self::GrandDome => "Grand Dome",
         }
     }
 
@@ -828,6 +835,7 @@ impl BuildingType {
             Self::TradePad => '¤',
             Self::Archive => '▤',
             Self::ArchiveOfRegret => '▦',
+            Self::GrandDome => '◎',
         }
     }
 
@@ -1225,6 +1233,12 @@ impl BuildingType {
                 wood: 20.0,
                 ..ColonyResources::zeroed()
             },
+            Self::GrandDome => ColonyResources {
+                metal: 40.0,
+                stone: 30.0,
+                wood: 10.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1548,6 +1562,14 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
                 crate::layer1::social::archive_of_regret::ArchiveOfRegret::default(),
                 crate::layer1::social::archive_of_regret::Indestructible,
             ));
+        }
+        // Spec 429 The Whispering Gallery: a Grand Dome is a perfect
+        // acoustic reflector — rumors spoken inside it broadcast
+        // colony-wide.
+        BuildingType::GrandDome => {
+            entity.insert(
+                crate::layer1::social::whispering_gallery::AcousticReflector::default(),
+            );
         }
     }
 }
@@ -2916,7 +2938,8 @@ mod tests {
         assert_eq!(BuildingType::CoreDrill.next(), BuildingType::TradePad);
         assert_eq!(BuildingType::TradePad.next(), BuildingType::Archive);
         assert_eq!(BuildingType::Archive.next(), BuildingType::ArchiveOfRegret);
-        assert_eq!(BuildingType::ArchiveOfRegret.next(), BuildingType::Housing);
+        assert_eq!(BuildingType::ArchiveOfRegret.next(), BuildingType::GrandDome);
+        assert_eq!(BuildingType::GrandDome.next(), BuildingType::Housing);
     }
 
     #[test]
@@ -3180,6 +3203,8 @@ mod tests {
         assert_eq!(mode.selected, BuildingType::Archive);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::ArchiveOfRegret);
+        mode.selected = mode.selected.next();
+        assert_eq!(mode.selected, BuildingType::GrandDome);
         mode.selected = mode.selected.next();
         assert_eq!(mode.selected, BuildingType::Housing);
     }

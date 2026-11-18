@@ -829,6 +829,13 @@ pub use feral_outpost::*;
 pub mod archive_of_regret;
 pub use archive_of_regret::*;
 
+/// The Whispering Gallery (Spec 429): a Grand Dome acoustic
+/// reflector broadcasts Rumor Web rumors spoken inside it
+/// colony-wide, amplifying good news and panics alike.
+/// No glob re-export: callers use the full path, so generic
+/// names (AcousticReflector, BroadcastRumorEvent) stay namespaced.
+pub mod whispering_gallery;
+
 /// The Empathy Broadcast (Spec 305): a neighbouring empire's psychic
 /// distress wave saturates every colony pop with unavoidable stress and
 /// posts a DemandIntervention grievance.

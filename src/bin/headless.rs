@@ -693,6 +693,9 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "heritage" => print_heritage(world),
         "curio" => print_curio_ledger(world),
         "rumors" => print_rumors(world),
+        "gallery" => print_gallery(world),
+        "whisper" => handle_whisper_command(world, &parts),
+        "dome" => handle_dome_command(world, &parts),
         "contagion" => print_contagion(world),
         "season" => print_season(world),
         "galaxy" => print_galaxy(world),
@@ -3461,6 +3464,17 @@ fn print_stats(world: &mut World) {
         known_rumor_count(world)
     };
 
+    // Spec 429: whispering-gallery census for STATS (panel: `gallery`).
+    let (gallery_broadcasts, domes) = {
+        use scale::layer1::social::whispering_gallery::{
+            grand_dome_count, WhisperingGalleryLedger,
+        };
+        let broadcasts = world
+            .get_resource::<WhisperingGalleryLedger>()
+            .map_or(0, |l| l.broadcasts);
+        (broadcasts, grand_dome_count(world))
+    };
+
     // Spec 346: pops currently carrying a contagion-sourced mood modifier.
     let contagion = {
         use scale::layer1::social::emotional_contagion::contagion_affected_count;
@@ -3725,7 +3739,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={}",
         tick,
         scenario,
         pops,
@@ -3799,6 +3813,8 @@ fn print_stats(world: &mut World) {
         memories,
         identity,
         rumors,
+        gallery_broadcasts,
+        domes,
         contagion,
         season_name,
         quirks_label,
@@ -7579,6 +7595,21 @@ fn print_help() {
                     "rumors",
                     "",
                     "Rumor web: circulation, false-rumor believers, debunks, panics (Spec 343)",
+                ),
+                (
+                    "gallery",
+                    "",
+                    "Whispering gallery: Grand Domes, broadcasts, adoptions, amplified panics (Spec 429)",
+                ),
+                (
+                    "whisper",
+                    "[food|doom|mutant|news]",
+                    "Speak a rumor under the Grand Dome; it broadcasts colony-wide next tick (Spec 429)",
+                ),
+                (
+                    "dome",
+                    "[build|dampen|undampen]",
+                    "Grand Dome tools: list domes, build one by the first pop, fit/remove a dampener (Spec 429)",
                 ),
                 (
                     "contagion",
@@ -12639,6 +12670,157 @@ fn print_season(world: &mut World) {
         ),
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
+    );
+}
+
+
+/// Whispering gallery report (headless `gallery` command, Spec 429).
+fn print_gallery(world: &mut World) {
+    use scale::layer1::social::whispering_gallery::{
+        grand_dome_count, WhisperingGalleryLedger,
+    };
+    let domes = grand_dome_count(world);
+    let (broadcasts, adoptions, dampened, cooldown, panics, morale_apps) = world
+        .get_resource::<WhisperingGalleryLedger>()
+        .map(|l| {
+            (
+                l.broadcasts,
+                l.adoptions,
+                l.suppressed_dampened,
+                l.suppressed_cooldown,
+                l.panics_amplified,
+                l.dome_morale_applications,
+            )
+        })
+        .unwrap_or_default();
+    print_dashboard_panel(
+        "WHISPERING GALLERY",
+        &format!(
+            "Grand Domes standing: {}\nColony-wide broadcasts: {}\nBroadcast adoptions: {}\nSuppressed by dampeners: {}\nSwallowed by echo cooldown: {}\nFalse-rumor panics amplified: {}\nDome morale applications: {}\n\nA Grand Dome is beautiful — and it hears everything.\nAny rumor spoken beneath it reaches the whole colony at\nonce: the festival news and the scare story alike.\nFit an acoustic dampener (`dome dampen`) to silence it.",
+            domes, broadcasts, adoptions, dampened, cooldown, panics, morale_apps,
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 429 debug: `dome` lists Grand Domes; `dome build` raises one
+/// beside the first pop; `dome dampen` / `dome undampen` fit or remove
+/// an acoustic dampener on the first dome.
+fn handle_dome_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::building::{spawn_building, BuildingType, MaterialType};
+    use scale::layer1::map::GridPosition;
+    use scale::layer1::social::whispering_gallery::{AcousticDampener, AcousticReflector};
+
+    match parts.get(1).copied() {
+        Some("build") => {
+            let Some((x, y)) = world
+                .query::<&GridPosition>()
+                .iter(world)
+                .next()
+                .map(|p| (p.x + 3, p.y))
+            else {
+                println!("DOME no pops to build beside");
+                return;
+            };
+            let dome = spawn_building(world, x, y, BuildingType::GrandDome, MaterialType::Stone);
+            println!(
+                "DOME built Grand Dome (entity {:?}) at ({x},{y}) — rumors spoken here broadcast colony-wide",
+                dome
+            );
+        }
+        Some("dampen") => {
+            let domes: Vec<bevy_ecs::entity::Entity> = world
+                .query_filtered::<bevy_ecs::entity::Entity, bevy_ecs::prelude::With<AcousticReflector>>()
+                .iter(world)
+                .collect();
+            if let Some(first) = domes.first() {
+                world.entity_mut(*first).insert(AcousticDampener::default());
+                println!("DOME dampener fitted — the gallery falls silent");
+            } else {
+                println!("DOME no Grand Dome to dampen (try `dome build`)");
+            }
+        }
+        Some("undampen") => {
+            let domes: Vec<bevy_ecs::entity::Entity> = world
+                .query_filtered::<bevy_ecs::entity::Entity, bevy_ecs::prelude::With<AcousticReflector>>()
+                .iter(world)
+                .collect();
+            if let Some(first) = domes.first() {
+                world.entity_mut(*first).remove::<AcousticDampener>();
+                println!("DOME dampener removed — the gallery hears again");
+            } else {
+                println!("DOME no Grand Dome found");
+            }
+        }
+        _ => {
+            let domes: Vec<(bevy_ecs::entity::Entity, GridPosition, f32, bool)> = {
+                let mut q = world.query::<(
+                    bevy_ecs::entity::Entity,
+                    &GridPosition,
+                    &AcousticReflector,
+                    bevy_ecs::prelude::Has<AcousticDampener>,
+                )>();
+                q.iter(world)
+                    .map(|(e, p, r, d)| (e, *p, r.amplification, d))
+                    .collect()
+            };
+            println!("DOMES count={}", domes.len());
+            for (e, p, amp, dampened) in &domes {
+                println!(
+                    "DOME entity={:?} at=({},{}) amplification={:.1} dampened={}",
+                    e, p.x, p.y, amp, dampened
+                );
+            }
+        }
+    }
+}
+
+/// Spec 429 debug: `whisper [food|doom|mutant|news]` speaks a rumor
+/// under the first Grand Dome. The broadcast lands on the next tick.
+fn handle_whisper_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::map::GridPosition;
+    use scale::layer1::social::rumor::{Rumor, RumorTopic};
+    use scale::layer1::social::whispering_gallery::{AcousticReflector, RumorSpokenEvent};
+
+    world.init_resource::<bevy_ecs::event::Events<RumorSpokenEvent>>();
+    let Some((dome, dome_pos)) = world
+        .query::<(bevy_ecs::entity::Entity, &GridPosition, &AcousticReflector)>()
+        .iter(world)
+        .next()
+        .map(|(e, p, _)| (e, *p))
+    else {
+        println!("WHISPER no Grand Dome standing (try `dome build`)");
+        return;
+    };
+    let speaker = world
+        .query_filtered::<bevy_ecs::entity::Entity, bevy_ecs::prelude::With<Pop>>()
+        .iter(world)
+        .next()
+        .unwrap_or(dome);
+    let topic = match parts.get(1).copied().unwrap_or("food") {
+        "doom" => RumorTopic::DoomProphecy,
+        "mutant" => RumorTopic::FalseMutantAttack,
+        "news" => RumorTopic::EventNews("First harvest festival".to_string()),
+        _ => RumorTopic::ResourceShortage("Food".to_string()),
+    };
+    let tick = world
+        .get_resource::<scale::shared::time::SimulationTime>()
+        .map_or(0, |t| t.tick);
+    world.send_event(RumorSpokenEvent {
+        rumor: Rumor {
+            topic: topic.clone(),
+            source: speaker,
+            timestamp: tick,
+            strength: 1.0,
+        },
+        speaker,
+        position: dome_pos,
+        room_entity: Some(dome),
+    });
+    println!(
+        "WHISPER spoke {:?} under the Grand Dome — run `tick 1`, then `gallery`",
+        topic
     );
 }
 

@@ -211,6 +211,25 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Observation),
     );
 
+    // Spec 429: The Whispering Gallery — pops under a Grand Dome speak
+    // what they learn into the gallery; the gallery broadcasts it
+    // colony-wide; the dome's beauty holds a baseline morale aura.
+    // Separate block: the rumor blocks above are at the arity limit.
+    // Broadcast adoptions are Changed<Knowledge>, so Spec 343's
+    // react_to_rumors_system lands false-rumor panics next pass.
+    schedule.add_systems(
+        (
+            crate::layer1::social::whispering_gallery::dome_speech_detection_system
+                .after(crate::layer1::rumor::spread_rumors_system),
+            crate::layer1::social::whispering_gallery::whispering_gallery_system
+                .after(crate::layer1::social::whispering_gallery::dome_speech_detection_system),
+            crate::layer1::social::whispering_gallery::broadcast_rumor_system
+                .after(crate::layer1::social::whispering_gallery::whispering_gallery_system),
+            crate::layer1::social::whispering_gallery::grand_dome_morale_system,
+        )
+            .in_set(Layer1SystemSet::Observation),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::unrest::identify_scapegoat_system

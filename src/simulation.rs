@@ -945,6 +945,12 @@ fn init_simulation_resources(world: &mut World) {
     // Spec 305 The Empathy Broadcast: without this the first tick panics on
     // a fresh world (same first-tick Events pattern as 1375/1208).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::empathy_broadcast::EmpathyBroadcastEvent>>();
+    // Spec 429 The Whispering Gallery: spoken/broadcast events, echo
+    // state and ledger (first-tick Events pattern as above).
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::whispering_gallery::RumorSpokenEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::whispering_gallery::BroadcastRumorEvent>>();
+    world.init_resource::<crate::layer1::social::whispering_gallery::WhisperingGalleryState>();
+    world.init_resource::<crate::layer1::social::whispering_gallery::WhisperingGalleryLedger>();
     // Spec 323 The Informant's Dilemma: accusation + report events (first-tick
     // Events pattern — systems write before any reader exists on a fresh world).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::informants::AccusationEvent>>();
