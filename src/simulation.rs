@@ -183,6 +183,15 @@ pub fn build_simulation_schedule() -> Schedule {
         )
             .chain(),
     );
+    // Spec 428 Propaganda Black Market: dealers spawn under high
+    // ideological control, then stressed pops buy Uncensored Data.
+    schedule.add_systems(
+        (
+            crate::layer1::social::propaganda_black_market::truth_dealer_spawn_system,
+            crate::layer1::social::propaganda_black_market::auto_purchase_system,
+        )
+            .chain(),
+    );
     // Spec 403 Dysonian Swarms: power into the real EnergyGrid
     // ledger -> shadow/insolation state -> flare attrition.
     schedule.add_systems(
@@ -1420,6 +1429,10 @@ fn init_simulation_resources(world: &mut World) {
     // (defaults are inert — neighbor strength 0 — until configured).
     world.init_resource::<crate::layer1::social::ideological_pressure::ColonyEthicAnchor>();
     world.init_resource::<crate::layer1::social::ideological_pressure::NeighborPressure>();
+    // Spec 428 Propaganda Black Market: control level + ledger
+    // (defaults are inert — control 0 — until configured).
+    world.init_resource::<crate::layer1::social::propaganda_black_market::IdeologicalControl>();
+    world.init_resource::<crate::layer1::social::propaganda_black_market::PropagandaBlackMarketLedger>();
     world.init_resource::<crate::layer1::atmosphere::CorrosiveAtmosphere>();
 
     // Initialize Thermal Bloom Resource

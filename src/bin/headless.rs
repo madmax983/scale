@@ -26,6 +26,10 @@
 //!   `redirect <vx> <vy>` - Redirect the first asteroid to a new velocity (Spec 401)
 //!   `asteroids`        - Show asteroids / captures / impacts (Spec 401)
 //!   `pressure [ethic] [strength]` - Show/set rival ideological pressure (Spec 402)
+//!   `censorship [0-100]` - Show/set ideological control level (Spec 428)
+//!   `truthdealers`     - Show Propaganda Black Market status (Spec 428)
+//!   `truthbuy`         - Debug: force one Uncensored Data sale (Spec 428)
+//!   `truthraid`        - Security raid: clear all Truth-Dealers (Spec 428)
 //!   `homeethic [ethic] [strength]` - Show/set the home ethic anchor (Spec 402)
 //!   `dust`            - Show Desire Dust / RoadMind status
 //!   `launch_sat`      - Launch a slogan satellite (Spec 1380)
@@ -603,6 +607,10 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "redirect" => handle_redirect_command(world, &parts),
         "asteroids" => print_asteroids(world),
         "pressure" => handle_pressure_command(world, &parts),
+        "censorship" => handle_censorship_command(world, &parts),
+        "truthdealers" | "truth" => print_truth_market(world),
+        "truthbuy" => handle_truthbuy_command(world),
+        "truthraid" => handle_truthraid_command(world),
         "swarm" => handle_swarm_command(world, &parts),
         "swarms" => print_swarms(world),
         "ring" => handle_ring_command(world, &parts),
@@ -3619,6 +3627,9 @@ fn print_stats(world: &mut World) {
     let asteroid_label = scale::layer2::asteroid_redirect::asteroid_stats_label(world);
     // Spec 402: ideological pressure census for STATS (full panel: `pressure`).
     let pressure_label = scale::layer1::social::ideological_pressure::pressure_stats_label(world);
+    // Spec 428: propaganda black market census for STATS (full panel: `truthdealers`).
+    let truth_label =
+        scale::layer1::social::propaganda_black_market::truth_stats_label(world);
     // Spec 403: dysonian swarm census for STATS (full panel: `swarms`).
     let dyson_label = scale::layer2::dysonian::dysonian_stats_label(world);
     // Spec 404: thermal management census for STATS (full panel: `thermals`).
@@ -3714,7 +3725,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={}",
         tick,
         scenario,
         pops,
@@ -3895,6 +3906,7 @@ fn print_stats(world: &mut World) {
         lagrange_label,
         asteroid_label,
         pressure_label,
+        truth_label,
         dyson_label,
         thermal_label,
         cyber_label,
@@ -17664,4 +17676,107 @@ fn print_windsurf(world: &mut World) {
         Some(comfy_table::Color::Cyan),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+// Spec 428 Propaganda Black Market: `censorship [0-100]` shows/sets
+// the ideological control level, `truthdealers` is the full panel,
+// `truthbuy` forces one sale, `truthraid` is the security counterplay.
+fn handle_censorship_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::social::propaganda_black_market::IdeologicalControl;
+    world.init_resource::<IdeologicalControl>();
+    if let Some(raw) = parts.get(1) {
+        match raw.parse::<f32>() {
+            Ok(level) => {
+                world.resource_mut::<IdeologicalControl>().control_level =
+                    level.clamp(0.0, 100.0);
+                println!(
+                    "Ideological control set to {:.0}. Truth-Dealers spawn while effective control is over 80 (the CensorBroadcasts edict alone floors it at 85).",
+                    level.clamp(0.0, 100.0)
+                );
+            }
+            Err(_) => {
+                println!("Usage: censorship [0-100]");
+                return;
+            }
+        }
+    }
+    print_truth_market(world);
+}
+
+fn print_truth_market(world: &mut World) {
+    use scale::layer1::social::propaganda_black_market::{
+        effective_control_level, truth_market_census, IdeologicalControl,
+    };
+    world.init_resource::<IdeologicalControl>();
+    world.init_resource::<scale::layer1::social::propaganda_black_market::PropagandaBlackMarketLedger>();
+    let census = truth_market_census(world);
+    let raw = world.resource::<IdeologicalControl>().control_level;
+    let policies = world.get_resource::<scale::layer1::edicts::ColonyPolicies>();
+    println!(
+        "Propaganda black market: control {:.0} (effective {:.0}) | dealers {} | stock {} | sales {} | data cost {:.0}cr",
+        raw,
+        effective_control_level(Some(world.resource::<IdeologicalControl>()), policies),
+        census.dealers,
+        census.stock,
+        census.sales,
+        scale::layer1::social::propaganda_black_market::DATA_COST
+    );
+}
+
+fn handle_truthbuy_command(world: &mut World) {
+    use scale::layer1::social::propaganda_black_market::{
+        trigger_black_market_transaction, TruthDealer,
+    };
+    let dealer = {
+        let mut query = world.query::<(bevy_ecs::entity::Entity, &TruthDealer)>();
+        query
+            .iter(world)
+            .find(|(_, d)| d.stock > 0)
+            .map(|(e, _)| e)
+    };
+    let Some(dealer) = dealer else {
+        println!("No Truth-Dealer with stock in the colony. Raise censorship over 80 and wait for one to slip in.");
+        return;
+    };
+    // Richest pop who can afford it buys (debug command: morale gate
+    // is the auto-purchase system's job, not this one's).
+    let buyer = {
+        let mut query = world.query::<(
+            bevy_ecs::entity::Entity,
+            &scale::layer1::economy::Wallet,
+            &scale::layer1::social::morale::Morale,
+        )>();
+        query
+            .iter(world)
+            .filter(|(_, w, _)| {
+                w.credits >= scale::layer1::social::propaganda_black_market::DATA_COST
+            })
+            .max_by(|a, b| a.1.credits.partial_cmp(&b.1.credits).unwrap())
+            .map(|(e, _, _)| e)
+    };
+    let Some(buyer) = buyer else {
+        println!("No pop can afford Uncensored Data right now.");
+        return;
+    };
+    if trigger_black_market_transaction(world, buyer, dealer) {
+        println!(
+            "A pop bought Uncensored Data: credits spent, 'Enlightened by Truth' mood gained, ideological divergence unrest up."
+        );
+    } else {
+        println!("The sale fell through.");
+    }
+    print_truth_market(world);
+}
+
+fn handle_truthraid_command(world: &mut World) {
+    use scale::layer1::social::propaganda_black_market::raid_truth_dealers;
+    let cleared = raid_truth_dealers(world);
+    if cleared == 0 {
+        println!("The raid found no Truth-Dealers in the colony.");
+    } else {
+        println!(
+            "Security raid cleared {cleared} Truth-Dealer(s). The divergence network scatters — for now."
+        );
+    }
+    print_truth_market(world);
 }

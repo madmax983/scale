@@ -656,6 +656,12 @@ pub use indoctrination::*;
 
 /// Ideological Pressure (Spec 402).
 pub mod ideological_pressure;
+
+/// Propaganda Black Market (Spec 428): Truth-Dealers under high
+/// ideological control. No glob re-export: callers use the full
+/// path, so generic names (TruthDealer, IdeologicalControl) stay
+/// namespaced.
+pub mod propaganda_black_market;
 pub use ideological_pressure::*;
 
 pub mod placebo;
