@@ -1044,6 +1044,11 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<Events<crate::layer1::disasters::deorbit::DeorbitEvent>>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitState>();
     world.init_resource::<crate::layer1::disasters::deorbit::DeorbitDirector>();
+    world.init_resource::<Events<crate::layer3::phantom_debt::TriggerPhantomDebt>>();
+    world.init_resource::<Events<crate::layer3::phantom_debt::PayPhantomDebtEvent>>();
+    world.init_resource::<crate::layer3::phantom_debt::PhantomDebtEvent>();
+    world.init_resource::<crate::layer3::phantom_debt::PhantomDebtDirector>();
+    world.init_resource::<crate::layer3::phantom_debt::ColonySignatures>();
     // Spec 356 Orbital Crossfire: organic strike director + strike ledger.
     world.init_resource::<crate::layer1::environment::orbital_crossfire::CrossfireDirector>();
     world.init_resource::<crate::layer1::environment::orbital_crossfire::CrossfireStats>();

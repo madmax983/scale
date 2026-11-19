@@ -61,4 +61,5 @@ pub mod nomadic_fleets;
 pub mod tech;
 pub mod quarantine;
 pub mod sovereign_armada;
+pub mod phantom_debt;
 pub mod tourism_integration;

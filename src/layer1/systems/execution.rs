@@ -610,6 +610,21 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(super::Layer1SystemSet::Execution),
     );
 
+    // Spec 433 The Phantom Debt: signatures -> trigger -> pay ->
+    // dark-age evaluation -> fleet orbit. Separate add_systems call
+    // to stay clear of the IntoSystemConfigs arity limit.
+    schedule.add_systems(
+        (
+            crate::layer3::phantom_debt::update_colony_signatures_system,
+            crate::layer3::phantom_debt::spawn_collection_fleet_system,
+            crate::layer3::phantom_debt::pay_phantom_debt_system,
+            crate::layer3::phantom_debt::evaluate_dark_age_survival_system,
+            crate::layer3::phantom_debt::orbit_collection_fleet_system,
+        )
+            .chain()
+            .in_set(super::Layer1SystemSet::Execution),
+    );
+
     // Spec 375 Planetary Core Tapping: drill output + stability bleed,
     // then quake triggering. Separate add_systems call to stay clear of
     // the IntoSystemConfigs arity limit; process runs in Execution,

@@ -575,6 +575,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "hazards" => print_hazards(world),
         "hazardize" => handle_hazardize_command(world, &parts),
         "deorbit" => handle_deorbit_command(world, &parts),
+        "debt" => handle_debt_command(world, &parts),
         "shadow" => handle_shadow_command(world, &parts),
         "tether" => handle_tether_command(world, &parts),
         "tethers" => print_tethers(world),
@@ -3333,6 +3334,10 @@ fn print_stats(world: &mut World) {
         use scale::layer1::disasters::deorbit::tether_array_count;
         tether_array_count(world)
     };
+    let debt = {
+        use scale::layer3::phantom_debt::phantom_debt_status_label;
+        phantom_debt_status_label(world)
+    };
     // Spec 375: core-tapping census for STATS (full panel: `coredrills`).
     let stability = {
         use scale::layer1::tech::core_tapping::planetary_stability_level;
@@ -3758,7 +3763,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} voidweed={:.1} smuggling_heat={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={} tide={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} debt={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} voidweed={:.1} smuggling_heat={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={} tide={}",
         tick,
         scenario,
         pops,
@@ -3806,6 +3811,7 @@ fn print_stats(world: &mut World) {
         vetting,
         deorbit,
         tethers,
+        debt,
         stability,
         coredrills,
         core_active,
@@ -13834,6 +13840,94 @@ fn handle_shadow_command(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Magenta),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Debug: the Phantom Debt (Spec 433).
+/// `debt` — inspect debt/fleet/signatures state.
+/// `debt trigger` — the Collection Fleet arrives with its demand.
+/// `debt pay` — attempt payment from the real credits ledger.
+/// `debt dark` — go dark: engage the real BlackoutProtocol and shut
+/// down every generator (signatures read zero while dark).
+/// `debt light` — end the blackout and restart every generator.
+fn handle_debt_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use scale::layer1::energy::BlackoutProtocol;
+    use scale::layer3::phantom_debt::{
+        collection_fleet_count, phantom_debt_status_label, set_all_generators_active,
+        ColonySignatures, PayPhantomDebtEvent, PhantomDebtEvent, TriggerPhantomDebt,
+    };
+    world.init_resource::<Events<TriggerPhantomDebt>>();
+    world.init_resource::<Events<PayPhantomDebtEvent>>();
+    world.init_resource::<PhantomDebtEvent>();
+    world.init_resource::<ColonySignatures>();
+    world.init_resource::<BlackoutProtocol>();
+    match parts.get(1).copied() {
+        Some("trigger") => {
+            world
+                .resource_mut::<Events<TriggerPhantomDebt>>()
+                .send(TriggerPhantomDebt);
+            print_dashboard_panel(
+                "PHANTOM DEBT",
+                "An automated Collection Fleet has entered orbit, claiming this world was purchased by a defunct precursor empire. Run `tick 1` for its demand to land, then `debt` to inspect. Go dark (`debt dark`) for 3 days, pay the impossible sum, or face foreclosure.",
+                Some(comfy_table::Color::Red),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("pay") => {
+            world
+                .resource_mut::<Events<PayPhantomDebtEvent>>()
+                .send(PayPhantomDebtEvent);
+            print_dashboard_panel(
+                "PHANTOM DEBT PAYMENT",
+                "Payment tendered from the colony credits ledger. Run `tick 1` and then `debt` to see whether the fleet accepted it.",
+                Some(comfy_table::Color::Yellow),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("dark") => {
+            world.resource_mut::<BlackoutProtocol>().active = true;
+            let n = set_all_generators_active(world, false);
+            print_dashboard_panel(
+                "GOING DARK",
+                &format!(
+                    "Blackout protocol engaged; {n} generators shut down. Colony signatures read zero while the colony stays dark. The fleet needs 3 full days of darkness before it departs."
+                ),
+                Some(comfy_table::Color::Blue),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        Some("light") => {
+            world.resource_mut::<BlackoutProtocol>().active = false;
+            let n = set_all_generators_active(world, true);
+            print_dashboard_panel(
+                "LIGHTS BACK ON",
+                &format!("Blackout lifted; {n} generators restarted. The dark streak is broken."),
+                Some(comfy_table::Color::Green),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+        _ => {
+            let (d_active, d_demand, d_dark, d_fore) = {
+                let debt = world.resource::<PhantomDebtEvent>();
+                (debt.active, debt.demand, debt.dark_ticks, debt.foreclosure_ticks_remaining)
+            };
+            let (s_power, s_tech) = {
+                let sig = world.resource::<ColonySignatures>();
+                (sig.power, sig.tech)
+            };
+            let status = phantom_debt_status_label(world);
+            let fleets = collection_fleet_count(world);
+            print_dashboard_panel(
+                "PHANTOM DEBT",
+                &format!(
+                    "Status: {status}\nActive: {}  Demand: {:.0} credits  Dark ticks: {}  Foreclosure in: {} ticks\nSignatures: power={:.1} tech={:.1} (dark = both zero)\nCollection Fleet entities in Layer 2: {fleets}\nCommands: `debt trigger`, `debt pay`, `debt dark`, `debt light`.",
+                    d_active, d_demand, d_dark, d_fore, s_power, s_tech
+                ),
+                Some(comfy_table::Color::Cyan),
+                Some(comfy_table::Attribute::Bold),
+            );
+        }
+    }
 }
 
 fn handle_deorbit_command(world: &mut World, parts: &[&str]) {
