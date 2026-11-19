@@ -316,6 +316,19 @@ pub fn build_simulation_schedule() -> Schedule {
         crate::layer1::tech::teleporter::psychosis::process_psychosis_system,
         crate::layer1::tech::teleporter::psychosis::hunger_decay_system,
     ));
+    // Spec 432 Quantum Entanglement Commute: pad routing, jump costs,
+    // dissociation trigger/timer, and TeleportCount decay. Chained so a
+    // jump can trigger dissociation in the same tick it lands.
+    schedule.add_systems(
+        (
+            crate::layer1::quantum_commute::quantum_commute_autonomous_system,
+            crate::layer1::quantum_commute::quantum_commute_system,
+            crate::layer1::quantum_commute::check_dissociation_system,
+            crate::layer1::quantum_commute::temporal_dissociation_timer_system,
+            crate::layer1::quantum_commute::teleport_count_decay_system,
+        )
+            .chain(),
+    );
     schedule.add_systems((
         crate::layer1::biology::symbiotic_gear::symbiotic_hunger_modifier_system,
         crate::layer1::biology::symbiotic_gear::starving_symbiote_damage_system,

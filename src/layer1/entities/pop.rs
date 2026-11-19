@@ -375,6 +375,9 @@ pub struct PopBundle {
     /// Night-shift adaptation tracker (Spec 359). Bundled for the
     /// same total-coverage reason as the dissatisfaction ledger.
     pub night_shift: crate::layer1::social::shift_work::NightShiftAdaptation,
+    /// Quantum-jump ledger (Spec 432). Bundled for total coverage like
+    /// the dissatisfaction ledger above: every pop can use a pad.
+    pub teleport_count: crate::layer1::quantum_commute::TeleportCount,
     /// Spoken dialect.
     pub dialect: Dialect,
     /// Linguistic knowledge.
@@ -450,6 +453,7 @@ impl PopBundle {
             wallet: Wallet { credits: 50.0 },
             dissatisfaction: crate::layer1::social::dissatisfaction::Dissatisfaction::default(),
             night_shift: crate::layer1::social::shift_work::NightShiftAdaptation::default(),
+            teleport_count: crate::layer1::quantum_commute::TeleportCount::default(),
             dialect: Dialect::default(),
             linguistics: Linguistics::default(),
             gut_biome: GutBiome::default(),

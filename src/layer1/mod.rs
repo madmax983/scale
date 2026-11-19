@@ -442,6 +442,10 @@ pub use shipbreaking::*;
 pub mod void_weed;
 pub use void_weed::*;
 
+/// Quantum entanglement commute (Spec 432).
+pub mod quantum_commute;
+pub use quantum_commute::*;
+
 /// Temporal Ghost Towns mechanics
 pub mod temporal_ghost_towns;
 pub use temporal_ghost_towns::*;

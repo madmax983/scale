@@ -755,6 +755,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "insanity" => handle_insanity_command(world, &parts),
         "smuggler" => handle_smuggler_command(world),
         "weed" => handle_weed_command(world, &parts),
+        "qpad" => handle_qpad_command(world, &parts),
         "greatwork" => handle_greatwork_command(world, &parts),
         "contribute" => handle_contribute_command(world, &parts),
         "bio" => handle_bio_command(world, &parts),
@@ -3509,6 +3510,13 @@ fn print_stats(world: &mut World) {
         .get_resource::<scale::layer1::economy::black_market::ColonyStats>()
         .map_or(0.0, |s| s.corruption);
 
+    // Spec 432: quantum-commute census for STATS (full panel: `qpad`).
+    let quantum_jumps = world
+        .get_resource::<scale::layer1::quantum_commute::QuantumCommuteLedger>()
+        .map_or(0, |l| l.total_jumps);
+    let quantum_dissociated = scale::layer1::quantum_commute::dissociated_pop_count(world);
+    let quantum_pads = scale::layer1::quantum_commute::quantum_pad_count(world);
+
     // Spec 431: void-weed stash total + smuggling heat for STATS.
     let voidweed = scale::layer1::void_weed::total_void_weed(world);
     let smuggling_heat = world
@@ -3977,6 +3985,7 @@ fn print_stats(world: &mut World) {
         mutants_count,
         tide_label,
     );
+    println!("QUANTUM jumps={} qpads={} dissociated={}", quantum_jumps, quantum_pads, quantum_dissociated);
 }
 
 fn calculate_avg_morale(world: &mut World) -> f32 {
@@ -7005,6 +7014,117 @@ fn print_weed_panel(world: &mut World) {
     );
 }
 
+
+/// Spec 432 panel + debug levers (headless `qpad` command).
+fn print_qpad_panel(world: &mut World) {
+    use scale::layer1::quantum_commute::{
+        dissociated_pop_count, quantum_pad_count, QuantumCommuteLedger,
+    };
+    let ledger = world
+        .get_resource::<QuantumCommuteLedger>()
+        .copied()
+        .unwrap_or_default();
+    let pads = quantum_pad_count(world);
+    let dissociated = dissociated_pop_count(world);
+    print_dashboard_panel(
+        "QUANTUM COMMUTE",
+        &format!(
+            "Quantum Pads (Spec 432)\nPads placed: {pads}\nJumps: {} (refused, unpowered: {})\nEnergy spent: {:.1}\nTemporal Dissociations: {} (currently dissociating: {dissociated})\n\nEach jump: +10 stress, +5 dissociation, 10 energy from the departure pad. Five quick jumps at high stress dissociate a pop for ~12 in-game hours of aimless wandering; counted jumps decay one per day. Debug: `qpad place <x1> <y1> <x2> <y2>`, `qpad jump` (nearest pop rides pad A to pad B).",
+            ledger.total_jumps, ledger.refused_jumps, ledger.energy_spent, ledger.dissociations
+        ),
+        Some(comfy_table::Color::Cyan),
+        None,
+    );
+}
+
+fn handle_qpad_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::architecture::building::{Building, BuildingType};
+    use scale::layer1::energy::Battery;
+    use scale::layer1::map::GridPosition;
+    use scale::layer1::quantum_commute::{QuantumPad, QuantumTeleportEvent};
+    match parts.get(1).copied() {
+        Some("place") => {
+            let parse = |i: usize| parts.get(i).and_then(|s| s.parse::<i32>().ok());
+            let (Some(x1), Some(y1), Some(x2), Some(y2)) =
+                (parse(2), parse(3), parse(4), parse(5))
+            else {
+                println!("usage: qpad place <x1> <y1> <x2> <y2>");
+                return;
+            };
+            let battery = Battery {
+                capacity: 100.0,
+                charge: 100.0,
+                max_throughput: 100.0,
+            };
+            let a = world
+                .spawn((
+                    Building {
+                        building_type: BuildingType::QuantumPad,
+                    },
+                    GridPosition { x: x1, y: y1 },
+                    QuantumPad::default(),
+                    battery.clone(),
+                ))
+                .id();
+            let b = world
+                .spawn((
+                    Building {
+                        building_type: BuildingType::QuantumPad,
+                    },
+                    GridPosition { x: x2, y: y2 },
+                    QuantumPad::default(),
+                    battery,
+                ))
+                .id();
+            if let Some(mut pad) = world.get_mut::<QuantumPad>(a) {
+                pad.linked_pad = Some(b);
+            }
+            if let Some(mut pad) = world.get_mut::<QuantumPad>(b) {
+                pad.linked_pad = Some(a);
+            }
+            println!("Quantum Pads placed and linked: ({x1},{y1}) <-> ({x2},{y2})");
+        }
+        Some("jump") => {
+            // Teleport the first pop standing on a pad to its linked pad;
+            // if no pop is on a pad, teleport the first pop via pad A.
+            let mut pads_q = world.query::<(bevy_ecs::entity::Entity, &GridPosition, &QuantumPad)>();
+            let pads: Vec<_> = pads_q
+                .iter(world)
+                .map(|(e, p, q)| (e, *p, *q))
+                .collect();
+            if pads.len() < 2 {
+                println!("No linked Quantum Pads. Use `qpad place` first.");
+                return;
+            }
+            let (pad_a, _pos_a, q_a) = pads[0];
+            let Some(linked) = q_a.linked_pad else {
+                println!("Pad A is unlinked.");
+                return;
+            };
+            let Some((_, dest, _)) = pads.iter().find(|(e, _, _)| *e == linked) else {
+                println!("Linked pad not found.");
+                return;
+            };
+            let dest = *dest;
+            let mut pop_q =
+                world.query_filtered::<Entity, With<scale::layer1::pop::Pop>>();
+            let Some(pop) = pop_q.iter(world).next() else {
+                println!("No pops to teleport.");
+                return;
+            };
+            world
+                .resource_mut::<bevy_ecs::event::Events<QuantumTeleportEvent>>()
+                .send(QuantumTeleportEvent {
+                    entity: pop,
+                    target_pos: dest,
+                    pad: Some(pad_a),
+                });
+            println!("Quantum jump queued for pop {pop:?} -> ({},{}); run `tick 1`.", dest.x, dest.y);
+        }
+        _ => print_qpad_panel(world),
+    }
+}
+
 fn handle_weed_command(world: &mut World, parts: &[&str]) {
     use scale::layer1::void_weed::{
         MerchantArrivalEvent, MerchantType, SmugglingHeat, VoidWeedStash,
@@ -7475,6 +7595,7 @@ fn print_help() {
                 ("insanity [level]", "", "Debug (Spec 416): set every pop's insanity (default 95) — over 80 hallucinates false alerts"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
                 ("weed [grow [n]|sell|heat [n]|raid]", "", "Void-Weed panel (Spec 431): private stashes, smuggler prices, heat; grow plants a stash, sell summons a smuggler buyer, raid cracks down (seizes all, colony unrest)"),
+                ("qpad [place <x1> <y1> <x2> <y2>|jump]", "", "Quantum Commute panel (Spec 432): linked Quantum Pads, jump ledger, dissociation census; place links a pad pair, jump rides pad A to pad B"),
                 (
                     "greatwork start <skyhook|aegis|spire>",
                     "",

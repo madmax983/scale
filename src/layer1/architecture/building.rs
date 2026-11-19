@@ -381,6 +381,9 @@ pub enum BuildingType {
     /// Grand Dome whose perfect acoustics broadcast any rumor
     /// spoken inside it to the whole colony (Spec 429).
     GrandDome,
+    /// Quantum entanglement pad: instant travel to a linked pad at a
+    /// stress / dissociation / energy cost (Spec 432).
+    QuantumPad,
 }
 
 impl BuildingType {
@@ -490,6 +493,7 @@ impl BuildingType {
                 | Self::Grave
                 | Self::TradeDepot
                 | Self::TradePad
+                | Self::QuantumPad
                 | Self::Landfill
                 | Self::PersonalGarden
                 | Self::Airlock // Vent is explicitly an obstacle for standard movement (blocks Pops),
@@ -574,7 +578,7 @@ impl BuildingType {
             Self::Nanoforge => false,
             Self::School | Self::MediaStation => false,
             Self::Mainframe | Self::CommsRelay => false,
-            Self::Billboard | Self::BiomassExtractor | Self::TradePad => false,
+            Self::Billboard | Self::BiomassExtractor | Self::TradePad | Self::QuantumPad => false,
             Self::Archive | Self::ArchiveOfRegret => true,
         }
     }
@@ -662,7 +666,7 @@ impl BuildingType {
             Self::TrashCannon => Some(Tech::Militia),
             Self::CryoPod => Some(Tech::Medical),
             Self::AuroralCollector => Some(Tech::Electromagnetism),
-            Self::TetherArray => Some(Tech::Electromagnetism),
+            Self::TetherArray | Self::QuantumPad => Some(Tech::Electromagnetism),
             Self::CoreDrill => Some(Tech::Terraforming),
             Self::HarpoonLauncher => Some(Tech::Astronomy),
             Self::AtmosphericProcessor => Some(Tech::Terraforming),
@@ -763,6 +767,7 @@ impl BuildingType {
             Self::Archive => "Archive",
             Self::ArchiveOfRegret => "Archive of Regret",
             Self::GrandDome => "Grand Dome",
+            Self::QuantumPad => "Quantum Pad",
         }
     }
 
@@ -836,6 +841,7 @@ impl BuildingType {
             Self::Archive => '▤',
             Self::ArchiveOfRegret => '▦',
             Self::GrandDome => '◎',
+            Self::QuantumPad => 'Q',
         }
     }
 
@@ -1239,6 +1245,11 @@ impl BuildingType {
                 wood: 10.0,
                 ..ColonyResources::zeroed()
             },
+            Self::QuantumPad => ColonyResources {
+                metal: 20.0,
+                hyper_alloys: 5.0,
+                ..ColonyResources::zeroed()
+            },
         }
     }
 
@@ -1570,6 +1581,22 @@ fn configure_building_components(entity: &mut EntityWorldMut, building_type: Bui
             entity.insert(
                 crate::layer1::social::whispering_gallery::AcousticReflector::default(),
             );
+        }
+        // Spec 432: a Quantum Pad carries its link component, a charged
+        // battery (each jump discharges it), and a small grid draw.
+        BuildingType::QuantumPad => {
+            entity.insert((
+                crate::layer1::quantum_commute::QuantumPad::default(),
+                crate::layer1::energy::Battery {
+                    capacity: 100.0,
+                    charge: 100.0,
+                    max_throughput: 100.0,
+                },
+                crate::layer1::energy::PowerConsumer {
+                    demand: 1.0,
+                    active: true,
+                },
+            ));
         }
     }
 }

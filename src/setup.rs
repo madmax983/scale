@@ -673,6 +673,8 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<Events<crate::layer1::memory_core::HarvestMemoryCoreEvent>>();
     world.init_resource::<Events<crate::layer1::tech::machine_awakening::BotGlitchEvent>>();
     world.init_resource::<Events<crate::layer1::psychology::teleport_psychosis::TeleportEvent>>();
+    world.init_resource::<crate::layer1::quantum_commute::QuantumCommuteLedger>();
+    world.init_resource::<Events<crate::layer1::quantum_commute::QuantumTeleportEvent>>();
     world.init_resource::<Events<crate::layer1::environment::orbital_tether::TetherSnapEvent>>();
     world.init_resource::<Events<crate::layer3::diplomacy::RepossessionInvasionEvent>>();
     world.init_resource::<Events<crate::layer3::diplomacy::WarningDiplomaticMessageEvent>>();
