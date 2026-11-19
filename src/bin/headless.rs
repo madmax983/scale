@@ -754,6 +754,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "horror" => handle_horror_command(world, &parts),
         "insanity" => handle_insanity_command(world, &parts),
         "smuggler" => handle_smuggler_command(world),
+        "weed" => handle_weed_command(world, &parts),
         "greatwork" => handle_greatwork_command(world, &parts),
         "contribute" => handle_contribute_command(world, &parts),
         "bio" => handle_bio_command(world, &parts),
@@ -3508,6 +3509,12 @@ fn print_stats(world: &mut World) {
         .get_resource::<scale::layer1::economy::black_market::ColonyStats>()
         .map_or(0.0, |s| s.corruption);
 
+    // Spec 431: void-weed stash total + smuggling heat for STATS.
+    let voidweed = scale::layer1::void_weed::total_void_weed(world);
+    let smuggling_heat = world
+        .get_resource::<scale::layer1::void_weed::SmugglingHeat>()
+        .map_or(0.0, |h| h.level);
+
     // Spec 351: living Long-Haulers still on tour (or waiting on a ship).
     let travelers = {
         use scale::layer1::social::long_haulers::traveler_count;
@@ -3743,7 +3750,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={} tide={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} voidweed={:.1} smuggling_heat={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={} tide={}",
         tick,
         scenario,
         pops,
@@ -3826,6 +3833,8 @@ fn print_stats(world: &mut World) {
         works_label,
         smugglers,
         corruption,
+        voidweed,
+        smuggling_heat,
         graves,
         stashes,
         travelers,
@@ -6955,6 +6964,99 @@ fn handle_smuggler_command(world: &mut World) {
     );
 }
 
+/// Spec 431 panel + debug levers (headless `weed` command): the
+/// void-weed economy — private stashes, smuggler prices, heat, and the
+/// crackdown counterplay.
+fn print_weed_panel(world: &mut World) {
+    use scale::layer1::void_weed::{
+        AlienAddiction, SmugglingHeat, TradeNetwork, VoidWeedLedger,
+    };
+    let total = scale::layer1::void_weed::total_void_weed(world);
+    let heat = world
+        .get_resource::<SmugglingHeat>()
+        .map_or(0.0, |h| h.level);
+    let addiction = world
+        .get_resource::<AlienAddiction>()
+        .map_or(0.0, |a| a.level);
+    let price = scale::layer1::void_weed::VOID_WEED_BASE_PRICE
+        * world
+            .get_resource::<AlienAddiction>()
+            .map_or(1.0, |a| a.price_multiplier());
+    let network_credits = world
+        .get_resource::<TradeNetwork>()
+        .map_or(0.0, |n| n.credits);
+    let ledger = world.get_resource::<VoidWeedLedger>();
+    let (grown, sold, earned, sales, raids, crackdowns, seized) = ledger.map_or(
+        (0.0, 0.0, 0.0, 0, 0, 0, 0.0),
+        |l| {
+            (
+                l.grown_total,
+                l.sold_total,
+                l.credits_earned,
+                l.sales,
+                l.raids_triggered,
+                l.crackdowns,
+                l.seized_total,
+            )
+        },
+    );
+    println!(
+        "Void-Weed (Spec 431)\nStashes hold: {total:.1} units (grown {grown:.1} total)\nSmuggler price: {price:.0} credits/unit (addiction {addiction:.1})\nTrade network credits: {network_credits:.1} (earned {earned:.1} across {sales} sales, {sold:.1} units sold)\nSmuggling heat: {heat:.1} / 100.0 (trips a pirate raid + Council penalty)\nCrackdowns: {crackdowns} (seized {seized:.1}); heat-tripped raids: {raids}\n\nPops cultivate it privately for a tiny calm; smugglers pay exorbitantly and keep coming back hungrier. Debug: `weed grow [n]`, `weed sell`, `weed heat [n]`, `weed raid` (crackdown: seizes all stashes, colony-wide unrest)."
+    );
+}
+
+fn handle_weed_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::void_weed::{
+        MerchantArrivalEvent, MerchantType, SmugglingHeat, VoidWeedStash,
+    };
+    match parts.get(1).copied() {
+        Some("grow") => {
+            let amount: f32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(10.0);
+            world.spawn(VoidWeedStash::new(amount));
+            println!(
+                "Void-weed takes hold: a new stash of {amount:.1} units. Run `weed` for the panel, `weed sell` when a smuggler should call."
+            );
+        }
+        Some("sell") => {
+            world
+                .resource_mut::<bevy_ecs::event::Events<MerchantArrivalEvent>>()
+                .send(MerchantArrivalEvent {
+                    merchant_type: MerchantType::Smuggler,
+                });
+            println!(
+                "A smuggler is inbound for the void-weed. Run `tick 1` and watch STATS voidweed= / smuggling_heat= — or `weed` for the ledger."
+            );
+        }
+        Some("heat") => {
+            let level: f32 = parts
+                .get(2)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100.0);
+            if let Some(mut heat) = world.get_resource_mut::<SmugglingHeat>() {
+                heat.level = level;
+            }
+            println!(
+                "Smuggling heat set to {level:.1}. Run `tick 1`: at 100 the pirates come and the Council takes notice."
+            );
+        }
+        Some("raid") => {
+            let report = scale::layer1::void_weed::execute_void_weed_crackdown(world);
+            if report.stashes_raided == 0 {
+                println!("The crackdown found nothing — no stashes to raid.");
+            } else {
+                println!(
+                    "Crackdown: {} stash(es) raided, {:.1} units seized. Heat halved; every pop resents the knock on the door. Run `weed` for the ledger.",
+                    report.stashes_raided, report.seized
+                );
+            }
+        }
+        _ => print_weed_panel(world),
+    }
+}
+
 /// List all buildings with positions
 fn print_buildings(world: &mut World) {
     let mut table = Table::new();
@@ -7372,6 +7474,7 @@ fn print_help() {
                 ("horror [n]", "", "Debug (Spec 416): place n horror loci on the first pop — nearby pops accumulate insanity"),
                 ("insanity [level]", "", "Debug (Spec 416): set every pop's insanity (default 95) — over 80 hallucinates false alerts"),
                 ("smuggler", "", "Debug: a smuggler answers the colony's unmet needs and docks now (Spec 348)"),
+                ("weed [grow [n]|sell|heat [n]|raid]", "", "Void-Weed panel (Spec 431): private stashes, smuggler prices, heat; grow plants a stash, sell summons a smuggler buyer, raid cracks down (seizes all, colony unrest)"),
                 (
                     "greatwork start <skyhook|aegis|spire>",
                     "",

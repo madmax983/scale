@@ -655,6 +655,8 @@ pub fn setup_world_with_config(#[allow(unused_variables)] config: SetupConfig) -
     world.init_resource::<crate::layer1::administration::SentientBureaucracyState>();
     world.init_resource::<crate::layer1::void_weed::TradeNetwork>();
     world.init_resource::<crate::layer1::void_weed::SmugglingHeat>();
+    world.init_resource::<crate::layer1::void_weed::VoidWeedLedger>();
+    world.init_resource::<crate::layer1::void_weed::AlienAddiction>();
 
     world.init_resource::<Events<crate::layer1::void_weed::MerchantArrivalEvent>>();
     world.init_resource::<Events<crate::layer1::void_weed::PirateRaidEvent>>();

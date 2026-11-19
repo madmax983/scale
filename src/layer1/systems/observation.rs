@@ -684,6 +684,18 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Observation),
     );
 
+    // Spec 431: void-weed cultivation/growth/decay live in their own
+    // add_systems call — the tuple above is at Bevy's 20-system cap.
+    schedule.add_systems(
+        (
+            crate::layer1::void_weed::void_weed_cultivation_system,
+            crate::layer1::void_weed::void_weed_growth_system,
+            crate::layer1::void_weed::smuggling_heat_decay_system
+                .after(crate::layer1::void_weed::evaluate_smuggling_heat_system),
+        )
+            .in_set(Layer1SystemSet::Observation),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::diplomacy::wards::process_diplomatic_wards_system,
