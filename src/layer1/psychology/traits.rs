@@ -154,6 +154,8 @@ pub enum Trait {
     Skeptic,
     /// Hive-coordinated: works 25% faster as part of the collective (Spec 371).
     HiveCoordination,
+    /// Born to low gravity: thrives when the tide lets go (Spec 430).
+    ZeroGNative,
 }
 
 impl Trait {
@@ -239,6 +241,7 @@ impl Trait {
             Self::Gossip => "Gossip",
             Self::Skeptic => "Skeptic",
             Self::HiveCoordination => "Hive Coordination",
+            Self::ZeroGNative => "Zero-G Native",
         }
     }
 }
@@ -315,6 +318,7 @@ impl Traits {
             Trait::InsomniaDrive,
             Trait::Courage,
             Trait::Egalitarian,
+            Trait::ZeroGNative,
         ];
 
         let mut added = 0;

@@ -694,6 +694,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "curio" => print_curio_ledger(world),
         "rumors" => print_rumors(world),
         "gallery" => print_gallery(world),
+        "tide" => handle_tide_command(world, &parts),
         "whisper" => handle_whisper_command(world, &parts),
         "dome" => handle_dome_command(world, &parts),
         "contagion" => print_contagion(world),
@@ -3464,6 +3465,9 @@ fn print_stats(world: &mut World) {
         known_rumor_count(world)
     };
 
+    // Spec 430: gravitational-tide state for STATS (panel: `tide`).
+    let tide_label = scale::layer1::nature::gravitational_tides::tide_stats_label(world);
+
     // Spec 429: whispering-gallery census for STATS (panel: `gallery`).
     let (gallery_broadcasts, domes) = {
         use scale::layer1::social::whispering_gallery::{
@@ -3739,7 +3743,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={} tide={}",
         tick,
         scenario,
         pops,
@@ -3962,6 +3966,7 @@ fn print_stats(world: &mut World) {
         windsurf_exposure,
         windsurf_fleets,
         mutants_count,
+        tide_label,
     );
 }
 
@@ -7600,6 +7605,11 @@ fn print_help() {
                     "gallery",
                     "",
                     "Whispering gallery: Grand Domes, broadcasts, adoptions, amplified panics (Spec 429)",
+                ),
+                (
+                    "tide",
+                    "[high|normal|low|auto]",
+                    "Gravitational tides: current state, cycle position, ledger; pin a state or resume the cycle (Spec 430)",
                 ),
                 (
                     "whisper",
@@ -12673,6 +12683,80 @@ fn print_season(world: &mut World) {
     );
 }
 
+
+/// Gravitational tides report (headless `tide` command, Spec 430).
+fn print_tide(world: &mut World) {
+    use scale::layer1::nature::gravitational_tides::{
+        tide_state_for_tick, GravitationalTide, GravitationalTideLedger, TideState,
+        TIDE_CYCLE_TICKS,
+    };
+    let tick = world
+        .get_resource::<SimulationTime>()
+        .map_or(0, |t| t.tick);
+    let (state, auto) = world
+        .get_resource::<GravitationalTide>()
+        .map_or((TideState::Normal, true), |t| (t.state, t.auto_cycle));
+    let ledger = world
+        .get_resource::<GravitationalTideLedger>()
+        .copied()
+        .unwrap_or_default();
+    let phase = tick % TIDE_CYCLE_TICKS;
+    let cycle_state = tide_state_for_tick(tick);
+    print_dashboard_panel(
+        "GRAVITATIONAL TIDES",
+        &format!(
+            "Tide state: {} ({})\nCycle: {} — tick {} of {} (orbital prediction: {})\nSpeed multiplier: {:.2}x\nEnergy multiplier: {:.2}x\nShifts observed: {}\nFall risks emitted: {}\nUnsealed items drifted: {}\nLow-tide morale buffs applied: {}\n\nThe great neighbour hauls on the world in a 1000-tick\norbit: first quarter High (slow steps, hungry machines),\nmiddle half Normal, last quarter Low (fast steps, fall\nrisk up high, unsealed things drift). Zero-G Native pops\nlove Low tide; everyone else just gets on with it.\nPin a state with `tide high|normal|low`; `tide auto`\nresumes the orbital cycle.",
+            state.display_name(),
+            if auto { "orbital cycle" } else { "pinned" },
+            state.label(),
+            phase,
+            TIDE_CYCLE_TICKS,
+            cycle_state.label(),
+            scale::layer1::nature::gravitational_tides::speed_multiplier_for(state),
+            scale::layer1::nature::gravitational_tides::energy_multiplier_for(state),
+            ledger.shifts,
+            ledger.fall_risks_emitted,
+            ledger.items_floated,
+            ledger.morale_buffs_applied,
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
+}
+
+/// Spec 430 debug: `tide` prints the panel; `tide high|normal|low`
+/// pins a state; `tide auto` resumes the orbital cycle.
+fn handle_tide_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::nature::gravitational_tides::{GravitationalTide, TideState};
+    world.init_resource::<GravitationalTide>();
+    match parts.get(1).copied() {
+        None => print_tide(world),
+        Some("auto") => {
+            world.resource_mut::<GravitationalTide>().auto_cycle = true;
+            println!("TIDE orbital cycle resumed — state follows the tick from the next tick");
+        }
+        Some(name) => {
+            let state = match name {
+                "high" => Some(TideState::High),
+                "normal" => Some(TideState::Normal),
+                "low" => Some(TideState::Low),
+                _ => None,
+            };
+            if let Some(state) = state {
+                let mut tide = world.resource_mut::<GravitationalTide>();
+                tide.state = state;
+                tide.auto_cycle = false;
+                println!(
+                    "TIDE pinned to {} — run `tick 1`, then `stats` (tide={})",
+                    state.display_name(),
+                    state.label()
+                );
+            } else {
+                println!("TIDE usage: tide [high|normal|low|auto]");
+            }
+        }
+    }
+}
 
 /// Whispering gallery report (headless `gallery` command, Spec 429).
 fn print_gallery(world: &mut World) {

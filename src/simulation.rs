@@ -951,6 +951,12 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::whispering_gallery::BroadcastRumorEvent>>();
     world.init_resource::<crate::layer1::social::whispering_gallery::WhisperingGalleryState>();
     world.init_resource::<crate::layer1::social::whispering_gallery::WhisperingGalleryLedger>();
+    // Spec 430 Gravitational Tides: tide resource + ledger + risk/drift
+    // events (first-tick Events pattern as above).
+    world.init_resource::<crate::layer1::nature::gravitational_tides::GravitationalTide>();
+    world.init_resource::<crate::layer1::nature::gravitational_tides::GravitationalTideLedger>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::nature::gravitational_tides::FallDamageRiskEvent>>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer1::nature::gravitational_tides::ItemFloatedAwayEvent>>();
     // Spec 323 The Informant's Dilemma: accusation + report events (first-tick
     // Events pattern — systems write before any reader exists on a fresh world).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::informants::AccusationEvent>>();

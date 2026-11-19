@@ -67,6 +67,13 @@ mod silent_world_tests;
 
 pub mod crustal_tides;
 pub use crustal_tides::*;
+
+/// Gravitational Tides (Spec 430): the great neighbour's pull cycles
+/// High/Normal/Low — movement, machine energy, fall risk, drifting
+/// items, and Zero-G Native morale. Deliberately NOT glob-exported:
+/// callers use the full path, so generic names (TideState,
+/// GravitationalTide) stay namespaced (Spec 429 pattern).
+pub mod gravitational_tides;
 pub mod shattered_world;
 pub use shattered_world::*;
 

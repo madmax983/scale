@@ -247,6 +247,34 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(Layer1SystemSet::Execution),
     );
 
+    // Spec 430 Gravitational Tides: the cycle derives from the tick
+    // first, then the movement leg multiplies Speed after the per-tick
+    // reset (the cryo-shock pattern), and the energy / drift / morale
+    // legs read the fresh state. Execution runs before Economy, so the
+    // scaled PowerConsumer demand is what power_grid_system sums.
+    schedule.add_systems(
+        (
+            crate::layer1::nature::gravitational_tides::update_gravitational_tide_system
+                .after(crate::layer1::day_night::update_day_night_cycle_system),
+            crate::layer1::nature::gravitational_tides::apply_gravity_modifiers_system
+                .after(crate::layer1::pop::reset_speed_system)
+                .after(
+                    crate::layer1::nature::gravitational_tides::update_gravitational_tide_system,
+                ),
+            crate::layer1::nature::gravitational_tides::apply_gravity_energy_modifiers_system
+                .after(
+                    crate::layer1::nature::gravitational_tides::update_gravitational_tide_system,
+                ),
+            crate::layer1::nature::gravitational_tides::low_gravity_float_system.after(
+                crate::layer1::nature::gravitational_tides::update_gravitational_tide_system,
+            ),
+            crate::layer1::nature::gravitational_tides::tide_morale_system.after(
+                crate::layer1::nature::gravitational_tides::update_gravitational_tide_system,
+            ),
+        )
+            .in_set(Layer1SystemSet::Execution),
+    );
+
     schedule.add_systems(
         (
             crate::layer1::mind::temporal_fugue::evaluate_fugue_state_system
