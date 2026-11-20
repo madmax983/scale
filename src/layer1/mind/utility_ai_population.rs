@@ -707,6 +707,9 @@ pub fn collect_pop_data(world: &mut World, buffer: &mut UtilityAIBuffer, config:
                     // A digital ghost serves only its inherited shift —
                     // never a candidate for new tasks (Spec 361).
                     Without<crate::layer1::tech::posthumous_work_shift::DigitalGhost>,
+                    // Phantom Block residents produce nothing —
+                    // never colony workers (Spec 434).
+                    Without<crate::layer1::social::phantom_block::ResidentInPhantomBlock>,
                 ),
             )>()
             .iter(world)

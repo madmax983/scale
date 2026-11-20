@@ -822,6 +822,8 @@ pub use martyrdom::*;
 /// culture, found wild outposts, and refuse orders to return.
 pub mod feral_outpost;
 pub use feral_outpost::*;
+pub mod phantom_block;
+pub use phantom_block::*;
 
 /// The Archive of Regret (Spec 426): an indestructible building records
 /// every atrocity, generates Knowledge from the record, and weighs the

@@ -361,7 +361,12 @@ pub fn consume_food_system(
             Option<&crate::layer1::traits::Traits>,
             Option<&mut crate::layer1::gut_biome::GutBiome>,
         ),
-        With<Pop>,
+        (
+            With<Pop>,
+            // Spec 434: Phantom Block residents consume no colony
+            // resources — they are off the colony ledger entirely.
+            Without<crate::layer1::social::phantom_block::ResidentInPhantomBlock>,
+        ),
     >,
     mut resources: ResMut<ColonyResources>,
     farm_query: Query<&Farm>, // Query Farm instead of Crop

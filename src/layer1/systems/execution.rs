@@ -625,6 +625,24 @@ pub fn register(schedule: &mut Schedule) {
             .in_set(super::Layer1SystemSet::Execution),
     );
 
+    // Spec 434 The Parasitic Habitation Block: refresh housing
+    // conditions from real entities -> sustained bad conditions form
+    // a block -> the worst-off move in -> radicalization ticks ->
+    // riot at the threshold -> demolition requests (which riot first).
+    // Separate add_systems call to stay clear of the arity limit.
+    schedule.add_systems(
+        (
+            crate::layer1::social::phantom_block::update_housing_stats_system,
+            crate::layer1::social::phantom_block::evaluate_housing_conditions_system,
+            crate::layer1::social::phantom_block::assign_phantom_residents_system,
+            crate::layer1::social::phantom_block::phantom_block_radicalization_system,
+            crate::layer1::social::phantom_block::phantom_block_riot_system,
+            crate::layer1::social::phantom_block::demolish_phantom_block_system,
+        )
+            .chain()
+            .in_set(super::Layer1SystemSet::Execution),
+    );
+
     // Spec 375 Planetary Core Tapping: drill output + stability bleed,
     // then quake triggering. Separate add_systems call to stay clear of
     // the IntoSystemConfigs arity limit; process runs in Execution,

@@ -576,6 +576,7 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "hazardize" => handle_hazardize_command(world, &parts),
         "deorbit" => handle_deorbit_command(world, &parts),
         "debt" => handle_debt_command(world, &parts),
+        "phantom" => handle_phantom_command(world, &parts),
         "shadow" => handle_shadow_command(world, &parts),
         "tether" => handle_tether_command(world, &parts),
         "tethers" => print_tethers(world),
@@ -3338,6 +3339,11 @@ fn print_stats(world: &mut World) {
         use scale::layer3::phantom_debt::phantom_debt_status_label;
         phantom_debt_status_label(world)
     };
+    // Spec 434: Phantom Block census for STATS (full panel: ).
+    let phantom = {
+        use scale::layer1::social::phantom_block::phantom_block_status_label;
+        phantom_block_status_label(world)
+    };
     // Spec 375: core-tapping census for STATS (full panel: `coredrills`).
     let stability = {
         use scale::layer1::tech::core_tapping::planetary_stability_level;
@@ -3763,7 +3769,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} debt={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} voidweed={:.1} smuggling_heat={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={} tide={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} debt={} phantom={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} voidweed={:.1} smuggling_heat={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={} tide={}",
         tick,
         scenario,
         pops,
@@ -3812,6 +3818,7 @@ fn print_stats(world: &mut World) {
         deorbit,
         tethers,
         debt,
+        phantom,
         stability,
         coredrills,
         core_active,
@@ -13840,6 +13847,59 @@ fn handle_shadow_command(world: &mut World, parts: &[&str]) {
         Some(comfy_table::Color::Magenta),
         Some(comfy_table::Attribute::Bold),
     );
+}
+
+/// Debug: the Parasitic Habitation Block (Spec 434).
+/// `phantom` — inspect housing conditions, blocks, residents, riots.
+/// `phantom form` — force-form a block now (bypasses housing stats).
+/// `phantom demolish` — demolish the block: instantly triggers the
+/// riot (spec section 8), then removes it.
+fn handle_phantom_command(world: &mut World, parts: &[&str]) {
+    use bevy_ecs::event::Events;
+    use scale::layer1::social::phantom_block::{
+        first_phantom_block, force_form_phantom_block, phantom_block_count,
+        phantom_block_status_label, phantom_max_radicalization, phantom_resident_count,
+        DemolishPhantomBlockEvent, HousingStats, PhantomBlockState,
+    };
+    match parts.get(1).copied() {
+        Some("form") => {
+            if force_form_phantom_block(world) {
+                println!("A Phantom Block forms on a reserved tile near the colony heart. Run `tick 1` for the worst-off pops to move in.");
+            } else {
+                println!("A Phantom Block already stands. `phantom` to inspect it, `phantom demolish` to tear it down (and face the riot).");
+            }
+        }
+        Some("demolish") => {
+            if let Some(block) = first_phantom_block(world) {
+                world
+                    .resource_mut::<Events<DemolishPhantomBlockEvent>>()
+                    .send(DemolishPhantomBlockEvent { block });
+                println!("Demolition crews move against the Phantom Block. Its residents will riot — run `tick 1`.");
+            } else {
+                println!("No Phantom Block stands. Nothing to demolish.");
+            }
+        }
+        _ => {
+            let status = phantom_block_status_label(world);
+            let blocks = phantom_block_count(world);
+            let residents = phantom_resident_count(world);
+            let maxrad = phantom_max_radicalization(world);
+            let (quality, density, bad_ticks, riots, demolitions) = {
+                let stats = world.get_resource::<HousingStats>();
+                let state = world.get_resource::<PhantomBlockState>();
+                (
+                    stats.map_or(0.0, |s| s.quality_avg),
+                    stats.map_or(0.0, |s| s.pop_density),
+                    state.map_or(0, |s| s.bad_ticks),
+                    state.map_or(0, |s| s.riots),
+                    state.map_or(0, |s| s.demolitions),
+                )
+            };
+            println!(
+                "Status: {status}\nBlocks: {blocks}  Residents: {residents}  Max radicalization: {maxrad:.0}\nHousing: quality_avg={quality:.1} (slum-grade below 20)  pop_density={density:.1} (overcrowded above 100)  bad_ticks={bad_ticks}\nRiots: {riots}  Demolitions: {demolitions}\nCommands: `phantom form`, `phantom demolish`."
+            );
+        }
+    }
 }
 
 /// Debug: the Phantom Debt (Spec 433).

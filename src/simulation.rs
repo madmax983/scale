@@ -1049,6 +1049,14 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer3::phantom_debt::PhantomDebtEvent>();
     world.init_resource::<crate::layer3::phantom_debt::PhantomDebtDirector>();
     world.init_resource::<crate::layer3::phantom_debt::ColonySignatures>();
+    // Spec 434 The Parasitic Habitation Block: housing conditions,
+    // tuning, ledger, and the riot/demolition events (first-tick
+    // pattern — the systems read these on tick one).
+    world.init_resource::<crate::layer1::social::phantom_block::HousingStats>();
+    world.init_resource::<crate::layer1::social::phantom_block::PhantomBlockDirector>();
+    world.init_resource::<crate::layer1::social::phantom_block::PhantomBlockState>();
+    world.init_resource::<Events<crate::layer1::social::phantom_block::RadicalRiotEvent>>();
+    world.init_resource::<Events<crate::layer1::social::phantom_block::DemolishPhantomBlockEvent>>();
     // Spec 356 Orbital Crossfire: organic strike director + strike ledger.
     world.init_resource::<crate::layer1::environment::orbital_crossfire::CrossfireDirector>();
     world.init_resource::<crate::layer1::environment::orbital_crossfire::CrossfireStats>();
