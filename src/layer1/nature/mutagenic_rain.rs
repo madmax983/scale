@@ -56,6 +56,17 @@ pub fn photosynthesis_nourishment_system(
     }
 }
 
+/// Per-tick mutation chance for an unroofed pop during mutagenic rain
+/// (balance pass 2026-11-18, balance-report-2026-11-18.md). At the
+/// previous 0.05/tick, one organic storm (50-200 ticks) mutated
+/// 100% of living pops in 3/3 observed storms — a binary switch, not
+/// an exposure response. At 0.005/tick a full mean storm (~125 ticks)
+/// mutates ~46% of exposed pops, a short 50-tick storm ~22%, and a
+/// 20-tick dash outside ~10%: exposure time and roof cover now price
+/// the risk. Seasonal roll shares are untouched (incidence was
+/// already rare: 3 storms in 20 organic 2000t colonies).
+pub const MUTATION_CHANCE_PER_TICK: f64 = 0.005;
+
 /// Tag component to ensure pops don't mutate infinitely during a single storm.
 #[derive(Component, Default)]
 pub struct Mutated;
@@ -89,8 +100,7 @@ pub fn apply_mutagenic_rain_system(
         let is_under_roof = grid.has_roof(pos.x, pos.y);
 
         if !is_under_roof {
-            // High chance to mutate (e.g., 5% per tick for testing, but in reality maybe 0.1%)
-            if rng.gen_bool(0.05) {
+            if rng.gen_bool(MUTATION_CHANCE_PER_TICK) {
                 let new_trait = MUTANT_TRAITS[rng.gen_range(0..MUTANT_TRAITS.len())];
 
                 if !traits.has(new_trait) {
