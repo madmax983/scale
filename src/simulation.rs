@@ -970,6 +970,11 @@ fn init_simulation_resources(world: &mut World) {
     world.init_resource::<crate::layer1::nature::gravitational_tides::GravitationalTideLedger>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::nature::gravitational_tides::FallDamageRiskEvent>>();
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::nature::gravitational_tides::ItemFloatedAwayEvent>>();
+    // Spec 435 Orbital Solar Mirrors: director + ledger + disable events
+    // (first-tick Events pattern as above).
+    world.init_resource::<crate::layer2::orbital_mirrors::SolarMirrorDirector>();
+    world.init_resource::<crate::layer2::orbital_mirrors::SolarMirrorLedger>();
+    world.init_resource::<bevy_ecs::event::Events<crate::layer2::orbital_mirrors::DisableMirrorEvent>>();
     // Spec 323 The Informant's Dilemma: accusation + report events (first-tick
     // Events pattern — systems write before any reader exists on a fresh world).
     world.init_resource::<bevy_ecs::event::Events<crate::layer1::social::informants::AccusationEvent>>();
@@ -2264,11 +2269,20 @@ fn register_simulation_extended_systems(schedule: &mut Schedule) {
         crate::layer2::thermal::detection_risk_system
             .after(crate::layer2::thermal::update_thermal_bloom_system),
         crate::layer2::orbital_mirrors::orbital_mirror_focus_system,
+        // Spec 435 Orbital Solar Mirrors: hack -> process -> disable.
+        crate::layer2::orbital_mirrors::mirror_hack_system,
+        crate::layer2::orbital_mirrors::process_solar_mirrors_system
+            .after(crate::layer2::orbital_mirrors::mirror_hack_system),
+        crate::layer2::orbital_mirrors::disable_mirror_system
+            .after(crate::layer2::orbital_mirrors::process_solar_mirrors_system),
         crate::layer2::integration::thermal_detection_handler_system
             .after(crate::layer2::thermal::detection_risk_system),
         crate::layer2::culture::founder_effect::found_colony_system,
         crate::layer2::culture::founder_effect::update_colony_culture_system,
     ));
+    schedule.add_systems((update_event_buffer::<
+        crate::layer2::orbital_mirrors::DisableMirrorEvent,
+    >,));
 
     schedule.add_systems((
         crate::layer2::culture::cultural_drift::calculate_cultural_drift_system,

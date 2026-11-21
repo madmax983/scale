@@ -697,6 +697,8 @@ fn handle_command(world: &mut World, input: &str) -> bool {
         "rumors" => print_rumors(world),
         "gallery" => print_gallery(world),
         "tide" => handle_tide_command(world, &parts),
+        "mirror" => handle_mirror_command(world, &parts),
+        "mirrors" => print_mirrors(world),
         "whisper" => handle_whisper_command(world, &parts),
         "dome" => handle_dome_command(world, &parts),
         "contagion" => print_contagion(world),
@@ -3481,6 +3483,10 @@ fn print_stats(world: &mut World) {
     // Spec 430: gravitational-tide state for STATS (panel: `tide`).
     let tide_label = scale::layer1::nature::gravitational_tides::tide_stats_label(world);
 
+    // Spec 435: orbital solar mirror census for STATS (panel: `mirrors`).
+    let (mirror_count, mirror_hacked, mirror_power) =
+        scale::layer2::orbital_mirrors::mirror_stats(world);
+
     // Spec 429: whispering-gallery census for STATS (panel: `gallery`).
     let (gallery_broadcasts, domes) = {
         use scale::layer1::social::whispering_gallery::{
@@ -3769,7 +3775,7 @@ fn print_stats(world: &mut World) {
     let revterra_label = scale::layer2::reverse_terraforming::reverse_terraform_stats_label(world);
 
     println!(
-        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} debt={} phantom={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} voidweed={:.1} smuggling_heat={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={} tide={}",
+        "STATS tick={} scenario={} pops={} avg_health={:.1} avg_morale={:.2} min_pressure={:.2} food={:.1} wood={:.1} stone={:.1} tools={:.1} buildings={} lifesupport={} possessed={} sovereign={} legitimacy={:.2} melancholy={:.2} heat={:.1} hull={:.0} crew={} loyalty={:.2} governor={} gov_legitimacy={:.2} treasury={:.1} rivals={} wreck={} salvage={:.1} longshot={} lawbound={} chronodebt={} bloom={} origins={} panicking={} howling={} crystal_power={:.1} artifacts={} scions={} organs={:.1} waste={:.1} martyrdom={} feral={} fringe={} tamed={} tameable={} sabotaged={} vetting={} deorbit={} tethers={} debt={} phantom={} stability={:.2} coredrills={} core_active={} core_failed={} quakes={} sinkholes={} instability={:.1} void={} empathy={} pirates={} pension={:.0} informant={} paranoia={:.1} harpoon={} stowaway={} encroaching={} seniority={} shadowed={} shadows={} provenance={} vermin={} caveins={} mentored={} memories={} identity={} rumors={} gallery={} domes={} contagion={} season={} quirks={} saves={} works={} smugglers={} corruption={:.1} voidweed={:.1} smuggling_heat={:.1} graves={} stashes={} travelers={} vacuum={} vacuum_dormant={} ls_unpowered={} shelter={} suits={} worn={} suit_air={} drones={} drone_repairing={} deaths={} unknown_deaths={} galaxy={}/{} topo={} crossfire={} impact_sites={} graffiti={} dissat={:.2}/{:.2} miserable={} bitter={} nightworkers={} grid_strain={} grid_strain_episode={} cable_heat={} cable_heat_episode={} ls_duty={} ls_duty_episode={} biowaste={:.1} paste={:.1} ghosts={} nostalgia={} spite={} spite_sab={} insurance={} suspicion={:.0} claims={} investigator={} blockade={} cults={} cultists={} cult_refusals={} choir={} director={} gravity={} stareater={} imprint={} fossil={} hive={} megadecay={} ruins={} nomad={} psions={} psionic={:.2} schism={} seceded={} seeds={} native={} signal={} window={} filter={} roomzones={} roomvalue={:.1} barracks={} merchant={} tradepads={} merchant_trades={} marriages={} allied={} synch={} backlash={} mimicry={} accidents={} safety={} friction={} strat={} eureka={} geohazards={} bonds={} friends={} rivals={} toolless={} worn_tools={} tool_dur={:.2} edicts={} liberty={:.0} loose={} stored={} fronts={} front={} contracts={} nomadic={} migrations={} penal={} lagrange={} asteroids={} pressure={} truth={} dyson={} thermal={} cyber={} quarantine={} rings={} tourists={} shipbreak={} inspector={} awakening={} fluids={} cryo={} blackbox={} regret={} scrip={:.1} broke={} luxury_sales={} insanity={:.1} max_insanity={:.1} hallucinations={} unhinged={} chem={}/{}/{} elders={} buffed={} ephemeral={} ephemeral_lost={} privateers={} revterra={} royals={} assassins={} tunnels={} megafauna={} tremors={} tunnel_collapses={} windsurf={}/{:.0}/{} mutants={} tide={} mirrors={} mirror_hacked={} mirror_power={:.1}",
         tick,
         scenario,
         pops,
@@ -3997,6 +4003,9 @@ fn print_stats(world: &mut World) {
         windsurf_fleets,
         mutants_count,
         tide_label,
+        mirror_count,
+        mirror_hacked,
+        mirror_power,
     );
     println!("QUANTUM jumps={} qpads={} dissociated={}", quantum_jumps, quantum_pads, quantum_dissociated);
 }
@@ -7847,6 +7856,16 @@ fn print_help() {
                     "tide",
                     "[high|normal|low|auto]",
                     "Gravitational tides: current state, cycle position, ledger; pin a state or resume the cycle (Spec 430)",
+                ),
+                (
+                    "mirror",
+                    "[spawn [x] [y] [intensity]|hack|disable|threat <0..1>]",
+                    "Orbital solar mirrors: seed an array over a tile, force a hack, order a Command Center shutdown, set hack threat pressure (Spec 435)",
+                ),
+                (
+                    "mirrors",
+                    "",
+                    "Orbital solar mirrors: census, safe power, fire/hack/shutdown ledger (Spec 435)",
                 ),
                 (
                     "whisper",
@@ -12993,6 +13012,128 @@ fn handle_tide_command(world: &mut World, parts: &[&str]) {
             }
         }
     }
+}
+
+/// Spec 435 debug: `mirror spawn [x] [y] [intensity]` seeds an orbital
+/// mirror array over a tile; `mirror hack` forces the first aligned
+/// mirror hacked; `mirror disable` orders a Command Center shutdown of
+/// the first standing mirror (Admin-gated, fail-closed — the order
+/// lands next tick); `mirror threat <0..1>` sets the director's
+/// external-threat pressure. Bare `mirror` prints the panel.
+fn handle_mirror_command(world: &mut World, parts: &[&str]) {
+    use scale::layer1::energy::PowerSource;
+    use scale::layer2::orbital_mirrors::{
+        DisableMirrorEvent, OrbitalSolarMirror, SolarMirrorDirector, TargetTile,
+    };
+    world.init_resource::<SolarMirrorDirector>();
+    world.init_resource::<bevy_ecs::event::Events<DisableMirrorEvent>>();
+    match parts.get(1).copied() {
+        None => print_mirrors(world),
+        Some("spawn") => {
+            let x: i32 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(40);
+            let y: i32 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(40);
+            let intensity: f32 = parts
+                .get(4)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(500.0);
+            let entity = world
+                .spawn((
+                    OrbitalSolarMirror::new(intensity),
+                    TargetTile { x, y },
+                    PowerSource {
+                        output: 0.0,
+                        active: false,
+                    },
+                ))
+                .id();
+            println!(
+                "MIRROR spawned array (entity {:?}) over ({x},{y}) intensity {intensity:.0} — run `tick 1`, then `stats` (mirrors=, mirror_power=)",
+                entity
+            );
+        }
+        Some("hack") => {
+            let mut query =
+                world.query::<(bevy_ecs::entity::Entity, &mut OrbitalSolarMirror)>();
+            let mut hacked = None;
+            for (entity, mut mirror) in query.iter_mut(world) {
+                if !mirror.hacked && !mirror.disabled {
+                    mirror.hacked = true;
+                    mirror.fire_cooldown = 0;
+                    hacked = Some(entity);
+                    break;
+                }
+            }
+            match hacked {
+                Some(entity) => println!(
+                    "MIRROR array (entity {:?}) hacked — its beam will burn at its target tile",
+                    entity
+                ),
+                None => println!("MIRROR no aligned mirror to hack (try `mirror spawn`)"),
+            }
+        }
+        Some("disable") => {
+            let target = {
+                let mut query =
+                    world.query::<(bevy_ecs::entity::Entity, &OrbitalSolarMirror)>();
+                query
+                    .iter(world)
+                    .find(|(_, m)| !m.disabled)
+                    .map(|(e, _)| e)
+            };
+            match target {
+                Some(entity) => {
+                    world
+                        .resource_mut::<bevy_ecs::event::Events<DisableMirrorEvent>>()
+                        .send(DisableMirrorEvent { mirror: entity });
+                    println!(
+                        "MIRROR shutdown ordered for array (entity {:?}) — lands next tick if Admin surplus covers it",
+                        entity
+                    );
+                }
+                None => println!("MIRROR no mirror to shut down (try `mirror spawn`)"),
+            }
+        }
+        Some("threat") => {
+            if let Some(value) = parts.get(2).and_then(|s| s.parse::<f32>().ok()) {
+                let value = value.clamp(0.0, 1.0);
+                world.resource_mut::<SolarMirrorDirector>().external_threat = value;
+                println!(
+                    "MIRROR external threat pressure set to {value:.2} — hack pressure rises with unrest"
+                );
+            } else {
+                println!("MIRROR usage: mirror threat <0..1>");
+            }
+        }
+        _ => {
+            println!("MIRROR usage: mirror [spawn [x] [y] [intensity]|hack|disable|threat <0..1>]")
+        }
+    }
+}
+
+/// Orbital solar mirror report (headless `mirrors` command, Spec 435).
+fn print_mirrors(world: &mut World) {
+    use scale::layer2::orbital_mirrors::{mirror_stats, SolarMirrorLedger};
+    let (total, hacked, safe_power) = mirror_stats(world);
+    let (fires, hacks, shutdowns, refusals) = world
+        .get_resource::<SolarMirrorLedger>()
+        .map(|l| {
+            (
+                l.fires_started,
+                l.hacks,
+                l.shutdowns,
+                l.shutdown_refusals,
+            )
+        })
+        .unwrap_or_default();
+    print_dashboard_panel(
+        "ORBITAL SOLAR MIRRORS",
+        &format!(
+            "Mirrors standing: {}\nHacked mirrors: {}\nSafe power output: {:.1}\nFire events: {}\nHacks (organic): {}\nCommand Center shutdowns: {}\nShutdown refusals (Admin short): {}\n\nA mirror array never sleeps: it pours sunlight onto\nits tile through the night that grounds every panel.\nTurned against the colony, the same beam is a torch.\nThe Command Center can kill a mirror for 5 Admin\nsurplus — if the colony's paperwork can spare it.",
+            total, hacked, safe_power, fires, hacks, shutdowns, refusals,
+        ),
+        Some(comfy_table::Color::Cyan),
+        Some(comfy_table::Attribute::Bold),
+    );
 }
 
 /// Whispering gallery report (headless `gallery` command, Spec 429).
