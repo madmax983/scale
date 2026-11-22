@@ -58,9 +58,14 @@ use crate::layer1::social::morale::{MoodModifier, Morale};
 use crate::layer3::diplomacy::system_sovereignty::FactionRelations;
 use crate::shared::time::SimulationTime;
 
-/// Credits paid per unit of void-weed by a smuggler (spec §3: 10 units
-/// must yield exactly 5,000 credits at base addiction).
-pub const VOID_WEED_BASE_PRICE: f32 = 500.0;
+/// Credits paid per unit of void-weed by a smuggler. Balance tune
+/// 2026-11-21 (balance-report-2026-11-21.md): 500 -> 25. At 500 a single
+/// mature sale of the ~100 units a colony grows organically by tick
+/// 2000 paid a median ~45-52k credits (~83x a control colony's entire
+/// final wealth) for the price of one capped pirate raid; at 25 the
+/// same sale pays ~2.5k — a major windfall worth the guaranteed raid,
+/// not a colony-defining fortune.
+pub const VOID_WEED_BASE_PRICE: f32 = 25.0;
 /// Smuggling heat gained per unit sold.
 pub const HEAT_PER_UNIT: f32 = 2.0;
 /// Heat at or above this level trips a pirate raid (spec §3).
@@ -518,7 +523,7 @@ mod tests {
         schedule.run(&mut world);
 
         let network = world.resource::<TradeNetwork>();
-        assert_eq!(network.credits, 5000.0); // 10.0 * 500.0 credits
+        assert_eq!(network.credits, 250.0); // 10.0 * 25.0 credits
         let stash = world.get::<VoidWeedStash>(entity).unwrap();
         assert_eq!(stash.amount, 0.0);
     }
@@ -576,13 +581,13 @@ mod tests {
                 merchant_type: MerchantType::Smuggler,
             });
         schedule.run(&mut world);
-        // Colony ledger is the real money: 100 + 10 * 500.
-        assert_eq!(world.resource::<ColonyResources>().credits, 5100.0);
+        // Colony ledger is the real money: 100 + 10 * 25.
+        assert_eq!(world.resource::<ColonyResources>().credits, 350.0);
         assert_eq!(world.resource::<SmugglingHeat>().level, 20.0);
         assert_eq!(world.resource::<AlienAddiction>().level, 5.0);
         let ledger = world.resource::<VoidWeedLedger>();
         assert_eq!(ledger.sold_total, 10.0);
-        assert_eq!(ledger.credits_earned, 5000.0);
+        assert_eq!(ledger.credits_earned, 250.0);
         assert_eq!(ledger.sales, 1);
     }
 
@@ -600,7 +605,7 @@ mod tests {
                 merchant_type: MerchantType::Smuggler,
             });
         schedule.run(&mut world);
-        assert_eq!(world.resource::<TradeNetwork>().credits, 7500.0);
+        assert_eq!(world.resource::<TradeNetwork>().credits, 375.0);
     }
 
     #[test]
